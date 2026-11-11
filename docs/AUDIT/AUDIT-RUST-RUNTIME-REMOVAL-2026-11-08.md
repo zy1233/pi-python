@@ -8,9 +8,9 @@
 >
 > **方法**：读代码；用 `rg` 找符号的调用者；对每个发现写出设计怎么说、代码怎么做；每个修复带测试或门禁；对新测试做变异检查（去掉修复，测试必须失败）。没有用探针脚本。五个发现（F-1 至 F-5）先在聊天里报告过。本文的事实不是抄那份报告，而是对着代码重新核对的。
 >
-> **修复**：本地分支 `fix/audit-rust-runtime-findings`，基于 `origin/main` 的 `26ffb9b`，每个主题一个提交（`git log 26ffb9b..fix/audit-rust-runtime-findings`）。没有推送，没有 PR。用户没有要求推送。
+> **修复**：本地分支 `fix/audit-rust-runtime-findings`，基于 `origin/main` 的 `26ffb9b`，每个主题一个提交（`git log 26ffb9b..fix/audit-rust-runtime-findings`）。没有推送，没有 PR。用户没有要求推送。（2026-11-11 补记：分支后来推到了远端；用户要求合并，我在 2026-11-11 开了 PR [#115](https://github.com/zy1233/pi-python/pull/115) 并合入。经过见执行记录的 [§10.48](../PLAN/archive/PLAN-RUST-AGENT-RUNTIME-REMOVAL-EXECUTION-LOG.md#1048-r45-追加审计计划与代码的偏差修-xailog图片缓存的位置加权限管理器的门禁)「r46 补记」。）
 >
-> **测试状态**：见第五节。只在 macOS 上跑；Linux 与 Windows 没有跑。
+> **测试状态**：见第五节。只在 macOS 上跑；Linux 与 Windows 没有跑。（2026-11-11 补记：PR #115 的 CI 在 Linux 上跑了，全部通过：Ruff、pytest、`TUI CI` 的门禁与 `cargo check`、`cargo nextest`。`TUI CI` 只在 Linux 上构建：Rust 代码在 Windows 上的编译没有人跑过；macOS 上只有作者的那一次。）
 >
 > **状态图例**：`[x]` 已修复并验证 · `[x/~]` 已修复，有已记录的残留（第四节）
 

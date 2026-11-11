@@ -12,7 +12,7 @@
 
 ## 目录
 
-- [10. 执行记录（r3、r4、r5、r6、r7、r8、r9、r10、r11、r12、r13、r14、r15、r16、r17、r18、r19、r20、r21、r22、r23、r24、r25、r26、r27、r28、r29、r30、r31、r32、r33、r34、r35、r36、r37、r38、r39、r40、r41、r42、r43、r44、r45）](#10-执行记录r3r4r5r6r7r8r9r10r11r12r13r14r15r16r17r18r19r20r21r22r23r24r25r26r27r28r29r30r31r32r33r34r35r36r37r38r39r40r41r42r43r44r45)
+- [10. 执行记录（r3、r4、r5、r6、r7、r8、r9、r10、r11、r12、r13、r14、r15、r16、r17、r18、r19、r20、r21、r22、r23、r24、r25、r26、r27、r28、r29、r30、r31、r32、r33、r34、r35、r36、r37、r38、r39、r40、r41、r42、r43、r44、r45、r46）](#10-执行记录r3r4r5r6r7r8r9r10r11r12r13r14r15r16r17r18r19r20r21r22r23r24r25r26r27r28r29r30r31r32r33r34r35r36r37r38r39r40r41r42r43r44r45r46)
   - [10.1 范围、方法与规模](#101-范围方法与规模)
   - [10.2 `/model` 恢复（ADR3 r3）](#102-model-恢复adr3-r3)
   - [10.3 验证（r3 的实测）](#103-验证r3-的实测)
@@ -61,6 +61,7 @@
   - [10.46 r43 追加：收尾计划（最后七项），记 #105 与 Windows、WSL 的整套 pytest](#1046-r43-追加收尾计划最后七项记-105-与-windowswsl-的整套-pytest)
   - [10.47 r44 追加：修 Windows 上的 pi.exec，把扩展的登记迁到 docs/specs](#1047-r44-追加修-windows-上的-piexec把扩展的登记迁到-docsspecs)
   - [10.48 r45 追加：审计计划与代码的偏差，修 x.ai/log、图片缓存的位置，加权限管理器的门禁](#1048-r45-追加审计计划与代码的偏差修-xailog图片缓存的位置加权限管理器的门禁)
+  - [10.49 r46 追加：用户的实测、B2 的调查、setup 对话的一处改动、acp 1.0.0 的断裂与 0.9 的合并](#1049-r46-追加用户的实测b2-的调查setup-对话的一处改动acp-100-的断裂与-09-的合并)
 - [附录 A（摘录）：A.4](#附录-a摘录a4)
   - [A.4 r5 执行结果（对照 r5 时初稿里的「默认决策」；r9 的更新见 A.1）](#a4-r5-执行结果对照-r5-时初稿里的默认决策r9-的更新见-a1)
 - [附录 B：复现方法](#附录-b复现方法)
@@ -95,7 +96,7 @@
   - [G.7 待决策里决策 7 的状态](#g7-待决策里决策-7-的状态)
 - [修订记录](#修订记录)
 
-## 10. 执行记录（r3、r4、r5、r6、r7、r8、r9、r10、r11、r12、r13、r14、r15、r16、r17、r18、r19、r20、r21、r22、r23、r24、r25、r26、r27、r28、r29、r30、r31、r32、r33、r34、r35、r36、r37、r38、r39、r40、r41、r42、r43、r44、r45）
+## 10. 执行记录（r3、r4、r5、r6、r7、r8、r9、r10、r11、r12、r13、r14、r15、r16、r17、r18、r19、r20、r21、r22、r23、r24、r25、r26、r27、r28、r29、r30、r31、r32、r33、r34、r35、r36、r37、r38、r39、r40、r41、r42、r43、r44、r45、r46）
 
 r3 执行了「拆除 Rust runtime + 恢复 `/model`」；r4 在其上补了阶段 0 的 CI / 基线、清理 leader 的 UI 残留和生命周期命名；r5 把分支推上远端、在 Linux 上启用基线，执行入口审计并完成阶段 A（§10.7）；r6 清理品牌残留（§10.8）；r7 合并 `main`（§10.9）；r8 在 WSL2 上补 Linux 一侧的实测（§10.10）；r9 补阶段 0 的收尾与阶段 1 里不需要拍板的部分（§10.11）；r10 做 ADR1 的 PR 1（§10.12）与 1.P3 的 (a)（§10.13）；r11 做 0.5 与阶段 C（§10.14）；r12 定 V0.5 的发布里程碑，并做了决策 16（§10.15）；r13 做 ADR1 的 PR 2 与 PR 3，并加了读盘门禁（§10.16）；r14 合入这两个 PR，并做决策 17：会话文件在第一条用户消息时才写（§10.17）；r15 做决策 10 的存储层一项：删 `pi-shell` 里的旧存储层（§10.18）；r16 合入 #25 与 #26，并删 `pi-shell` 里剩下的死代码（§10.19）；r17 检查测试之间的竞争，只改测试与工具（§10.20）；r18 改用 `cargo nextest`，改 `protoc` 的路径与 `release.yml` 的令牌（§10.21）；r19 用 `gh stack` 合入 #27–#31，并设 V0.6 的发布里程碑（§10.22）；r20 定 MCP 的方向（可选扩展包），修空白对话，补发布内容，并合入 #33–#36（§10.23）；r21 做 V0.6 的版本号与发布说明（条件 5），合入 #38 与 #39，并做条件 1–4（§10.24）；r22 打 tag `v0.6.0`、发布、做发布后的核对（§10.25）；r23 把三个 action 升到 Node 24 的版本，处理扩展 API 的审计批 9，并把决策 11、13 记成不做（§10.26）；r24 在内核 6.12 的云 VM 上测了沙箱的 Landlock 层（§10.27）；r25 把 `pi-sandbox` 接进 `TUI CI`（§10.28）；r26 补记 v0.7.0 之前的合入（#45 至 #48、web 的 #50 至 #54、版本号 #55）与 v0.7.0 的发布（§10.29）；r27 量了旗标与设置页并修（#57、#60），去掉选择器的 30 天截止（#61），清了一批死代码（#62、#63；§10.30）；r28 用一次 `gh stack` 把这五个 PR 与另外五个（#56、#58、#59、#64、#65）合入 `main`（§10.31）。下表是 r3、r4 的提交，按当时的状态保留（当时都是本地提交、**未 push**），分支是 `codex/rust-agent-runtime-removal-plan`：
 
@@ -2779,7 +2780,7 @@ WSL（Ubuntu on WSL2，Python 3.12，PR 的头 `cc9d90a`；一份放在 tmpfs �
 
 这一节记 2026-11-05 的一轮。r43（[§10.46](#1046-r43-追加收尾计划最后七项记-105-与-windowswsl-的整套-pytest)）结束时，我问用户下一步做什么。用户用表单答复，两项都选：（1）修 Windows 上 `LocalExecutionEnv.exec` 不终止子进程的问题：新 PR，加测试，在 Windows 与 WSL 上跑 pytest；（2）把在用的 `pi/` 扩展的登记从 `packages/pi-agent-cli/AGENTS.md` 迁到 `docs/specs/`：文档 PR。这一轮有两个 PR：[#107](https://github.com/zy1233/pi-python/pull/107)（修复；分支 `fix/windows-exec-kill-tree`；基于 `main` 的 `2235210`）与本 PR [#108](https://github.com/zy1233/pi-python/pull/108)（登记与文档；分支 `docs/acp-extension-registry`；开的时候基于 #106 的分支 `docs/plan-r43-close`；用户合入 #106 之后，分支改基到 `main`，PR 的 base 也成了 `main`）。用户说过，发布 0.9 之前由他自己做实测；我没有做那些实测。两个 PR 我都没有合入。
 
-**仓库的状态（只读核对）。** 这一轮开始时，`main` 在 `2235210`，#106 开着（头 `080c5ac`，可合并）。#107 与 #108 开好、CI 通过之后，用户合入了 #106（2026-11-05 10:28 +08:00；squash；`main` 到 `2426452`，那是 r43 的一个只改文档的提交）。`main` 现在比 v0.8.0 多 31 个提交（`git rev-list --count v0.8.0..origin/main`）。#108 的分支随后被改基到 `main`：我没有推送这次改基；改基后的提交的 committer 与合入 #106 的是同一人，时间在合入之后 4 秒；我认为它是合入那一步的一部分（没有向用户确认）。改基前后的树相同（我核对过）。#107 的分支基于 `2235210`，还开着。
+**仓库的状态（只读核对）。** 这一轮开始时，`main` 在 `2235210`，#106 开着（头 `080c5ac`，可合并）。#107 与 #108 开好、CI 通过之后，用户合入了 #106（2026-11-05 10:28 +08:00；squash；`main` 到 `2426452`，那是 r43 的一个只改文档的提交）。`main` 现在比 v0.8.0 多 31 个提交（`git rev-list --count v0.8.0..origin/main`）。#108 的分支随后被改基到 `main`：我没有推送这次改基；改基后的提交的 committer 与合入 #106 的是同一人，时间在合入之后 4 秒；我认为它是合入那一步的一部分（没有向用户确认）。改基前后的树相同（我核对过）。#107 的分支基于 `2235210`，还开着（r46 补记：#107 与 #108 都已合入 `main`）。
 
 **#107：修 `LocalExecutionEnv.exec`（Windows）。**
 
@@ -2949,6 +2950,94 @@ macOS 上量到的（`HOME=/tmp/tui-test-home`；没有 nextest，用 `cargo tes
 - 两条过期的代码注释（`agent_modes.rs` 开头；`session_startup.rs` 第 164 行）没有动。
 - `pi-chat-state` 的 `ChatStateActor::spawn` 与 `spawn_with_pruning` 在这个 crate 之外没有调用者（`src/` 14,254 行；`pi-shell` 的 `Cargo.toml` 依赖它，源码里没有引用）。这是观察：没有门禁，也没有决定要不要动。
 - `python_agent_e2e.rs` 里 `Env.mark` 没人读，测试目标编译时有一条 `dead_code` 告警。这个文件这一轮没有改。
+
+**r46 补记（2026-11-11）。** 这个分支在 2026-11-11 有了 PR [#115](https://github.com/zy1233/pi-python/pull/115)，并合入：`f0d4976`。经过、CI 的运行与用时在 [§10.49](#1049-r46-追加用户的实测b2-的调查setup-对话的一处改动acp-100-的断裂与-09-的合并) 的「合并」。上面的「没有推送，没有 PR」「CI 没有跑过」是 2026-11-08 的状态，我没有改它们。合入前，我只做了一件事：把 `main`（#113）并进分支（`21e43ed`），`CHANGELOG.md` 里两条 `### Fixed` 的条目都留着；五个提交的内容没有动。Linux 上的 CI 全部通过（含 `cargo nextest`）；Windows 上 Rust 代码的编译没有人跑过，macOS 上只有作者的那一次。
+
+### 10.49 r46 追加：用户的实测、B2 的调查、setup 对话的一处改动、acp 1.0.0 的断裂与 0.9 的合并
+
+这一节记 2026-11-05 至 2026-11-11 的一轮。r44（[§10.47](#1047-r44-追加修-windows-上的-piexec把扩展的登记迁到-docsspecs)）之后，用户说发布 0.9 之前由他自己做实测；他问：这台电脑是开发环境，要不要新建虚拟环境。我给了一份指引，并在他答「可以」之后触发了两个云端演练。2026-11-11 11:20（+08:00），他回报了结果；之后他答复了我提的六个问题（见「用户的答复」）。**实测是用户做的**：我没有替他做任何一项，也没有动他的 home 与密钥。这一节记：演练的结果；他回报的结果；我对失败的一项（B2）的只读调查，原因没有找到；按他的一条建议改的一处代码（PR [#112](https://github.com/zy1233/pi-python/pull/112)）；一个新发现：`agent-client-protocol` 1.0.0（2026-11-09 发布）使新装的包与 CI 起不来（修复在 PR [#113](https://github.com/zy1233/pi-python/pull/113)）。2026-11-11 13:50，用户要我合并 PR，并定了 0.9 的范围；合并的经过在「合并」一段。我没有打 tag，没有改版本号。在用户这样要求之前，我没有合入任何 PR。
+
+**过程中的一件怪事。** 同一个会话里有两个运行同时在做这一轮的收尾；它们共用 agent 的存储。#112 的推送与创建、#113 的分支与创建，是另一个运行做的：我在 11:59 之后查远端，才看到 #112 已经存在。我在 agent 的存储里留了一份分工的说明。**原因（用户的说明，2026-11-11）：** 是用户设置的 `git push` hook 触发了 CI 失败的流程。我读了 `.cursor/hooks.json`、`.cursor/hooks/` 里的两个脚本和今天的日志（只读），只能证实一部分：今天 hook 起了 10 个 watcher；它们都监视 `main`（脚本取工作区根目录的分支，不是被推送的分支），都立刻以「CI success; no autofix needed」结束；今天没有 autofix agent 的输出日志（`agent-output-*`）。所以从这些文件里，我看不出第二个运行是怎么起来的；这一点没有查清。用户之后又改了 hook 里 autofix 用的模型名，并要我一起提交（见「合并」一段）。下面的数字是我自己量的；不是我量的，注明了出处。
+
+**指引。** 一个新的虚拟环境，装本机构建的 wheel；一个隔离的 `PI_HOME`；六组检查，每项有步骤与预期：A 终端里的 Python agent；B Auto 模式（Windows 上的 Zed）；C 项目信任；D Zed 与进程（`--setup` 的终端登录、ask 模式的批准、模式选择器、取消、退出 Zed 后的进程、会话恢复）；E `zypi`（只能在 WSL 里测）；F 单文件 exe。步骤 0、1 至 4 与 A1 我在一个临时目录里跑过，再全部删除：构建 20 s，安装 11 s，虚拟环境约 76 MB，仓库没有变化。Zed、`zypi` 与真模型的步骤我没有运行；它们的预期来自文档与设计。`main` 的版本号与 PyPI 的 v0.8.0 相同，所以指引用 `import pi_agent_cli.auto_rules` 检查装对了没有（PyPI 的 0.8.0 没有这个模块；我试过）。
+
+**两个云端演练**（2026-11-05 03:28Z；`main` 的 `b0a55cb`；`workflow_dispatch`，不发布）。
+- `Release`（[运行 41961811635](https://github.com/zy1233/pi-python/actions/runs/41961811635)）：成功，约 29 分钟。预发布测试 286 s；Linux x86_64 的 `zypi` 1,241 s；Python 包 31 s；macOS arm64 的 `zypi` 1,455 s；`Publish to PyPI` 与 `GitHub Release` 跳过（它们只在 `v*` 的 tag 推送上跑）。产物（压缩后的大小）：`dist` 4,646,826 B，`tui-binary` 91,500,460 B，`tui-binary-macos-arm64` 19,653,179 B。
+- `Agent binaries`（[运行 41961816375](https://github.com/zy1233/pi-python/actions/runs/41961816375)）：成功，约 8 分钟。`Plan`、五个平台的 `Build and test`（225 至 453 s）与三个 `Tests`（windows-2022、macos-15、macos-15-intel；86 至 354 s）都成功；`Attach to the release` 跳过。五个产物（压缩后）：`agent-darwin-x86_64` 40,720,570 B；`agent-darwin-aarch64` 40,830,713 B；`agent-windows-x86_64` 42,317,708 B；`agent-linux-aarch64` 73,700,432 B；`agent-linux-x86_64` 76,210,310 B。
+- 产物保存到 2027-02-03。两个演练只证明 `b0a55cb` 能按发布的办法构建与测试：发布提交（版本号与发布说明）还没有做，发布前要对它再跑一次。
+
+**用户回报的结果**（2026-11-11 11:20；1 是通过，0 是失败；Windows，Zed）。
+- A（终端里的 Python agent）：A1、A2、A3 通过。
+- B（Auto，Zed）：B1、B3 至 B9 通过；**B2 失败**（预期：Auto 下，在受信任的项目里，`git status` 与 `ls` 直接运行，不问）。B10 至 B15 没有回报。
+- C（项目信任）：C1、C2 通过。
+- D（Zed 与进程）：D1 至 D6 通过。D1 附了一条建议（见下面「setup 对话的一处改动」）。
+- E（`zypi`，WSL）：用户说之前测过，问题应该不大，没有重测。这一轮没有 `zypi` 的结果。
+- F（单文件 exe）：F1、F2、F3 通过。
+- 合计：回报了 23 项，22 通过，1 失败。没有结果的 12 项：B10 至 B15，和 E 组的六项。
+
+**B2 的调查（只读；原因没有找到）。** 用户没有给 B2 的细节：卡片上的原因句、模型运行的命令、他看到的是询问还是别的。`D:\zytest` 在 11:22 之后已不存在。Zed 的日志（`%LOCALAPPDATA%\Zed\logs\Zed.log`，只读）里，11 月 11 日有七次 ACP 连接的记录（10:32 至 11:22），没有 agent 的消息、卡片或命令：B2 的那张卡查不到。我做了三件事，一件没做：
+- **规则。** 在 Windows（Python 3.12.7）上，对一个临时的 git 项目、项目受信的上下文，用 `auto_rules.decide` 判 104 条 bash 命令：39 条内置，37 条是 B2 的各种写法，28 条带反斜杠。结果：放行 76，交给模型 5，询问 23。B2 的 37 条里，35 条放行，1 条交给模型（`git remote -v && git status`），1 条询问（链里有 `printf '\n'`，见下一段）。自然的写法（`git status`、`ls -la`、`git status && ls`、带 `echo` 标签的链、`cd "<盘符路径>" && …`、`git -C … status`）都放行。**会询问的写法**（一个以为自己在 Windows 上的模型可能写）：`cd /d …`（`bash.unclear.cd`，加不加引号都问）；`powershell -Command …` 与 `cmd /c …`（`bash.hidden.program`）；MSYS 形式的路径（`/d/…` 这一类；`path.outside_project`）。`dir` 交给模型步骤。所以，B2 里若模型用了这些写法之一，规则会问。**更正**（同日；另一个运行指出，我用项目自己的路径重测，结果相同）：我的探针清单里有一行写死了用户的路径，`cd D:\zytest\proj && git status && ls`，而探针的项目在 `C:` 的临时目录里，所以这一行总是在项目之外，会问：这是探针的假象，不是规则的行为。用项目自己的路径，`cd <路径> && git status && ls` 放行，不加引号、加引号、用正斜杠都一样。上面的 104 条与 76、5、23 这几个数没有变；只是这一行对 B2 没有意义。
+- **会话的检查。** 在这台电脑上：`PATH`（进程与注册表里的两个值）没有空的或相对的项；Bash 工具找到 `C:\Program Files\Git\bin\bash.exe`；`context_problems` 为空。此外 B1（一次写）通过了，而 `session.check_failed` 会让写也问：所以原因不是这一条。这台电脑的值不一定是 Zed 启动的 agent 进程的值。
+- **项目信任的匹配。** `[extensions] trusted_projects` 的一项，与会话目录的各种写法：原样、正斜杠、盘符大小写、末尾反斜杠、带 `.` 的段，都匹配；不匹配的是 `\\?\` 前缀与 `file://` 形式（据我所知 Zed 不发这两种，没有验证）。B8（`git add . && git commit`；预期：模型步骤放行）通过：如果它是直接运行的，项目那时是受信的（未受信的项目里 `git` 由地板直接问，不到模型）。
+- **没有做的：** 在 Windows 上端到端重现「一条消息里两个调用」（`git status` 与 `ls`）。`test_auto_wiring.py` 与 `test_auto_wiring_redteam.py` 测了「一个一个地跑」与 `session.parallel_batch`，Windows 与 WSL 的整套 pytest 通过。
+
+剩下的可能：模型用了会询问的写法（上面）；`dir` 或别的规则没有判定的写法，模型步骤没有在 8 s 内答 `ALLOW`（超时、请求失败都是询问）；我没有想到的。卡片上的原因句能区分：`leaves the project folder`；`cannot tell if it is safe` 与 `command hides what it does`；`the checker did not answer`；`runs code of an untrusted project`。再测一次的办法：B2 之后立刻输入 `/auto-log`，把 `ask` 行发来。
+
+**Windows 上以反斜杠开头的参数（新发现；没有改）。** 在 Windows 上，规则把以反斜杠开头的引号参数当作盘根路径：`grep -rn '\bTODO\b' .`、`grep -E '\.py$' f`、`rg '\d+' f`、`printf '\n'`、`echo '\n'`、`tr '\n' ' ' < f` 在受信任的项目里问（`path.outside_project`，原因句 `leaves the project folder`）。同一条在 Linux（WSL，同一个提交）放行。上面的 104 条里有 11 条是这样（Windows 问，WSL 放行）。WSL 上询问的 15 条里有 6 条是探针的目录在符号链接 `/dev/shm` 下造成的（`bash.unclear.cd_symlink`），与这件事无关。方向是安全的（多问，不是少问；符合「Auto 出错就问」，不变量 9b），代价是 Windows 上的 Auto 在普通工作里多问（B15 要数的正是这个）。Python 3.11.14 与 3.13.9 上，同一批命令的结果与 3.12.7 完全相同：反斜杠的 28 行是 11 行询问、15 行放行、2 行交给模型；`cd` 的 9 行也相同（3.13 改了 `os.path.isabs` 对单个反斜杠开头的路径的判断：3.12.7 返回 True，3.13.9 返回 False；这不影响结论，因为 `os.path.join` 在两个版本上都把它接到盘根，`C:\proj` 加 `\bTODO` 得 `C:\bTODO`）。这两次我用一次性的虚拟环境，装自本分支的 wheel（`agent-client-protocol` 0.12.1），用完删除。我没有改规则：改它要动语料与变异测试，在两个平台上跑；留给用户决定。另：`dir`（Git Bash 里是 GNU 的 `dir`，是 `ls` 的一种形式）不在只读清单里，交给模型。
+
+**setup 对话的一处改动（PR [#112](https://github.com/zy1233/pi-python/pull/112)）。** 用户的建议（D1）：设置的第三步输入 API 环境变量名称 `REAL_LLM_API_KEY` 后，第四步又要输入 `REAL_LLM_API_KEY`；两者相同时直接读取。我读成：键变量已经有值时，不再问 key。读代码：已配置模型的分支（「Replace the key?」）早就看 `values.get(key_env)`；第一次使用的分支问完预设、模型号、base URL（有的预设）与键变量名之后，不看，直接问 key，并把它写进 `local.env`。改法：第一次使用的分支在问完键变量名之后看 `values`（环境优先于 `local.env`，与 agent 启动时一致）：有值就不问 key，不写 `local.env`，说出值从哪里读；值在环境里时再说「启动 agent 的客户端要把这个变量传下去」（客户端启动的 agent 不一定有终端的环境）。空值算没有值。不复制的理由：agent 就在原处读它；复制只会过期。测试：5 个函数（6 个用例）。对旧代码，新测试 4 个失败（另外 2 个固定不变的行为，新旧代码都通过）；10 个手工变异体全被抓住（只看 `local.env`；只看环境；空值算有值；总说值在 `local.env`；总说值在环境；仍然复制进 `local.env`；去掉「要传下去」那句；`local.env` 的值也说「要传下去」；去掉「变量已有值」那句；永不跳过）。Windows：`test_setup_command.py` 44 通过、4 跳过（POSIX 的文件模式）；`packages/pi-agent-cli/tests` 3861 通过、47 跳过、1 取消选择；整套 pytest `6093 passed, 87 skipped, 31 deselected in 634.59s`（r44 是 6086；+1 是 #111 的测试，+6 是新用例）。WSL（tmpfs 里的副本，`env -i`，做法同 [§10.47](#1047-r44-追加修-windows-上的-piexec把扩展的登记迁到-docsspecs)）：`5966 passed, 22 skipped, 31 deselected in 295.62s`（r44 是 5959；同样 +7）。`ruff check .` 与 `ruff format --check .` 通过。同一个 PR 改 `CHANGELOG.md` 的 `[Unreleased]`、两个 README、`packages/pi-agent-cli/AGENTS.md` 与 `docs/specs/2026-10-28-acp-terminal-auth-setup-design.md` 各一句。**没有运行的：** 真终端里的提示（`input()` 与 `getpass`；测试用脚本化的 `SetupIO`，和以前一样）；Zed 里带这处改动的终端登录；客户端不传变量的情形。如果用户要的是别的做法（例如把环境里的值复制进 `local.env`），要改。用户已确认这个读法（见「用户的答复」）。#112 的 CI 是红的，原因是下一段的 acp 1.0.0，不是这处改动。我读过 `7d89333` 上那次运行的日志；#112 的头现在是 `8c43b64`，它只改 `CHANGELOG.md` 里的一个数（新用例的个数），这个头上的运行我没有读日志。（下午，#113 合入、#112 更新了 `main` 之后，它的 CI 全绿；合入见「合并」。）
+
+**`agent-client-protocol` 1.0.0 的断裂（新发现；修复开着）。** `agent-client-protocol` 1.0.0 在 2026-11-09 00:34Z 上传到 PyPI（1.0.0rc1 在 2026-09-11，rc3 在 2026-10-12）。`packages/pi-agent-cli/pyproject.toml` 写 `agent-client-protocol>=0.12.0`，没有上界；开发用的虚拟环境有 0.12.1。三个证据：
+- #112 的 CI（[运行 42956277912](https://github.com/zy1233/pi-python/actions/runs/42956277912)，`pull_request`，2026-11-11 03:59Z）：Ruff 通过；三个 pytest job（Python 3.11、3.12、3.13）在 40 s 内失败：收集时 59 个错误，如 `ImportError: cannot import name 'text_block' from 'acp'` 与 `ModuleNotFoundError: No module named 'acp.helpers'`；安装步骤装到了 `agent-client-protocol-1.0.0`。`Tests (macos-15)` 与 `Agent binaries` 里的 Linux 构建也失败：#113 的正文说五个都是这个导入错误（我只读了 pytest 的日志）。`main` 自己上一次的 CI 在 2026-11-08（`26ffb9b`，[运行 42452066735](https://github.com/zy1233/pi-python/actions/runs/42452066735)）成功，早于 1.0.0。
+- 新装的 v0.8.0：我在一个新的虚拟环境里从 PyPI 装 `pi-agent-cli-lc==0.8.0`（它的依赖也是 `agent-client-protocol>=0.12.0`），装到 1.0.0；`python -m pi_agent_cli --help` 退出码 1：`agent.py` 第 15 行 `from acp.helpers import update_agent_message_text`，`ModuleNotFoundError: No module named 'acp.helpers'`。也就是说，2026-11-09 之后新装的 v0.8.0 起不来。#113 的正文说 `uvx pi-agent-cli-lc -p hello` 同样失败，加 `--with "agent-client-protocol<1.0.0"` 则正常（我没有试 `uvx`）。
+- 1.0.0 的包里没有 `helpers` 模块；我在它的源码里也没有找到 `text_block`、`update_agent_message_text`、`tool_content` 的定义（只搜了定义的名字，没有读它的变更说明）。#113 的正文说 `events.py` 从 `acp.helpers` 导入八个名字，`agent.py` 导入一个，很多测试用 `text_block`。迁到 1.0 的接口没有估工作量。
+- 为什么更早没有人看到（另一个运行先查到；我用 `gh` 与源码重读了）：`main` 上最后一次 `CI` 运行是 2026-11-08 05:46Z（`26ffb9b`，成功），早于 1.0.0；之后 `main` 上只有定时的 `Provider matrix`（2026-11-09 10:54Z，[运行 42604729097](https://github.com/zy1233/pi-python/actions/runs/42604729097)，成功）。它的安装命令含 `pi-agent-cli`，但只跑 `pi_agent_core/tests/test_provider_matrix.py`，这个文件没有导入 `pi_agent_cli` 或 `acp`，所以它看不到断裂。
+
+影响。用户的 A 至 F 通过，说明他的测试环境装的是能用的版本；我不知道是哪一个（`D:\zytest` 已删，没法查）。本机开发环境是 0.12.1。v0.8.0 的单文件程序（2026-10-31 构建）与 2026-11-05 的演练产物带的是当时的版本，不受影响。**新装的包、新的构建**（0.9 的发布构建；README 里的 `pip install`）受影响；已经装好、没有升级依赖的环境不受影响。修复：PR [#113](https://github.com/zy1233/pi-python/pull/113)，给依赖加上界 `<1.0.0`，CHANGELOG 写了怎么修已装的环境；我在 2026-11-11 12:19 查它（头 `f0ff2b6`）：14 项检查里 13 项通过，`Attach to the release` 跳过（每个 PR 都跳过）；之后它的头又移到 `50942d6`（只改 `CHANGELOG.md` 的一行）。它只改依赖的上界与 `CHANGELOG.md`（3 个文件，+5/−2）。13:50 用户要我合并 PR；我合入了这个头（见「合并」）。发布的 v0.8.0 里的依赖不能改：不发 0.8.1（用户，2026-11-11）；要不要迁到 1.0 的接口，没有答复。
+
+**#110 与 #111**（2026-11-08 合入；不是这一轮做的；只记 PR 正文里的事实，我没有重跑）。#110（`f37160e`）：`test_a_path_that_is_not_valid_text_can_still_be_saved` 在 macOS 上因 `EILSEQ` 失败（文件系统不收非 UTF-8 的名字），改成遇到这个错误就跳过。PR 正文：macOS 上对 `b0a55cb` 跑整套 pytest，`1 failed, 6127 passed, 45 skipped, 31 deselected`；改后 `6127 passed, 46 skipped, 31 deselected`。#111（`26ffb9b`）：`ExtensionLoader.discover_entry_points` 在 Python 3.11 上不再读整张表，各版本都用 `entry_points(group=…)`（3.11 的 CI 原来印 288 条警告）；加一个测试；CI 的 Python 3.11 整套 `6133 passed, 41 skipped, 31 deselected`。计划里原来没有 macOS 上 Python 整套 pytest 的数。
+
+**用户的答复**（2026-11-11；一个表单，六个问题）。
+- B2 的现象：出现了询问卡片。卡片上的原因句，他不记得。所以 B2 的原因仍然没有找到；要再测才能找到（B2 之后立刻输入 `/auto-log`，把 `ask` 行发来）。
+- B10 至 B15：**0.9 之前不测。**
+- Windows 上以反斜杠开头的参数多问：**记为 0.9 之后的待办，不修。**
+- D1：我的读法**对**（键变量已有值时不再问 key）。#112 的做法得到确认。
+- `agent-client-protocol` 1.0.0：**不发 0.8.1；#113 的上界并入 0.9。** 迁到 acp 1.0 的接口：这个答复没有涉及，没有排期。
+- 表单之后，用户说明了上面那件怪事的原因（见「过程中的一件怪事」）。
+- 13:50：「你帮我合并PR，0.9发布主要包含auto模式，以及审计项修复，其他小问题也可以包含在内。」**已定：** 0.9 主要含 Auto 模式与审计项修复；别的小问题可以并入。他也要我合并 PR（以前他自己合并）。他没有要我发版、打 tag 或改版本号，我没有做。0.9 的日期没有定；要不要迁到 acp 1.0 的接口，没有答复。
+- 13:55：「我修改了hook的触发模型，你可以一起提交」：他改了 `.cursor/hooks.json` 里的 `-AutofixModel`（一行），要我随这一轮提交。
+
+**合并**（2026-11-11 13:50 之后；用户的要求见上）。以前的轮次由用户自己合并；这一次他明确要我合并，所以我合并了。每个 PR 我只合我看过 CI 的那个头（`gh pr merge --match-head-commit`，或 REST 的 `sha`），用 squash，标题加 `(#N)`，与这个仓库以前的合并一样；`deleteBranchOnMerge` 开着，远端分支随合并删除。
+- **先查。** 开着的 PR：#112（`--setup`）、#113（acp 的上界）、#114（本 PR）。#104（VS Code 的打包）是关闭的；我没有碰它，也没有碰它的分支。用户说的「审计项修复」是 r45 的分支 `fix/audit-rust-runtime-findings`（[§10.48](#1048-r45-追加审计计划与代码的偏差修-xailog图片缓存的位置加权限管理器的门禁)）：它在远端，有 5 个提交（2026-11-08，基于 `26ffb9b`），**没有 PR**，所以没有 CI 跑过。我把它做成 PR [#115](https://github.com/zy1233/pi-python/pull/115)。
+- **次序与理由。** #113 先合：它小，CI 全绿，没有它别的 PR 的 CI 都是红的。然后是 #115：它的 Rust 代码只由作者在 macOS 上测过，所以 PR 的 CI 是它在 Linux 上的第一次运行，要等得最久（nextest）。#112 在 #115 之后：两个 PR 都在 `CHANGELOG.md` 的同一处加一条，后合的要解冲突；#112 的 CI 只要约 10 分钟，放在后面，重跑的代价最小。#114（本 PR）最后：它记下其余的结果。
+- **#113**（头 `50942d6`）：检查全部通过后合入：`afb80a5`（13:57）。`main` 上的 `CI`（[运行 42969155099](https://github.com/zy1233/pi-python/actions/runs/42969155099)）成功，约 4.6 分钟。
+- **#115**（审计）：分支先要跟上 `main`：#113 与审计都在 `CHANGELOG.md` 的 `### Fixed` 开头加一条，有冲突；我合并 `main`（`21e43ed`），两条都留着（acp 的一条在前）。这个头的运行（[`CI`](https://github.com/zy1233/pi-python/actions/runs/42969580614)、[`TUI CI`](https://github.com/zy1233/pi-python/actions/runs/42969580743)）：Ruff 8 s；pytest（Python 3.11、3.12、3.13）4 分 49 秒、6 分 08 秒、5 分 51 秒；`Gates + cargo check (Linux x86_64)` 7 分 56 秒；`cargo nextest (Linux x86_64)` 36 分 44 秒。这个 job 以前用 14.3 至 20.4 分钟，这一次长得多；它的缓存恢复一步只用了约 1 秒，像是缓存没有命中，我没有查原因。我另外在 Windows 与 WSL 上跑了 `scripts/tests`（Windows 272 通过、11 跳过；WSL 278 通过、5 跳过）与 Ruff。全部通过后合入：`f0d4976`（14:45）。`main` 的树与分支头的树相同（`git diff` 为空）。
+- **#112**：#113 合入后，我用 GitHub 的「更新分支」把 `main` 并进来（没有冲突；头 `ead6d8e`），CI 全绿，含 `python_agent_e2e`。#115 合入后又有冲突：两边都在 `### Changed` 的末尾加一条。我在临时工作树里合并 `main`，两条都留着（缓存的一条在前）；头 `7e87cc7`。对 `main` 的差仍是原来的 7 个文件（+117/−12）；`ruff check .` 与 `ruff format --check .` 通过；`test_setup_command.py` 在 Windows 上 44 通过、4 跳过（用工作树里的代码）。这个头的 CI 全部通过：[`CI`](https://github.com/zy1233/pi-python/actions/runs/42974846407)（Ruff 9 s；pytest 的 Python 3.11、3.12、3.13 是 4 分 38 秒、4 分 52 秒、5 分 12 秒）；[`Agent binaries`](https://github.com/zy1233/pi-python/actions/runs/42974846463)（五个平台的 `Build and test` 在 3 分 07 秒到 7 分 11 秒之间；三个 `Tests`（macos-15、macos-15-intel、windows-2022）在 1 分 26 秒到 2 分 04 秒之间；`Attach to the release` 照例跳过）；[`TUI E2E`](https://github.com/zy1233/pi-python/actions/runs/42974846490)（`python_agent_e2e` 12 分 35 秒；缓存恢复一步约 1 秒，像是又没有命中，所以比以前的 9.5 分钟长）。合入：`bae3a5e`（15:00）；`main` 的树与分支头的树相同。
+- **合并之后的 `main`。** `CI` 在三个合并提交上都成功：`afb80a5`（上面的运行 42969155099）、`f0d4976`（[运行 42974699429](https://github.com/zy1233/pi-python/actions/runs/42974699429)）、`bae3a5e`（[运行 42976416330](https://github.com/zy1233/pi-python/actions/runs/42976416330)，约 5.8 分钟）。`TUI CI`（`f0d4976`，[运行 42974699465](https://github.com/zy1233/pi-python/actions/runs/42974699465)）与 `TUI E2E`（`bae3a5e`，[运行 42976416314](https://github.com/zy1233/pi-python/actions/runs/42976416314)）在我写这一段时还在跑；它们的结果看运行页。
+- **网络。** 14:20 起，`gh` 到 `api.github.com` 多次报 `TLS handshake timeout`，`curl` 同时是通的；我重试。`gh pr merge` 用 GraphQL，一直超时，所以 #115 用 REST 的合并接口（`sha` 参数的作用与 `--match-head-commit` 相同）；第三次尝试成功。
+- **hook 的一行改动。** 用户的 `.cursor/hooks.json`：`-AutofixModel` 的值换了一个模型名。我在本 PR 里做成独立的一个提交（`e30282f`；文件内容与用户工作树里的相同，blob 一致）。我不能验证新的名字：本机的 `agent` 命令没有登录（`agent models` 要求认证），我没有登录它。我的每次 `git push` 都会起一个 watcher；它们监视 `main`，今天的几个都在 CI 成功后结束，没有起 autofix。
+
+**这一轮改了什么。**
+- #112（7 个文件，+117/−12）：`packages/pi-agent-cli/pi_agent_cli/setup_command.py`；`packages/pi-agent-cli/tests/test_setup_command.py`（5 个测试函数）；`CHANGELOG.md`、`README.md`、`packages/pi-agent-cli/README.md`、`packages/pi-agent-cli/AGENTS.md`、`docs/specs/2026-10-28-acp-terminal-auth-setup-design.md`。
+- 依赖的上界：PR #113（3 个文件，+5/−2；另一个运行的）；审计的修复：PR #115（21 个文件，+1,038/−301；r45 的分支加一个合并 `main` 的提交，内容我没有改）。两个都不在本 PR 里；它们已合入（见「合并」）。
+- hook：`.cursor/hooks.json` 的一行（用户的改动；提交 `e30282f`）。
+- 计划：头部与「当前状态」改到 r46，并记 r45 的合入；「下一步」（acp 已处理；0.9 的范围已定；等用户决定的几项；已合入还没发布的提交数与用户会看到的变化）；「还没有验证的」（平台；真实 LLM；`--setup` 的终端登录；Auto；单文件程序；子进程；`pi.exec`；新装包的依赖；审计的修复）；§10 索引（r45 与 r46 两行；「修订记录」一行的范围改成 r1–r46）；修订记录（摘要）改 r45、加 r46；链接定义加 `l10-49`、`pr-110` 至 `pr-115`。
+- 本文：新增 §10.49；§10.48 末尾加「r46 补记」；目录、「10.」的标题与修订记录跟着改（r45 与 r46 各一条）；§10.47 里「#107 的分支……还开着」后面补一句（r46 补记：已合入）。
+- 用户的答复（上一段）与怪事的原因：本文加「用户的答复」一段，并改「过程中的一件怪事」；计划的头部、「下一步」「还没有验证的」「修订记录（摘要）」照答复改。
+- 审计报告 `docs/AUDIT/AUDIT-RUST-RUNTIME-REMOVAL-2026-11-08.md`：头部加一句 2026-11-11 的补记（已推送，PR #115，已合入，CI 的结果）；正文没有改。
+- 没有改代码（本 PR 只改文档与 hook 的一行设置）；没有改 `web/`；没有改 `CHANGELOG.md`（#112、#113、#115 各自带了条目）。
+
+**核对。**
+- `check_plan_docs.py`（我的临时脚本，不在仓库里）：计划里每个 `[文字][ref]` 都有定义；两个文件里每个指向本文件标题的锚点链接都有对应的标题；计划里指向本文的每个定义，锚点都在。结果：0 个错误，没有多余的定义。
+- 渲染：用 GitHub 的 markdown 接口（`gfm`）渲染本文的 §10.48 与 §10.49、本文的目录、本文的最后三行、计划全文和审计报告；代码以外没有留下未配对的粗体标记。目录里 §10.49 的链接指向 `#1049-r46-…`，与标题按 GitHub 的规则算出的锚点相同；接口的输出里没有标题的 id，所以这一条是算出来的，没有在页面上点过。
+- 行尾：两个文件的行尾一致（工作树是 CRLF，提交时 git 转成 LF），没有单独的 CR。
+- `ruff check .` 与 `ruff format --check .`：通过（312 个文件已格式化）。
+- 事实：`git rev-list --count v0.8.0..origin/main` 是 38（合并之后，本 PR 合入之前）；`main` 是 `bae3a5e`；#107、#108、#110、#111、#112、#113、#115 的状态是 MERGED，#104 是 CLOSED（`gh pr view`）。每次合并之后，我取回 `main` 看了提交；#115 合入后，`main` 的树与分支头的树相同。
+- 更正与重测：B2 一段里一个写法的归类，按另一个运行的提醒与我的重测改了（见 B2 的调查）；Python 3.11.14 与 3.13.9 上重量了反斜杠的 28 行与 `cd` 的 9 行（与 3.12.7 没有差别），并核对了 `os.path.isabs` 与 `os.path.join` 在 3.12.7 与 3.13.9 上的行为。
+- hook：读了 `.cursor/hooks.json`、`on_git_push.ps1`、`watch_ci_and_autofix.ps1` 与 2026-11-11 的日志（只读，没有改脚本）。后来按用户的要求提交了他对 `.cursor/hooks.json` 的一行改动：提交里的文件与他工作树里的文件逐字节相同（blob 相同）。
+- 我没有改 Python 代码，所以本 PR 没有跑 pytest。合入的 PR 各自在 Linux 上跑了整套 pytest（Python 3.11、3.12、3.13）；我另外跑了 #115 的 `scripts/tests`（Windows 与 WSL）与 #112 的 `test_setup_command.py`（Windows）。
+
+**没有验证的。** B2 的原因（用户记得出现的是询问卡片，不记得原因句；要再测）；B10 至 B15（没有回报；用户决定 0.9 之前不测）；E 组在 0.9 的候选上（用户说之前测过，没有重测）；#112 的改动在真终端里与 Zed 里；Windows 上以反斜杠开头的参数只用规则探过，没有在 Zed 里端到端试；用户的测试环境装了哪个 `agent-client-protocol`（查不到）；1.0.0 的变更说明（没有读）；`uvx` 的行为（只引 #113）；#110、#111 的数来自 PR 正文；macOS 上什么也没有由我运行。合并之后新增的：审计的 Rust 代码在 Windows 上的编译（`TUI CI` 只在 Linux 上构建）；`zypi` 里粘一张图、再删会话（#115 的 F-2）；hook 里新的模型名是否有效（`agent` 没有登录，我没有登录它）；合并之后 `main` 上 `TUI CI`（`f0d4976`）与 `TUI E2E`（`bae3a5e`）的结果（写这一段时没有结束）。
 
 ## 附录 A（摘录）：A.4
 
@@ -4085,4 +4174,5 @@ r42 把计划里已发布的发布里程碑（V0.5 至 V0.7）、头部的状态
 - r42：补记 v0.8.0 的发布、r33 与 r39 至 r41 的执行记录和 r28 之后没有轮次的合入；同步计划的状态；已发布的里程碑（V0.5 至 V0.7）与整理前的头部、「当前状态」的一段、「下一步」、决策 7 的状态存入附录 G，并加 V0.8（2026-11-04；`f2c6c09`；分支 `docs/plan-r42-sync`；PR [#100](https://github.com/zy1233/pi-python/pull/100)）。同一批改了 `docs/baselines/tui.md` 的测试数、设计记录的状态与 registry 的状态，和本文修订记录里三处坏的链接。只改文档。见 [§10.45](#1045-r42-追加补记-v080-的发布与-r28-之后没有轮次的合入同步计划归档已发布的里程碑)。
 - r43：收尾计划（2026-11-04；`2235210`；分支 `docs/plan-r43-close`；PR [#106](https://github.com/zy1233/pi-python/pull/106)）。用户答复 §7 的最后七项：0.9、1.P5、1.P6 勾掉；1.P3、1.R2、1.R3、1.R5 关闭；pager 继续用旧的 `pi/yolo_mode_changed`；`-p` 保持「已忽略」的警告。先收尾再发版：版本是 0.9，发布前用户自己做实测。补记 PR [#105](https://github.com/zy1233/pi-python/pull/105)（修 Windows 整套 pytest 的 9 个失败）与 Windows、WSL 的整套 pytest（Windows：9 失败 → 0；WSL：0 失败）；记下 Windows 上 `LocalExecutionEnv.exec` 不终止子进程这个没修的发现。计划里过时的事实（30 个提交；Auto 的 pytest 一条）与附录 A.1 的三行改了；`docs/DESIGN.md` 的 §8.5 与 Auto 设计的头部状态同步（扩展的登记记为已知缺口）。只改文档。见 [§10.46](#1046-r43-追加收尾计划最后七项记-105-与-windowswsl-的整套-pytest)。
 - r44：修 `pi.exec`，建扩展的登记处（2026-11-05；`2235210`，#106 合入后是 `2426452`；分支 `fix/windows-exec-kill-tree` 与 `docs/acp-extension-registry`；PR [#107](https://github.com/zy1233/pi-python/pull/107)、[#108](https://github.com/zy1233/pi-python/pull/108)）。用户答复跟进的问题，两项都选。#107：Windows 上 `LocalExecutionEnv.exec` 超时或被中止时，终止整个进程树（`ProcessTreeKiller`），加两个测试；Windows 与 WSL 的整套 pytest 通过（6086 与 5959 个通过）。#108：把在用的 `pi/` 扩展的登记迁到新的 `docs/specs/2026-11-05-acp-extension-registry.md`（八项）；核对五条准入规则：四项不满足第 ① 条，没有一项在 `initialize` 里协商，六项的类型不在 `pi-acp-lib`；用户答复了登记里的问题（Q1）：第 ④、⑤ 条只对新项适用，八项保持原样（2026-11-05）。`docs/DESIGN.md` 的 §8.5、两个 `AGENTS.md` 与 Auto 设计的头部同步。#107 改代码；#108 只改文档。见 [§10.47](#1047-r44-追加修-windows-上的-piexec把扩展的登记迁到-docsspecs)。
-- r45：审计计划与代码的偏差（2026-11-08；`26ffb9b`；本地分支 `fix/audit-rust-runtime-findings`；没有推送，没有 PR）。用户要我审计代码与设计有没有偏差；我报告了五处（F-1 至 F-5），用户五项都选：写报告、给 F-4 加门禁、改文档、修 F-2、修 F-1。F-1：pager 把自己的日志当作 `x.ai/log` 通知发给 agent；`acp_send` 里挡它的守卫读的是序列化之后的请求，扩展的方法名不在里面，所以从不触发；删了转发，守卫改读类型里的名字，被清单 `--skip` 的测试恢复了。F-2：图片与图表的缓存写在 agent 的会话目录里，删会话时留在磁盘上；移到 `<home>/pager-cache/<会话号>/`，agent 确认删会话之后清掉，读盘门禁多看两个 crate。F-4：Rust 的权限管理器没有调用者，加了门禁 `no_callers`。F-3 与 F-5：P6、ADR4、ADR5、附录 A 与几处状态的文字对齐代码。数：清单合计 8,232 → 8,240，跳过 25 → 24，`x.ai` 的上限 245 → 240。审计报告：[`AUDIT-RUST-RUNTIME-REMOVAL-2026-11-08.md`](../../AUDIT/AUDIT-RUST-RUNTIME-REMOVAL-2026-11-08.md)。见 [§10.48](#1048-r45-追加审计计划与代码的偏差修-xailog图片缓存的位置加权限管理器的门禁)。
+- r45：审计计划与代码的偏差（2026-11-08；`26ffb9b`；分支 `fix/audit-rust-runtime-findings`；当时没有推送，没有 PR；2026-11-11 开 PR [#115](https://github.com/zy1233/pi-python/pull/115)，合入为 `f0d4976`）。用户要我审计代码与设计有没有偏差；我报告了五处（F-1 至 F-5），用户五项都选：写报告、给 F-4 加门禁、改文档、修 F-2、修 F-1。F-1：pager 把自己的日志当作 `x.ai/log` 通知发给 agent；`acp_send` 里挡它的守卫读的是序列化之后的请求，扩展的方法名不在里面，所以从不触发；删了转发，守卫改读类型里的名字，被清单 `--skip` 的测试恢复了。F-2：图片与图表的缓存写在 agent 的会话目录里，删会话时留在磁盘上；移到 `<home>/pager-cache/<会话号>/`，agent 确认删会话之后清掉，读盘门禁多看两个 crate。F-4：Rust 的权限管理器没有调用者，加了门禁 `no_callers`。F-3 与 F-5：P6、ADR4、ADR5、附录 A 与几处状态的文字对齐代码。数：清单合计 8,232 → 8,240，跳过 25 → 24，`x.ai` 的上限 245 → 240。审计报告：[`AUDIT-RUST-RUNTIME-REMOVAL-2026-11-08.md`](../../AUDIT/AUDIT-RUST-RUNTIME-REMOVAL-2026-11-08.md)。见 [§10.48](#1048-r45-追加审计计划与代码的偏差修-xailog图片缓存的位置加权限管理器的门禁)。
+- r46：用户的实测、0.9 的范围与合并（2026-11-11；`26ffb9b`，合入之后是 `bae3a5e`；分支 `docs/plan-r45-hands-on-results`；本 PR [#114](https://github.com/zy1233/pi-python/pull/114)；补记 PR [#112](https://github.com/zy1233/pi-python/pull/112)、[#113](https://github.com/zy1233/pi-python/pull/113)、[#115](https://github.com/zy1233/pi-python/pull/115)）。用户在 Windows 上做了 0.9 的实测：回报 23 项，22 通过，B2（Auto 下 `git status` 与 `ls` 本应直接运行）失败，原因没有找到（规则探针、会话检查、信任匹配都查了；缺卡片上的原因句）；D1 附了一条建议，改成 PR #112（键变量已有值时 `--setup` 不再问 key）；B10 至 B15 没有回报，E 组没有重测。两个云端演练（`b0a55cb`）成功。发现 Windows 上以反斜杠开头的参数被规则当成盘根路径而多问（没有改）。发现 `agent-client-protocol` 1.0.0（2026-11-09）使新装的 v0.8.0 与 CI 起不来；修复是另一个运行的 PR #113（加上界 `<1.0.0`）。记 #110、#111（2026-11-08 合入，不是这一轮做的）。用户随后答复了六个问题：B2 出现的是询问卡片（原因句不记得）；B10 至 B15 在 0.9 之前不测；反斜杠多问留到 0.9 之后；#112 的读法对；不发 0.8.1，#113 并入 0.9；他还说明了「怪事」是他的 `git push` hook 触发的 CI 失败流程（我从文件里只能证实一部分）。13:50 他定了 0.9 的范围（主要含 Auto 模式与审计项修复，别的小问题可以并入），并要我合并 PR：我合入了 #113（`afb80a5`）、#115（`f0d4976`；r45 的审计分支原来没有 PR，我开了它）与 #112（bae3a5e），各自等 CI 通过后合入；13:55 他改了 hook 里 autofix 用的模型，要我一起提交（`e30282f`）。改文档与 hook 的一行设置。见 [§10.49](#1049-r46-追加用户的实测b2-的调查setup-对话的一处改动acp-100-的断裂与-09-的合并)。
