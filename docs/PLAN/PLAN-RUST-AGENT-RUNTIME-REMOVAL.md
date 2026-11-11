@@ -446,7 +446,7 @@ Rust（pager）：
 | [§10.45][l10-45] | r42 | 补记 v0.8.0 的发布与 r28 之后没有轮次的合入（G-1、`workflow` 的隔离、子 agent 的限额）；同步计划，已发布的里程碑存入附录 G；`docs/baselines/tui.md` 的测试数 | PR [#93][pr-93]、[#96][pr-96]、[#97][pr-97]、[#100][pr-100] |
 | [§10.46][l10-46] | r43 | 收尾计划：用户答复 §7 的最后七项（0.9、1.P3、1.P5、1.P6、1.R2、1.R3、1.R5）；补记 #105（Windows 整套 pytest 的 9 个失败）与 Windows、WSL 的整套 pytest；已知缺口的清单；发现 Windows 上 `LocalExecutionEnv.exec` 不终止子进程 | PR [#105][pr-105]、[#106][pr-106] |
 | [§10.47][l10-47] | r44 | 修 Windows 上 `LocalExecutionEnv.exec` 不终止子进程；把扩展的登记迁到 `docs/specs/`，核对登记的八项；Windows 与 WSL 的整套 pytest | PR [#107][pr-107]；本 PR [#108][pr-108] |
-| [§10.48][l10-48] | r45 | 用户在 Windows 上的实测（回报 23 项，22 通过，B2 失败，原因没有找到）与两个云端演练；`--setup` 的一处改动；`agent-client-protocol` 1.0.0 使新装的包与 CI 起不来；记 #110、#111 | PR [#112][pr-112]、[#113][pr-113] |
+| [§10.48][l10-48] | r45 | 用户在 Windows 上的实测（回报 23 项，22 通过，B2 失败，原因没有找到）与两个云端演练；`--setup` 的一处改动；`agent-client-protocol` 1.0.0 使新装的包与 CI 起不来；记 #110、#111 | PR [#112][pr-112]、[#113][pr-113]；本 PR [#114][pr-114] |
 | [附录 A.4][logA4] | r5 | 入口审计的 r5 执行结果 | [#7][pr-7] |
 | [附录 B][logB] | r2–r17 | 复现方法（依赖图、模块级闭包、各轮的测量与测试命令） | — |
 | [附录 C][logC] | r10 | §7 的逐项注释（原文） | — |
@@ -577,7 +577,7 @@ Rust（pager）：
 - r42：补记 v0.8.0 的发布、r33 与 r39 至 r41 的执行记录和 r28 之后没有轮次的合入（2026-11-04；分支 `docs/plan-r42-sync`；PR [#100][pr-100]）；同步计划的状态；V0.5 至 V0.7 的里程碑与整理前的头部等存入附录 G，加 V0.8。只改文档。见 [§10.45][l10-45]。
 - r43：收尾计划（2026-11-04；`2235210`；分支 `docs/plan-r43-close`；PR [#106][pr-106]）：用户答复 §7 的最后七项：0.9、1.P5、1.P6 勾掉；1.P3、1.R2、1.R3、1.R5 关闭；pager 继续用旧的 `pi/yolo_mode_changed`；`-p` 保持「已忽略」的警告。先收尾再发版：版本是 0.9，发布前用户自己做实测。补记 PR [#105][pr-105]（修 Windows 整套 pytest 的 9 个失败）与 Windows、WSL 的整套 pytest。更正计划里过时的事实与附录 A.1 的三行；`docs/DESIGN.md` 的 §8.5 与 Auto 设计的头部状态同步（扩展的登记记为已知缺口）。只改文档。见 [§10.46][l10-46]。
 - r44：修 `pi.exec`，建扩展的登记处（2026-11-05；`2235210`，#106 合入后是 `2426452`；分支 `fix/windows-exec-kill-tree` 与 `docs/acp-extension-registry`；PR [#107][pr-107]、[#108][pr-108]）：用户答复跟进的问题，两项都选。一，修 Windows 上 `LocalExecutionEnv.exec` 超时或被中止时不终止子进程（`exec` 改用 `ProcessTreeKiller`；加两个测试；Windows 与 WSL 的整套 pytest 通过）。二，把在用的 `pi/` 扩展的登记从 `packages/pi-agent-cli/AGENTS.md` 迁到新的 `docs/specs/2026-11-05-acp-extension-registry.md`（八项）；核对结果：四项不满足第 ① 条，没有一项在 `initialize` 里协商，六项的类型不在 `pi-acp-lib`；用户答复了登记里的问题（Q1）：第 ④、⑤ 条只对新项适用，八项保持原样（2026-11-05）。`docs/DESIGN.md` 的 §8.5、两个 `AGENTS.md` 与 Auto 设计的头部同步。#107 改代码；#108 只改文档。见 [§10.47][l10-47]。
-- r45：用户的实测与一个新发现（2026-11-11；`26ffb9b`；分支 `docs/plan-r45-hands-on-results`；补记 PR [#112][pr-112]、[#113][pr-113]）：用户在 Windows 上做了 0.9 的实测，回报 23 项，22 通过，B2 失败（Auto 下 `git status` 与 `ls` 本应直接运行；原因没有找到）；B10 至 B15 没有回报，E 组没有重测；D1 的建议做成 PR #112（键变量已有值时 `--setup` 不再问 key）。两个云端演练成功。发现 Windows 上以反斜杠开头的参数多问（没有改），发现 `agent-client-protocol` 1.0.0 使新装的包与 CI 起不来（PR #113 修）。记 #110、#111。计划里过时的事实改了（35 个提交；`26ffb9b`；#107、#108 已合入）。只改文档。见 [§10.48][l10-48]。
+- r45：用户的实测与一个新发现（2026-11-11；`26ffb9b`；分支 `docs/plan-r45-hands-on-results`；本 PR [#114][pr-114]；补记 PR [#112][pr-112]、[#113][pr-113]）：用户在 Windows 上做了 0.9 的实测，回报 23 项，22 通过，B2 失败（Auto 下 `git status` 与 `ls` 本应直接运行；原因没有找到）；B10 至 B15 没有回报，E 组没有重测；D1 的建议做成 PR #112（键变量已有值时 `--setup` 不再问 key）。两个云端演练成功。发现 Windows 上以反斜杠开头的参数多问（没有改），发现 `agent-client-protocol` 1.0.0 使新装的包与 CI 起不来（PR #113 修）。记 #110、#111。计划里过时的事实改了（35 个提交；`26ffb9b`；#107、#108 已合入）。只改文档。见 [§10.48][l10-48]。
 
 <!-- 链接定义 -->
 [log]: archive/PLAN-RUST-AGENT-RUNTIME-REMOVAL-EXECUTION-LOG.md
@@ -721,6 +721,7 @@ Rust（pager）：
 [pr-111]: https://github.com/zy1233/pi-python/pull/111
 [pr-112]: https://github.com/zy1233/pi-python/pull/112
 [pr-113]: https://github.com/zy1233/pi-python/pull/113
+[pr-114]: https://github.com/zy1233/pi-python/pull/114
 [run-release-v060]: https://github.com/zy1233/pi-python/actions/runs/40180264121
 [rel-v060]: https://github.com/zy1233/pi-python/releases/tag/v0.6.0
 [run-release-v070]: https://github.com/zy1233/pi-python/actions/runs/41049069065
