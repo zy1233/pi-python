@@ -69,10 +69,7 @@ impl AgentView {
         source: crate::app::actions::ClipboardPasteSource,
         change_count: Option<u64>,
     ) {
-        let images_dir = crate::prompt_images::session_images_dir(
-            self.session.session_id.as_ref(),
-            &self.session.cwd,
-        );
+        let images_dir = crate::prompt_images::session_images_dir(self.session.session_id.as_ref());
         self.paste_probe_in_flight += 1;
         self.pending_effects
             .push(crate::app::actions::Effect::ProbeClipboardAttachment {
@@ -394,10 +391,9 @@ impl AgentView {
         mut pasted: crate::prompt_images::PastedImage,
     ) -> bool {
         let preparation = pasted.preview_preparation();
-        if let Some(images_dir) = crate::prompt_images::session_images_dir(
-            self.session.session_id.as_ref(),
-            &self.session.cwd,
-        ) && let Err(e) = crate::prompt_images::persist_to_session(&mut pasted, &images_dir)
+        if let Some(images_dir) =
+            crate::prompt_images::session_images_dir(self.session.session_id.as_ref())
+            && let Err(e) = crate::prompt_images::persist_to_session(&mut pasted, &images_dir)
         {
             tracing::warn!("failed to persist pasted image: {e}");
             self.show_toast("Couldn't save pasted image");

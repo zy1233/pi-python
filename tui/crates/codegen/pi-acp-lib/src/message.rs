@@ -43,6 +43,15 @@ impl AcpSide for acp::ClientSide {
 /// Extends each request/response type pair with the side marker type and schema method name.
 pub trait AcpMethod {
     fn method_name(&self) -> &'static str;
+
+    /// The name of the extension method or notification that this message carries
+    /// (`ExtRequest`, `ExtNotification`), or `None` for a standard ACP message.
+    ///
+    /// The name is not part of the serialized form (`ExtRequest::method` is
+    /// `#[serde(skip)]`), so only the typed value can tell it.
+    fn ext_name(&self) -> Option<&str> {
+        None
+    }
 }
 
 /// Connect together ACP request and response types for each rpc method.
@@ -104,8 +113,34 @@ macro_rules! acp_define_request_response {
     };
 }
 
-acp_define_request_response!(acp::ExtRequest, acp::ExtResponse, "ext_method");
-acp_define_request_response!(acp::ExtNotification, (), "ext_notification");
+// The two extension types are written out: they also tell the name of the extension.
+impl AcpRequest for acp::ExtRequest {
+    type Response = acp::ExtResponse;
+}
+
+impl AcpMethod for acp::ExtRequest {
+    fn method_name(&self) -> &'static str {
+        "ext_method"
+    }
+
+    fn ext_name(&self) -> Option<&str> {
+        Some(&self.method)
+    }
+}
+
+impl AcpRequest for acp::ExtNotification {
+    type Response = ();
+}
+
+impl AcpMethod for acp::ExtNotification {
+    fn method_name(&self) -> &'static str {
+        "ext_notification"
+    }
+
+    fn ext_name(&self) -> Option<&str> {
+        Some(&self.method)
+    }
+}
 
 pub trait StorageMarker: fmt::Debug + Clone + Copy {
     type Type<T>: Borrow<T> + From<T>;

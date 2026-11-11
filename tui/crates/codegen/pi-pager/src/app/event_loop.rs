@@ -914,7 +914,6 @@ pub(crate) async fn run(
     }
     let tracing_handle = crate::tracing::init_tracing();
 
-    crate::unified_log::init(connection.tx.clone());
     crate::unified_log::info("pager started", None, None);
     pi_telemetry::startup::enter(pi_telemetry::startup::StartupPhase::AppInit);
     let mut app = AppView::new(
