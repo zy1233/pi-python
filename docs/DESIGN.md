@@ -355,7 +355,7 @@ TUI 与 agent 之间的线上协议是标准 ACP，加上登记在册的 `pi/` �
 
 ### CLI (`pi-agent-cli-lc`)
 
-- 依赖 `pi-agent-core-lc`、`pi-agent-harness-lc`、`agent-client-protocol>=0.12`
+- 依赖 `pi-agent-core-lc`、`pi-agent-harness-lc`、`agent-client-protocol>=0.12,<1`（1.0 删了 `acp.helpers` 与 `text_block`，还没有移植）
 - PyPI 发布（`.github/workflows/release.yml`）；Rust `zypi` TUI 不在 PyPI
 
 ### 开发
