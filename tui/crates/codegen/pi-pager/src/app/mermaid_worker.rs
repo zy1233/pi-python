@@ -809,7 +809,7 @@ fn render_job(render: &RenderFn, job: &MermaidJob, timeout: Duration) -> (Mermai
 /// crash mid-write never leaves a partial file the next disk-hit would load.
 fn write_png_atomic(path: &Path, png: &[u8]) -> std::io::Result<()> {
     if let Some(parent) = path.parent() {
-        std::fs::create_dir_all(parent)?;
+        crate::prompt_images::create_dir_all_private(parent)?;
     }
     let tmp = path.with_extension("png.tmp");
     std::fs::write(&tmp, png)?;
@@ -1015,10 +1015,7 @@ impl AgentView {
         }) {
             return Some(path);
         }
-        let dir = crate::prompt_images::session_mermaid_dir(
-            self.session.session_id.as_ref(),
-            &self.session.cwd,
-        )?;
+        let dir = crate::prompt_images::session_mermaid_dir(self.session.session_id.as_ref())?;
         Some(dir.join(key.cache_filename()))
     }
 

@@ -806,11 +806,14 @@ pub(crate) fn execute(
                     }
                 };
                 match acp_send(ext, &tx).await {
-                    Ok(_) => TaskResult::DeleteSessionComplete {
-                        source,
-                        session_id,
-                        after,
-                    },
+                    Ok(_) => {
+                        forget_session_cache(&session_id).await;
+                        TaskResult::DeleteSessionComplete {
+                            source,
+                            session_id,
+                            after,
+                        }
+                    }
                     Err(error) => TaskResult::DeleteSessionFailed {
                         source,
                         session_id,
@@ -821,6 +824,26 @@ pub(crate) fn execute(
         }
     }
     (false, meta)
+}
+
+/// Remove what the pager wrote for a session (pasted images, rendered diagrams) once the agent
+/// has deleted the session. The agent does not know these files, so nobody else removes them.
+///
+/// Best effort: a session that is gone is not reported as a failure because a cache directory
+/// could not be removed. The error goes to the log.
+async fn forget_session_cache(session_id: &str) {
+    let id = session_id.to_owned();
+    match tokio::task::spawn_blocking(move || crate::prompt_images::remove_session_cache(&id))
+        .await
+    {
+        Ok(Ok(())) => {}
+        Ok(Err(error)) => {
+            tracing::warn!(session_id, %error, "could not remove the cache of a deleted session");
+        }
+        Err(error) => {
+            tracing::warn!(session_id, %error, "removal of the cache of a deleted session did not finish");
+        }
+    }
 }
 
 /// Build the single text content block for a plain `Effect::SendPrompt`.

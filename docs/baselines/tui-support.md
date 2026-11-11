@@ -2,7 +2,7 @@
 
 This file is generated. Do not edit it by hand.
 
-- Command: `python scripts/tui_callgraph.py keep`. Commit: `b5bc147`.
+- Command: `python scripts/tui_callgraph.py keep`. Commit: `6785b0e`.
 - Run the command again after a change that moves code between modules or crates.
 - It replaces the hand-written list of examples in item 0.5 of
   [`PLAN-RUST-AGENT-RUNTIME-REMOVAL.md`](../PLAN/PLAN-RUST-AGENT-RUNTIME-REMOVAL.md).
@@ -25,7 +25,7 @@ This file is generated. Do not edit it by hand.
 
 | crate | non-test lines | live | dead | dead units | check first | provider-stack refs |
 |---|---|---|---|---|---|---|
-| `pi-shell` | 20,293 | 20,293 (100%) | 0 (0%) | 0 | 0 | 6 |
+| `pi-shell` | 20,362 | 20,362 (100%) | 0 (0%) | 0 | 0 | 6 |
 | `pi-sampling-types` | 11,596 | 11,596 (100%) | 0 (0%) | 0 | 0 | 0 |
 | `pi-tools` | 130,430 | 130,386 (100%) | 44 (0%) | 1 | 1 | 0 |
 | `pi-agent` | 22,877 | 22,877 (100%) | 0 (0%) | 0 | 0 | 5 |
@@ -37,11 +37,11 @@ This file is generated. Do not edit it by hand.
 
 ### `pi-shell`
 
-Non-test code: 20,293 lines in 40 units.
+Non-test code: 20,362 lines in 40 units.
 
 | | units | lines | share |
 |---|---|---|---|
-| live | 40 | 20,293 | 100% |
+| live | 40 | 20,362 | 100% |
 | dead | 0 | 0 | 0% |
 
 Provider stack (`pi_sampler`, `async_openai`, `pi_sampling_types`, `crate::sampling`): 6 live units, 6 files, 6 references: `agent::config` (1), `agent::model_providers` (1), `sampling` (1), `sampling::conversation` (1), `sampling::types` (1), `util::config` (1).
@@ -50,7 +50,7 @@ Provider stack (`pi_sampler`, `async_openai`, `pi_sampling_types`, `crate::sampl
 
 | unit | lines | references from live code outside |
 |---|---|---|
-| `util::config` | 5,677 | 87 |
+| `util::config` | 5,746 | 87 |
 | `auth::manager` | 3,522 | 0 |
 | `agent::config` | 2,924 | 24 |
 | `config` | 1,357 | 16 |
@@ -226,7 +226,7 @@ Check these dead units first. Each has `impl` blocks for types that other units 
 | `types::process_manager` | 14 | 0 |
 | `computer` | 4 | 0 |
 | `registry` | 4 | 0 |
-| `util::grok_home` | 4 | 13 |
+| `util::grok_home` | 4 | 12 |
 
 </details>
 

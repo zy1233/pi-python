@@ -1,39 +1,17 @@
-//! Unified log forwarding for the pager.
+//! Log lines of the pager.
 //!
-//! Buffers log entries in memory and flushes them to the shell via
-//! `legacy ext RPC` ACP notifications. Call [`init`] once at startup with
-//! the ACP sender, then use [`info`], [`warn`], [`error`], [`debug`]
-//! from anywhere.
+//! The pager used to buffer these entries and send them to the agent as vendor notifications.
+//! The old Rust shell wrote them to `unified.jsonl`. The agent is now a Python process, and it
+//! has no handler for that notification. The pager sends no vendor extension
+//! (`pi_acp_lib::acp_send` drops it), so the entries go to `tracing`.
+//!
+//! Use [`info`], [`warn`], [`error`], [`debug`] from anywhere. [`write_direct_info`] writes
+//! one entry straight to `unified.jsonl`.
 
-use std::sync::{Mutex, OnceLock};
+use pi_telemetry::unified_log::{ClientLogEntry, LogLevel, LogSource};
 
-use agent_client_protocol as acp;
-use tokio::runtime::Handle;
-use pi_acp_lib::AcpAgentTx;
-use pi_telemetry::unified_log::{
-    ClientLogEntry, LOG_METHOD, LogLevel, LogNotificationParams, LogSource,
-};
-
-static ACP_TX: OnceLock<AcpAgentTx> = OnceLock::new();
-static BUFFER: Mutex<Vec<ClientLogEntry>> = Mutex::new(Vec::new());
-
-/// Initialize the unified log forwarder with the ACP sender.
-///
-/// Must be called once after the ACP connection is established.
-/// Spawns a background task that flushes buffered entries every few
-/// seconds so events are delivered promptly without manual flush calls.
-/// Entries buffered before this call will be picked up on the first tick.
-pub fn init(tx: AcpAgentTx) {
-    let _ = ACP_TX.set(tx);
-    tokio::spawn(async {
-        let mut interval = tokio::time::interval(std::time::Duration::from_secs(1));
-        interval.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
-        loop {
-            interval.tick().await;
-            flush();
-        }
-    });
-}
+/// The `tracing` target of every entry.
+const TARGET: &str = "pi_pager::unified_log";
 
 fn now_ts() -> String {
     chrono::Utc::now().to_rfc3339_opts(chrono::SecondsFormat::Millis, true)
@@ -56,11 +34,8 @@ fn make_entry(
     }
 }
 
-/// Write an info entry straight to `unified.jsonl`, bypassing the ACP
-/// forwarder. The forwarder only gets a sender after a successful connect
-/// and a flush on a failed startup destroys buffered entries — so pre-connect
-/// facts that must survive a failed startup go through here, with the same
-/// pager source and pid stamping as forwarded entries.
+/// Write an info entry straight to `unified.jsonl`, with the pager source and pid stamping.
+/// Use it for a fact that must survive a failed startup.
 pub fn write_direct_info(msg: &str, ctx: Option<serde_json::Value>) {
     pi_telemetry::unified_log::ingest_client_entries(
         LogSource::GrokPager,
@@ -69,76 +44,14 @@ pub fn write_direct_info(msg: &str, ctx: Option<serde_json::Value>) {
 }
 
 fn push_entry(lvl: LogLevel, msg: &str, sid: Option<&str>, ctx: Option<serde_json::Value>) {
-    let entry = make_entry(lvl, msg, sid, ctx);
-    if let Ok(mut buf) = BUFFER.lock() {
-        buf.push(entry);
-        // Auto-flush when we have a reasonable batch, but only if the ACP
-        // sender is ready -- otherwise keep buffering until an explicit flush().
-        if buf.len() >= 16 && ACP_TX.get().is_some() {
-            let entries: Vec<ClientLogEntry> = buf.drain(..).collect();
-            drop(buf);
-            send_entries(entries);
-        }
+    let ctx = ctx.map(|value| value.to_string());
+    let ctx = ctx.as_deref();
+    match lvl {
+        LogLevel::Error => tracing::error!(target: TARGET, session_id = sid, ctx, "{msg}"),
+        LogLevel::Warn => tracing::warn!(target: TARGET, session_id = sid, ctx, "{msg}"),
+        LogLevel::Info => tracing::info!(target: TARGET, session_id = sid, ctx, "{msg}"),
+        LogLevel::Debug => tracing::debug!(target: TARGET, session_id = sid, ctx, "{msg}"),
     }
-}
-
-fn build_notification(entries: Vec<ClientLogEntry>) -> Option<acp::ExtNotification> {
-    if entries.is_empty() {
-        return None;
-    }
-    let params = LogNotificationParams {
-        src: LogSource::GrokPager,
-        entries,
-    };
-    let raw = serde_json::value::to_raw_value(&params).ok()?;
-    Some(acp::ExtNotification::new(LOG_METHOD, raw.into()))
-}
-
-fn send_entries(entries: Vec<ClientLogEntry>) {
-    let Some(tx) = ACP_TX.get() else { return };
-    let Some(notification) = build_notification(entries) else {
-        return;
-    };
-    // Guard against panic if called from a non-tokio thread (e.g., a
-    // tracing::Layer callback on a blocking thread).
-    let Ok(handle) = Handle::try_current() else {
-        return;
-    };
-    let tx = tx.clone();
-    handle.spawn(async move {
-        let _ = pi_acp_lib::acp_send(notification, &tx).await;
-    });
-}
-
-/// Flush any buffered entries to the shell (fire-and-forget).
-pub fn flush() {
-    let entries = {
-        let Ok(mut buf) = BUFFER.lock() else { return };
-        if buf.is_empty() {
-            return;
-        }
-        buf.drain(..).collect::<Vec<_>>()
-    };
-    send_entries(entries);
-}
-
-/// Flush buffered entries and await delivery.
-///
-/// Use this before process exit to ensure entries are delivered
-/// before the agent shuts down.
-pub async fn flush_blocking() {
-    let entries = {
-        let Ok(mut buf) = BUFFER.lock() else { return };
-        if buf.is_empty() {
-            return;
-        }
-        buf.drain(..).collect::<Vec<_>>()
-    };
-    let Some(tx) = ACP_TX.get() else { return };
-    let Some(notification) = build_notification(entries) else {
-        return;
-    };
-    let _ = pi_acp_lib::acp_send(notification, tx).await;
 }
 
 /// Log an info-level entry.

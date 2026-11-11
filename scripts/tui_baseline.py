@@ -368,6 +368,38 @@ def scan_session_disk_reads(
     return hits
 
 
+def scan_callers(tui_dir: Path, symbols: Sequence[str], allowed: Sequence[str]) -> list[str]:
+    """`path:line: text` for every line of production code under `tui/crates` that names a symbol.
+
+    A file below one of the `allowed` paths (paths under `tui/crates`, such as
+    `codegen/pi-workspace/src/permission`) may name it, and every other file may not. Only the
+    `src` of each crate is read. Test files, inline test modules and comment lines are skipped,
+    as in `scan_session_disk_reads`. A symbol is a plain substring, so `spawn_permission_manager`
+    also matches `spawn_permission_manager_with_hub`.
+    """
+    if not symbols:
+        return []
+    pattern = re.compile("|".join(re.escape(s) for s in symbols))
+    prefixes = tuple(a.strip("/") + "/" for a in allowed)
+    crates = tui_dir / "crates"
+    hits: list[str] = []
+    for path in sorted(crates.rglob("*.rs")):
+        relative = path.relative_to(crates)
+        parts = relative.parts
+        if "src" not in parts or relative.as_posix().startswith(prefixes):
+            continue
+        if is_test_source(Path(*parts[parts.index("src") + 1 :])):
+            continue
+        text = path.read_text(encoding="utf-8", errors="replace")
+        if not pattern.search(text):
+            continue
+        for number, stripped in production_lines(text):
+            if pattern.search(stripped):
+                where = path.relative_to(tui_dir).as_posix()
+                hits.append(f"{where}:{number}: {stripped[:120]}")
+    return hits
+
+
 def evaluate_suite(
     suite: dict[str, Any],
     totals: SuiteTotals,
@@ -629,6 +661,20 @@ def run_gates(manifest: dict[str, Any], tui_dir: Path) -> tuple[list[Check], dic
                 f"no session file reads in {', '.join(Path(c).name for c in disk_reads['crates'])}",
                 "pass" if not hits else "fail",
                 "no production code reads or locates session files"
+                if not hits
+                else "; ".join(hits[:5]),
+            )
+        )
+
+    for gate in gates.get("no_callers", []):
+        hits = scan_callers(tui_dir, gate["symbols"], gate["allowed"])
+        extra.setdefault("no_callers", {})[gate["name"]] = len(hits)
+        inside = ", ".join(f"{Path(a).name}/" for a in gate["allowed"])
+        checks.append(
+            Check(
+                f"no caller of {gate['name']} outside {inside}",
+                "pass" if not hits else "fail",
+                f"nothing starts it ({', '.join(gate['symbols'])})"
                 if not hits
                 else "; ".join(hits[:5]),
             )

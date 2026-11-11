@@ -36,7 +36,7 @@ tracked_crates = [
 [gates.residue]
 "grok agent" = 0
 "leader" = 213
-"x.ai" = 245
+"x.ai" = 240
 
 # ADR1 (plan section 10.16): the pager asks the agent which sessions exist (`session/list`) and
 # reads no session files itself. Production code in these crates (paths under tui/crates) must
@@ -47,8 +47,21 @@ tracked_crates = [
 # decision 10); the patterns stay as a guard against writing it back. `session::title` is not
 # listed: `sanitize_and_cap_title` and `is_forbidden_title_char` are pure string helpers that the
 # pager uses on purpose.
+#
+# The pager also writes nothing into the sessions directory (audit AUDIT-RUST-RUNTIME-REMOVAL
+# F-2): the agent owns that directory, and it deletes a session without knowing the files of the
+# pager. The pasted images and the diagram cache were there until r45, and this gate did not look
+# at the two crates that built their path (`pi-pager-render`, `pi-shared`). They are in the list
+# now, with the helpers that build a path in the sessions directory (`sessions_cwd_dir`, which
+# also matches `ensure_sessions_cwd_dir`, and `session::session_dir`). The files of the pager are
+# in `<home>/pager-cache/<session id>`, and the pager removes them when it deletes a session.
 [gates.session_disk_reads]
-crates = ["codegen/pi-pager", "codegen/pi-pager-bin"]
+crates = [
+    "codegen/pi-pager",
+    "codegen/pi-pager-bin",
+    "codegen/pi-pager-render",
+    "codegen/pi-shared",
+]
 patterns = [
     "list_summaries",
     "resolve_local_session",
@@ -58,7 +71,23 @@ patterns = [
     "session::storage",
     "persistence::session_dir",
     'join("sessions")',
+    "sessions_cwd_dir",
+    "session::session_dir",
 ]
+
+# Audit F-4 (AUDIT-RUST-RUNTIME-REMOVAL): the permission manager of `pi-workspace` (in
+# `permission/`, with the Auto mode: a classifier that asks a model) is code that nothing starts.
+# The agent in Python decides every permission (plan principle P1). The manager runs only when
+# something calls `spawn_permission_manager` or `spawn_permission_manager_with_hub`, and no code
+# outside `permission/` does. The code stays (the user decided not to refactor `pi-workspace`,
+# plan D.4). This gate keeps it from coming alive: a caller outside `permission/` would put a
+# second engine in the pager process that decides permissions with its own rules.
+# Skipped: test files, inline `#[cfg(test)] mod ... {}` blocks, and comment lines. A symbol is a
+# plain substring. If the manager is deleted, delete this gate with it.
+[[gates.no_callers]]
+name = "the Rust permission manager"
+symbols = ["spawn_permission_manager"]
+allowed = ["codegen/pi-workspace/src/permission"]
 
 [graph]
 package = "pi-pager-bin"
@@ -208,11 +237,18 @@ targets = [
 # = 5,517 (one local run on Linux; the test of `agent_modes` and the two of `cli` were rewritten,
 # not added). Then +1 for a third Auto case of `python_agent_e2e` (a shell command that no rule
 # decides, with the model step on and with `classifier = "rules"`): 5,518 (one local run on Linux).
-reference_passed = 5518
-min_passed = 5300
+# Then +1 in r45 (audit F-2): `delete_session_removes_the_pager_cache_after_the_agent_confirms`,
+# which pins that the delete effect removes the cache of the session that the agent deleted, and
+# only that one: 5,519 (derived from 5,518; the r45 run was on macOS: `--lib` 5,243 passed, 12
+# ignored, and the five integration targets 272 passed, with `PI_E2E_PYTHON` set and
+# `PI_E2E_REQUIRED=1`, so the 15 cases of `python_agent_e2e` ran and were not skipped).
+reference_passed = 5519
+min_passed = 5301
 
 # Lib tests only; they were outside the manifest until r8 (plan section 10.10: 1,092 passed,
-# 2 ignored on Linux, 1.4 s).
+# 2 ignored on Linux, 1.4 s). r45 (audit F-2) replaced 1 test of `prompt_images` with 6, so the
+# reference is 1,097 (1,092 + 5; the Linux number is derived, not measured: the r45 run was on
+# macOS, 1,094 passed, 2 ignored).
 [[test.suite]]
 package = "pi-pager-render"
 targets = ["--lib"]
@@ -222,8 +258,8 @@ targets = ["--lib"]
 # idle or with every core busy. Tolerated rather than skipped: the report still names it when it
 # fails, so a test that fails on every run is visible, but it does not block.
 known_failures = ["tmux_probe::tests::successful_near_deadline_exit_still_returns_captured_output"]
-reference_passed = 1092
-min_passed = 1040
+reference_passed = 1097
+min_passed = 1045
 
 # Lib tests only (79 passed on Linux). Its diff-background test used to fail under the default
 # thread count for want of the theme lock; with the lock it is stable (40/40 in each mode).
@@ -247,13 +283,17 @@ min_passed = 33
 [[test.suite]]
 package = "pi-acp-lib"
 targets = ["--lib", "--test", "ext_wire_golden"]
-# The x.ai drop test hangs forever: acp::ExtRequest serialises `method` away, so the drop logic
-# never fires and the queued request is never answered (docs/PLAN/... section 10.4).
-skip = ["vendor_x_ai_ext_is_dropped_without_sending"]
 # 21 + 42 tests that came with the extension types in plan B.3 + 1 golden decode test
-# (`ext_wire_golden`): 64 (one local run on Linux).
-reference_passed = 64
-min_passed = 64
+# (`ext_wire_golden`): 64 (one local run on Linux). Then 68 (r45, audit F-1): the drop test of the
+# vendor extensions (`vendor_x_ai_ext_is_dropped_without_sending`) was skipped until then, because
+# it hung: `acp::ExtRequest` serialises `method` away, so the guard never fired and the queued
+# request was never answered (docs/PLAN/... section 10.4). `acp_send` now reads the name from the
+# typed value (`AcpMethod::ext_name`), the test runs (+1), and it no longer waits for an answer, so
+# a broken guard fails the test instead of hanging it. Three more tests: the notification case, the
+# `pi/*` and near-miss names that must still go out, and the name reader (+3). 64 + 1 + 3 = 68
+# (one local run on macOS; the floor keeps no distance, as before).
+reference_passed = 68
+min_passed = 68
 
 [[test.suite]]
 package = "pi-http"
@@ -266,8 +306,10 @@ package = "pi-telemetry"
 targets = ["--lib"]
 # 239 before phase D.3 (r38) deleted the xAI OTEL exporter (`otel_layer/`, 19 tests: 11 in
 # `redact.rs`, 8 in `mod.rs`): 239 - 19 = 220 on Linux (one local run; the floor keeps the distance
-# of 9).
-reference_passed = 220
+# of 9). Then 218 (r45, audit F-1): the pager does not send its log over ACP any more, and the two
+# tests of the wire type of that notification (`LogNotificationParams`) went with the type:
+# 220 - 2 = 218 (the floor stays).
+reference_passed = 218
 min_passed = 211
 
 [[test.suite]]
