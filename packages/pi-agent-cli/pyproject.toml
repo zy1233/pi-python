@@ -29,7 +29,9 @@ dependencies = [
     # a bare `uvx pi-agent-cli-lc` (which cannot add `--with`) then has a model to talk to.
     "pi-agent-core-lc[openai]==0.8.0",
     "pi-agent-harness-lc==0.8.0",
-    "agent-client-protocol>=0.12.0",
+    # 1.0.0 (2026-11-09) removed `acp.helpers` and `acp.text_block`, which the agent uses. The port
+    # to 1.0 is not done.
+    "agent-client-protocol>=0.12.0,<1.0.0",
     "pydantic>=2.0",
 ]
 
