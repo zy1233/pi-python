@@ -122,6 +122,80 @@ def test_a_provider_can_be_named_and_the_key_variable_changed(tmp_path):
     assert read_local_env(tmp_path) == {"MY_DS_KEY": KEY}
 
 
+# --- a key variable that already has a value ------------------------------------------------
+# The script has no hidden answer in these tests: a key question would end the run (code 1).
+
+
+@pytest.mark.parametrize(
+    ("variable_answer", "variable"), [("", "OPENAI_API_KEY"), ("MY_OWN_KEY", "MY_OWN_KEY")]
+)
+def test_a_variable_that_has_a_value_in_the_environment_asks_no_key(
+    tmp_path, variable_answer, variable
+):
+    answers = ["1", "gpt-x", "", variable_answer]
+    code, term = run(tmp_path, answers=answers, environ={variable: KEY})
+    assert code == 0, term.err.getvalue()
+
+    out = term.out.getvalue()
+    assert f"The variable {variable} already has a value in your environment." in out
+    assert "No key is asked." in out
+    assert not any("API key for" in prompt for prompt in term.prompts)
+    assert load_config(tmp_path).api_key_env == variable
+    # The agent reads the variable where it is, so no copy of the key is made.
+    assert sorted(p.name for p in tmp_path.iterdir()) == ["agent.toml"]
+    assert f"Key:   {variable}, read from your environment (nothing was written for it)" in out
+    # A client has to pass the variable on: only the environment is not read by the agent itself.
+    assert f"A client that starts the agent has to pass {variable} on." in out
+    assert KEY not in term.shown()
+    assert KEY not in (tmp_path / "agent.toml").read_text(encoding="utf-8")
+
+
+def test_a_variable_that_has_a_value_in_local_env_asks_no_key_and_leaves_that_file_alone(tmp_path):
+    original = b"# mine\nMY_KEY=sk-old-0123\nOTHER=1\n"
+    (tmp_path / "local.env").write_bytes(original)
+    code, term = run(tmp_path, answers=["1", "gpt-x", "", "MY_KEY"])
+    assert code == 0, term.err.getvalue()
+
+    out = term.out.getvalue()
+    assert "The variable MY_KEY already has a value in local.env. No key is asked." in out
+    assert "Key:   MY_KEY, read from local.env (nothing was written for it)" in out
+    assert "has to pass" not in out  # the agent reads local.env by itself
+    assert (tmp_path / "local.env").read_bytes() == original
+    assert load_config(tmp_path).api_key_env == "MY_KEY"
+    assert "sk-old-0123" not in term.shown()
+
+
+def test_the_environment_is_named_when_both_it_and_local_env_have_the_variable(tmp_path):
+    (tmp_path / "local.env").write_bytes(b"MY_KEY=from-file\n")
+    code, term = run(
+        tmp_path, answers=["1", "gpt-x", "", "MY_KEY"], environ={"MY_KEY": "from-environment"}
+    )
+    assert code == 0, term.err.getvalue()
+    assert "already has a value in your environment." in term.out.getvalue()  # it wins, as at start
+    assert (tmp_path / "local.env").read_bytes() == b"MY_KEY=from-file\n"
+
+
+def test_a_key_is_asked_when_only_another_variable_has_a_value(tmp_path):
+    code, term = run(
+        tmp_path,
+        answers=["1", "gpt-x", "", "MY_KEY"],
+        secrets=[KEY],
+        environ={"OPENAI_API_KEY": "the-key-of-another-variable"},
+    )
+    assert code == 0, term.err.getvalue()
+    assert "already has a value" not in term.out.getvalue()
+    assert read_local_env(tmp_path) == {"MY_KEY": KEY}
+
+
+def test_a_variable_that_is_empty_has_no_value(tmp_path):
+    code, term = run(
+        tmp_path, answers=["1", "gpt-x", "", ""], secrets=[KEY], environ={"OPENAI_API_KEY": ""}
+    )
+    assert code == 0, term.err.getvalue()
+    assert "already has a value" not in term.out.getvalue()
+    assert read_local_env(tmp_path) == {"OPENAI_API_KEY": KEY}
+
+
 def test_a_bad_answer_is_asked_again(tmp_path):
     answers = ["9", "x", "1", "", "has space", "gpt-x", "ftp://host", "", "1BAD", ""]
     secrets = ["", "two words", "'quoted'", KEY]
