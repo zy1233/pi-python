@@ -13,6 +13,10 @@ What it writes, and where:
   lines stay as they are. The file is private to the user on POSIX (mode 0600); on Windows it has
   the rights of the user folder.
 
+When the variable that the user names already has a value (in the environment, or in
+``local.env``), the dialog asks no key and writes no ``local.env``: the agent reads that variable
+where it is.
+
 The key is read without echo. It is never printed, logged or written to ``agent.toml``.
 """
 
@@ -329,6 +333,16 @@ def _confirm(io: SetupIO, question: str) -> bool:
     return io.ask(f"{question} [y/N]: ").strip().casefold() in {"y", "yes"}
 
 
+_ENVIRONMENT = "your environment"
+_LOCAL_ENV = "local.env"
+
+
+def _where_the_value_is(name: str, environ: Mapping[str, str]) -> str:
+    """Where a variable that has a value gets it from. The real environment wins over
+    ``local.env``, as it does when the agent starts."""
+    return _ENVIRONMENT if environ.get(name) else _LOCAL_ENV
+
+
 def _installed(module: str) -> bool:
     return importlib.util.find_spec(module) is not None
 
@@ -386,6 +400,8 @@ def _dialog(home: Path, io: SetupIO, environ: Mapping[str, str]) -> int:
 
     key_env = config.api_key_env
     replaced_key = False
+    key_from: str | None = None  # where a key that was already there lives (no key is asked)
+    key: str | None
     preset: Preset | None
 
     if config.provider.casefold() == MOCK_PROVIDER:
@@ -403,7 +419,13 @@ def _dialog(home: Path, io: SetupIO, environ: Mapping[str, str]) -> int:
         base_url = _ask_base_url(io) if preset.asks_base_url else None
         key_env = _ask_key_env(io, preset.key_env)
         table = model_table(provider, model_id, base_url, key_env)
-        key = _ask_key(io, key_env)
+        if values.get(key_env):
+            # The agent reads this variable as it is: asking again would only copy it.
+            key_from = _where_the_value_is(key_env, environ)
+            io.say(f"The variable {key_env} already has a value in {key_from}. No key is asked.")
+            key = None
+        else:
+            key = _ask_key(io, key_env)
         add_model_table(config_path, table)
     else:
         provider, model_id = config.provider, config.model_id
@@ -426,18 +448,24 @@ def _dialog(home: Path, io: SetupIO, environ: Mapping[str, str]) -> int:
         key = _ask_key(io, key_env)
 
     assert key_env is not None
-    env_path = write_local_env(home, key_env, key)
+    # A variable that already has a value is not copied: the agent reads it where it is.
+    env_path = write_local_env(home, key_env, key) if key is not None else None
 
     io.say()
     io.say("Saved.")
     io.say(f"  Model: {provider} / {model_id}  ({config_path})")
-    rights = (
-        "only your user can read it"
-        if os.name == "posix"
-        else "it has the rights of your user folder"
-    )
-    io.say(f"  Key:   {key_env} in {env_path}  ({rights})")
+    if env_path is None:
+        io.say(f"  Key:   {key_env}, read from {key_from} (nothing was written for it)")
+    else:
+        rights = (
+            "only your user can read it"
+            if os.name == "posix"
+            else "it has the rights of your user folder"
+        )
+        io.say(f"  Key:   {key_env} in {env_path}  ({rights})")
     io.say("Start a new session in your agent client.")
+    if key_from == _ENVIRONMENT:
+        io.say(f"A client that starts the agent has to pass {key_env} on.")
     if replaced_key:
         io.say("An agent that is running keeps the old key until it is started again.")
     if preset is not None and not _installed(preset.module) and is_frozen():

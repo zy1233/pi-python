@@ -1652,3 +1652,83 @@ fn sanitize_user_error_collapses_disk_full() {
             "couldn't create worktree: failed to get HEAD commit from source"
         );
 }
+
+/// What the pager cached for a session (pasted images, diagrams) goes away when the agent has
+/// deleted the session, and only then, and only for that session. The agent does not know these
+/// files. A delete that the agent refused keeps the session, so it keeps the cache (audit F-2).
+///
+/// It sets `PI_HOME`, so it runs in a process of its own.
+#[test]
+fn delete_session_removes_the_pager_cache_after_the_agent_confirms() {
+    crate::test_util::in_own_process(|| {
+        use crate::app::actions::AfterSessionDelete;
+        use pi_acp_lib::AcpAgentMessage;
+
+        let home = tempfile::tempdir().expect("temp home");
+        // SAFETY: the body runs alone in a process of its own, before any other thread starts.
+        unsafe { std::env::set_var("PI_HOME", home.path()) };
+        let cache = |id: &str| {
+            home.path()
+                .join(crate::prompt_images::PAGER_CACHE_DIR)
+                .join(id)
+        };
+        for id in ["confirmed", "refused", "untouched"] {
+            std::fs::create_dir_all(cache(id).join("images")).expect("make the cache");
+            std::fs::write(cache(id).join("images").join("image-1.png"), b"png").expect("write");
+        }
+
+        let runtime = tokio::runtime::Builder::new_current_thread()
+            .enable_all()
+            .build()
+            .expect("runtime");
+        runtime.block_on(async {
+            let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel();
+            // The agent confirms every delete but the one of `refused`.
+            tokio::spawn(async move {
+                while let Some(message) = rx.recv().await {
+                    let AcpAgentMessage::ExtMethod(args) = message else {
+                        continue;
+                    };
+                    assert_eq!(&*args.request.method, "pi/session/delete");
+                    let answer = if args.request.params.get().contains("refused") {
+                        Err(acp::Error::new(acp::ErrorCode::InternalError.into(), "refused"))
+                    } else {
+                        Ok(serde_json::from_value(serde_json::json!({ "deleted": true }))
+                            .expect("ext response"))
+                    };
+                    let _ = args.response_tx.send(answer);
+                }
+            });
+            let mut tasks = JoinSet::new();
+            for id in ["confirmed", "refused"] {
+                execute(
+                    Effect::DeleteSession {
+                        source: "local".into(),
+                        session_id: id.into(),
+                        cwd: "/repo".into(),
+                        after: AfterSessionDelete::Stay,
+                    },
+                    &mut tasks,
+                    &tx,
+                    Path::new("."),
+                    &SessionFlags::default(),
+                );
+            }
+            while let Some(result) = tasks.join_next().await {
+                match result.expect("no panic") {
+                    TaskResult::DeleteSessionComplete { session_id, .. } => {
+                        assert_eq!(session_id, "confirmed");
+                    }
+                    TaskResult::DeleteSessionFailed { session_id, .. } => {
+                        assert_eq!(session_id, "refused");
+                    }
+                    other => panic!("unexpected task result {other:?}"),
+                }
+            }
+        });
+
+        assert!(!cache("confirmed").exists(), "a confirmed delete leaves its cache");
+        assert!(cache("refused").exists(), "a refused delete must keep the cache");
+        assert!(cache("untouched").exists(), "another session's cache must stay");
+    });
+}

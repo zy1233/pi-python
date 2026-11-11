@@ -712,7 +712,6 @@ pub async fn run(args: PagerArgs) -> anyhow::Result<()> {
             } else {
                 pending_startup.finish(f.outcome);
             }
-            crate::unified_log::flush_blocking().await;
             let _ = restore_terminal(terminal, writer_thread, screen_mode);
             cancel.cancel();
             return Err(f.error);
@@ -737,7 +736,6 @@ pub async fn run(args: PagerArgs) -> anyhow::Result<()> {
             } else {
                 pending_startup.finish(crate::acp::StartupOutcome::Error);
             }
-            crate::unified_log::flush_blocking().await;
             let _ = restore_terminal(terminal, writer_thread, screen_mode);
             drop(agent_guard);
             return Err(failure.error);
@@ -791,7 +789,6 @@ pub async fn run(args: PagerArgs) -> anyhow::Result<()> {
         exit_timeout::arm(code);
         exit_timeout::hold_teardown_for_test();
     }
-    crate::unified_log::flush_blocking().await;
     let restore_result = restore_terminal(terminal, writer_thread, current_screen_mode());
     drop(agent_guard);
     pi_telemetry::session_ctx::drain_at_process_exit().await;

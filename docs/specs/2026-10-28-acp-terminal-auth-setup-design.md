@@ -37,10 +37,12 @@ It needs a terminal on stdin and stdout (exit status 2 if there is none). It ask
 
 | State of the home | Questions |
 |-------------------|-----------|
-| No model (the provider is `mock`) | Provider (OpenAI, Anthropic, DeepSeek), model id, base URL (OpenAI and DeepSeek only), name of the key variable (default: the usual name of the provider), the key. |
+| No model (the provider is `mock`) | Provider (OpenAI, Anthropic, DeepSeek), model id, base URL (OpenAI and DeepSeek only), name of the key variable (default: the usual name of the provider), the key. The key is not asked when that variable already has a value (see below). |
 | A model, and its `api_key_env` has no value | The key. |
 | A model, and its `api_key_env` has a value | "Replace the key?" Then the key. |
 | A model with no `api_key_env` | Nothing. It says so. |
+
+**A key variable that already has a value** (changed 2026-11-11, after a hands-on test: the dialog asked for the key of a variable that the user had just named and that was already set). In the first row of the table, the dialog looks at the variable that the user names. When it has a value, the dialog says where (`your environment`, or `local.env`: the real environment wins, as it does when the agent starts), asks no key and writes no `local.env`: the agent reads the variable where it is. A copy would be a second place for the key. "Has a value" is the same test as in the other rows: an empty variable has none. When the value is in the environment, the final text adds that a client that starts the agent has to pass the variable on, because an agent that a client starts may not have the environment of the terminal. To replace a key later, run `--setup` again: the model is set then, and the dialog asks "Replace the key?" as in the third row.
 
 What it writes:
 
