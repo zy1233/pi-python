@@ -7835,7 +7835,7 @@ dependencies = [
 
 [[package]]
 name = "pi-pager-bin"
-version = "0.8.0"
+version = "0.9.0"
 dependencies = [
  "anyhow",
  "clap",
@@ -8535,7 +8535,7 @@ dependencies = [
 
 [[package]]
 name = "pi-version"
-version = "0.8.0"
+version = "0.9.0"
 dependencies = [
  "semver",
 ]
