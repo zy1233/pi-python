@@ -12,7 +12,7 @@
 
 ## 目录
 
-- [10. 执行记录（r3、r4、r5、r6、r7、r8、r9、r10、r11、r12、r13、r14、r15、r16、r17、r18、r19、r20、r21、r22、r23、r24、r25、r26、r27、r28、r29、r30、r31、r32、r33、r34、r35、r36、r37、r38、r39、r40、r41、r42、r43、r44、r45、r46）](#10-执行记录r3r4r5r6r7r8r9r10r11r12r13r14r15r16r17r18r19r20r21r22r23r24r25r26r27r28r29r30r31r32r33r34r35r36r37r38r39r40r41r42r43r44r45r46)
+- [10. 执行记录（r3、r4、r5、r6、r7、r8、r9、r10、r11、r12、r13、r14、r15、r16、r17、r18、r19、r20、r21、r22、r23、r24、r25、r26、r27、r28、r29、r30、r31、r32、r33、r34、r35、r36、r37、r38、r39、r40、r41、r42、r43、r44、r45、r46、r47）](#10-执行记录r3r4r5r6r7r8r9r10r11r12r13r14r15r16r17r18r19r20r21r22r23r24r25r26r27r28r29r30r31r32r33r34r35r36r37r38r39r40r41r42r43r44r45r46r47)
   - [10.1 范围、方法与规模](#101-范围方法与规模)
   - [10.2 `/model` 恢复（ADR3 r3）](#102-model-恢复adr3-r3)
   - [10.3 验证（r3 的实测）](#103-验证r3-的实测)
@@ -62,6 +62,7 @@
   - [10.47 r44 追加：修 Windows 上的 pi.exec，把扩展的登记迁到 docs/specs](#1047-r44-追加修-windows-上的-piexec把扩展的登记迁到-docsspecs)
   - [10.48 r45 追加：审计计划与代码的偏差，修 x.ai/log、图片缓存的位置，加权限管理器的门禁](#1048-r45-追加审计计划与代码的偏差修-xailog图片缓存的位置加权限管理器的门禁)
   - [10.49 r46 追加：用户的实测、B2 的调查、setup 对话的一处改动、acp 1.0.0 的断裂与 0.9 的合并](#1049-r46-追加用户的实测b2-的调查setup-对话的一处改动acp-100-的断裂与-09-的合并)
+  - [10.50 r47 追加：审计代码在 Windows 上的检查与 0.9 的发布准备](#1050-r47-追加审计代码在-windows-上的检查与-09-的发布准备)
 - [附录 A（摘录）：A.4](#附录-a摘录a4)
   - [A.4 r5 执行结果（对照 r5 时初稿里的「默认决策」；r9 的更新见 A.1）](#a4-r5-执行结果对照-r5-时初稿里的默认决策r9-的更新见-a1)
 - [附录 B：复现方法](#附录-b复现方法)
@@ -96,7 +97,7 @@
   - [G.7 待决策里决策 7 的状态](#g7-待决策里决策-7-的状态)
 - [修订记录](#修订记录)
 
-## 10. 执行记录（r3、r4、r5、r6、r7、r8、r9、r10、r11、r12、r13、r14、r15、r16、r17、r18、r19、r20、r21、r22、r23、r24、r25、r26、r27、r28、r29、r30、r31、r32、r33、r34、r35、r36、r37、r38、r39、r40、r41、r42、r43、r44、r45、r46）
+## 10. 执行记录（r3、r4、r5、r6、r7、r8、r9、r10、r11、r12、r13、r14、r15、r16、r17、r18、r19、r20、r21、r22、r23、r24、r25、r26、r27、r28、r29、r30、r31、r32、r33、r34、r35、r36、r37、r38、r39、r40、r41、r42、r43、r44、r45、r46、r47）
 
 r3 执行了「拆除 Rust runtime + 恢复 `/model`」；r4 在其上补了阶段 0 的 CI / 基线、清理 leader 的 UI 残留和生命周期命名；r5 把分支推上远端、在 Linux 上启用基线，执行入口审计并完成阶段 A（§10.7）；r6 清理品牌残留（§10.8）；r7 合并 `main`（§10.9）；r8 在 WSL2 上补 Linux 一侧的实测（§10.10）；r9 补阶段 0 的收尾与阶段 1 里不需要拍板的部分（§10.11）；r10 做 ADR1 的 PR 1（§10.12）与 1.P3 的 (a)（§10.13）；r11 做 0.5 与阶段 C（§10.14）；r12 定 V0.5 的发布里程碑，并做了决策 16（§10.15）；r13 做 ADR1 的 PR 2 与 PR 3，并加了读盘门禁（§10.16）；r14 合入这两个 PR，并做决策 17：会话文件在第一条用户消息时才写（§10.17）；r15 做决策 10 的存储层一项：删 `pi-shell` 里的旧存储层（§10.18）；r16 合入 #25 与 #26，并删 `pi-shell` 里剩下的死代码（§10.19）；r17 检查测试之间的竞争，只改测试与工具（§10.20）；r18 改用 `cargo nextest`，改 `protoc` 的路径与 `release.yml` 的令牌（§10.21）；r19 用 `gh stack` 合入 #27–#31，并设 V0.6 的发布里程碑（§10.22）；r20 定 MCP 的方向（可选扩展包），修空白对话，补发布内容，并合入 #33–#36（§10.23）；r21 做 V0.6 的版本号与发布说明（条件 5），合入 #38 与 #39，并做条件 1–4（§10.24）；r22 打 tag `v0.6.0`、发布、做发布后的核对（§10.25）；r23 把三个 action 升到 Node 24 的版本，处理扩展 API 的审计批 9，并把决策 11、13 记成不做（§10.26）；r24 在内核 6.12 的云 VM 上测了沙箱的 Landlock 层（§10.27）；r25 把 `pi-sandbox` 接进 `TUI CI`（§10.28）；r26 补记 v0.7.0 之前的合入（#45 至 #48、web 的 #50 至 #54、版本号 #55）与 v0.7.0 的发布（§10.29）；r27 量了旗标与设置页并修（#57、#60），去掉选择器的 30 天截止（#61），清了一批死代码（#62、#63；§10.30）；r28 用一次 `gh stack` 把这五个 PR 与另外五个（#56、#58、#59、#64、#65）合入 `main`（§10.31）。下表是 r3、r4 的提交，按当时的状态保留（当时都是本地提交、**未 push**），分支是 `codex/rust-agent-runtime-removal-plan`：
 
@@ -3037,7 +3038,80 @@ macOS 上量到的（`HOME=/tmp/tui-test-home`；没有 nextest，用 `cargo tes
 - hook：读了 `.cursor/hooks.json`、`on_git_push.ps1`、`watch_ci_and_autofix.ps1` 与 2026-11-11 的日志（只读，没有改脚本）。后来按用户的要求提交了他对 `.cursor/hooks.json` 的一行改动：提交里的文件与他工作树里的文件逐字节相同（blob 相同）。
 - 我没有改 Python 代码，所以本 PR 没有跑 pytest。合入的 PR 各自在 Linux 上跑了整套 pytest（Python 3.11、3.12、3.13）；我另外跑了 #115 的 `scripts/tests`（Windows 与 WSL）与 #112 的 `test_setup_command.py`（Windows）。
 
-**没有验证的。** B2 的原因（用户记得出现的是询问卡片，不记得原因句；要再测）；B10 至 B15（没有回报；用户决定 0.9 之前不测）；E 组在 0.9 的候选上（用户说之前测过，没有重测）；#112 的改动在真终端里与 Zed 里；Windows 上以反斜杠开头的参数只用规则探过，没有在 Zed 里端到端试；用户的测试环境装了哪个 `agent-client-protocol`（查不到）；1.0.0 的变更说明（没有读）；`uvx` 的行为（只引 #113）；#110、#111 的数来自 PR 正文；macOS 上什么也没有由我运行。合并之后新增的：审计的 Rust 代码在 Windows 上的编译（`TUI CI` 只在 Linux 上构建）；`zypi` 里粘一张图、再删会话（#115 的 F-2）；hook 里新的模型名是否有效（`agent` 没有登录，我没有登录它）；合并之后 `main` 上 `TUI CI`（`f0d4976`）与 `TUI E2E`（`bae3a5e`）的结果（写这一段时没有结束）。
+**没有验证的。** B2 的原因（用户记得出现的是询问卡片，不记得原因句；要再测）；B10 至 B15（没有回报；用户决定 0.9 之前不测）；E 组在 0.9 的候选上（用户说之前测过，没有重测）；#112 的改动在真终端里与 Zed 里；Windows 上以反斜杠开头的参数只用规则探过，没有在 Zed 里端到端试；用户的测试环境装了哪个 `agent-client-protocol`（查不到）；1.0.0 的变更说明（没有读）；`uvx` 的行为（只引 #113）；#110、#111 的数来自 PR 正文；macOS 上什么也没有由我运行。合并之后新增的：审计的 Rust 代码在 Windows 上的编译（`TUI CI` 只在 Linux 上构建）；`zypi` 里粘一张图、再删会话（#115 的 F-2）；hook 里新的模型名是否有效（`agent` 没有登录，我没有登录它）；合并之后 `main` 上 `TUI CI`（`f0d4976`）与 `TUI E2E`（`bae3a5e`）的结果（写这一段时没有结束）。（r47 补记：审计的 Rust 代码在 Windows 上的编译与测试已查，见 [§10.50](#1050-r47-追加审计代码在-windows-上的检查与-09-的发布准备)；用户定了 B2 与 `--setup` 的改动不再验证；F-2，他说「先记录」，我读成不验证。）
+
+### 10.50 r47 追加：审计代码在 Windows 上的检查与 0.9 的发布准备
+
+这一节记 2026-11-11 15:33 之后的一轮。上一轮（[§10.49](#1049-r46-追加用户的实测b2-的调查setup-对话的一处改动acp-100-的断裂与-09-的合并)）合入了 #113、#115、#112 与 #114。15:33，用户说：「B2失败和--setup 的改动不需要验证了。#115，F2先记录。你验证下windows审计代码，然后准备发布0.9」。我读成四件事：一，B2 与 `--setup` 的改动不再验证，记为用户的决定；二，#115 的 F-2（在真的 `zypi` 里粘图、再删会话）先记下来，不验证；三，验证审计的 Rust 代码在 Windows 上的表现；四，准备 0.9 的发布：一个发布准备的 PR，加一次 `Release` 的演练。他没有要我合并、打 tag 或发布，我没有做。我没有动用户的 home 与密钥，也没有替他做任何实测。这一节记：用户的决定；Windows 上的检查（方法、运行、结果）；发布准备（PR [#116](https://github.com/zy1233/pi-python/pull/116)、测试数、CI、演练）；没有验证的。
+
+**用户的决定**（2026-11-11 15:33）。
+- B2：不再验证。原因仍然没有找到；记进 `CHANGELOG.md` 的已知问题。
+- `--setup` 的新对话（#112）：不再在真终端或 Zed 里验证；记进已知问题。
+- F-2（#115 的缓存目录：在真的 `zypi` 里粘一张图，再删会话，看目录有没有被清）：先记录，这一轮不验证；记进已知问题。我把「先记录」读成「只记录」。
+- 0.9 的日期：用户没有定。`CHANGELOG.md` 里的 2026-11-11 是我选的（今天）。发布的日子不是今天，就要改。
+
+**Windows 上的检查：为什么，怎么做。** `TUI CI` 只在 Linux 上构建，仓库没有 Windows 的 `zypi`，所以审计的 Rust 代码在 Windows 上没有人编译过。#115 里缓存目录的代码，在非 Unix 上走另一条分支（`#[cfg(not(unix))]`：`std::fs::create_dir_all`，不设 0700）；作者只在 macOS 上测过。这台电脑没有 `cargo`、`rustup`、`rustc`；WSL 里有 Rust 1.94.0，但只能编 Linux 的目标。所以我用 GitHub 的 `windows-latest`（Windows Server 2025，镜像 `windows-2025-vs2026` 20261103.298.1）；工具链是 `tui/rust-toolchain.toml` 固定的 1.94.0，`cargo-nextest` 0.9.148，`protoc` 28.x。两个一次性的分支，各带一个一次性的 workflow；它们不在 `main`，用完已删除。
+- `ci/windows-audit-check`：同一组步骤对两个提交各跑一遍：审计之前的 `26ffb9b`（before）与审计之后的 `a83bf5f`（after）。只在 after 出现的失败是审计造成的；两列都有的，审计之前就有。步骤：`cargo check` 五个审计动过的 crate（`pi-acp-lib`、`pi-pager-render`、`pi-pager`、`pi-shared`、`pi-telemetry`）的全部目标；`cargo check -p pi-pager-bin`（`zypi` 的全部非测试代码）；`cargo nextest` 跑这些 crate 的单元测试（`--lib`；`pi-pager` 共 5,212 个，只跑名字里含 `effects`、`unified_log`、`mermaid_worker` 或 `paste` 的 301 个，因为审计改的 `pi-pager` 文件是这四处；`event_loop.rs` 与 `mod.rs` 各只删了几行）。
+- `ci/windows-audit-standalone`：把缓存目录的函数与审计的 4 个测试从 `prompt_images.rs`（`a83bf5f`）逐字切出来，放进一个只有它们的小 crate（加 `tempfile`），在 Windows 上 `cargo +1.94.0 test`。它不依赖整个 workspace 能不能编。
+
+**运行与结果**（时间是 UTC；北京时间加 8 小时；产物保存 90 天，到 2027-02-09）。
+
+| 运行 | 提交 | 内容 | 结果 |
+|---|---|---|---|
+| 1，[42981181522](https://github.com/zy1233/pi-python/actions/runs/42981181522) | `47bcb19` | 原样 | 两列都在 `pi-tools-api` 的 build script 失败（发现 1） |
+| 2，[42982928619](https://github.com/zy1233/pi-python/actions/runs/42982928619) | `7d7afda` | 补丁一（一次性）：`pi-proto-build` 在 Windows 上不再让 `protoc` 写依赖清单 | 两列相同：`cargo check -p pi-pager-bin` 成功；`--all-targets` 有 5 个错误，都在测试代码里（发现 2、3） |
+| 3，[42985272884](https://github.com/zy1233/pi-python/actions/runs/42985272884) | `9a201a7` | 补丁一加补丁二：在 Windows 上关掉那两个编不过的测试，并且一个 crate 一次 nextest | after 列跑完；before 列最后一步 13 分钟没有结束，我取消了（发现 4） |
+| standalone 1，[42983261350](https://github.com/zy1233/pi-python/actions/runs/42983261350) | `87fdcc5` | 切出的代码，runner 默认的工具链 | 7 个测试通过 |
+| standalone 2，[42984014725](https://github.com/zy1233/pi-python/actions/runs/42984014725) | `43a6ef1` | 同上，固定 `cargo +1.94.0` | 7 个测试通过（`rustc 1.94.0`） |
+
+**发现。**
+1. **整个 workspace 在原生 Windows 上编不过，审计之前就是这样**（运行 1，两列相同）。`pi-tools-api` 的 build script（`build.rs` 第 49 行）调 `pi_proto_build`；它的 `emit_rerun_if_changed`（`tui/crates/build/pi-proto-build/src/lib.rs`）让 `protoc` 把依赖清单写到 `/dev/stdout`，之后还认输出里 `/dev/null:` 的前缀。Windows 没有这两个路径：`protoc` 报 `/dev/stdout: No such file or directory`，build script 的 `unwrap` 失败。该函数只用来打印 `cargo:rerun-if-changed` 的行（一个优化）。另外，`tui/bin/protoc` 是 Linux 的程序，在 Windows 上起不来（`os error 193`），代码退回 PATH 里的 `protoc`，这一步是通的。后果：`pi-acp-lib`、`pi-pager-render`、`pi-pager`、`pi-shared` 与 `pi-pager-bin` 在 Windows 上到不了编译；`pi-version`、`pi-tools`、`pi-config`、`pi-sandbox`、`pi-shell` 等靠前的 crate 编过了。这是 vendored 的上游代码。
+2. **补丁一之后，非测试的代码在 Windows 上编得过**（运行 2，两列相同）。`cargo check -p pi-pager-bin` 两列都成功（after 列这一步 1 分 48 秒）。它包含 #115 的全部非测试代码，也就是缓存目录的 `#[cfg(not(unix))]` 分支。
+3. **两处测试代码在 Windows 上编不过，审计之前就是这样**（运行 2，两列相同）。`cargo check --all-targets` 有 5 个错误。`pi-pager-render` 的 `link_opener.rs` 第 373、374 行：一个没有 cfg 的测试（`open_path_command_passes_path_as_a_single_arg`）调用 `build_open_path_command`，这个函数只在 `cfg(not(target_os = "windows"))` 下有定义。`pi-pager` 的 `diagnostics/fix_tests.rs` 第 225、228 行（3 个错误）：一个 `cfg(windows)` 的测试（`windows_is_manual_only_before_shell_selection`）调用 `request`、`report`、`terminal`，编译器找不到这三个函数；`git grep` 在 `diagnostics/` 里也找不到它们的定义。后果：这两个 crate 的 `--lib` 测试程序编不出来，nextest 一个测试也不跑。
+4. **补丁二之后，测试能跑，审计没有带来新的失败**（运行 3）。两列的 `cargo check`（五个 crate 的全部目标，和 `pi-pager-bin`）都成功。after 列（`a83bf5f`）：
+   - `pi-pager-render` 的全部 `--lib` 测试：1,075 个跑了，1,041 通过，34 失败，2 跳过。
+   - 审计的缓存目录测试（按名字选的 6 个：5 个新的，加 `persist_to_session_writes_full_bytes`）：6 个全部通过。Unix 专用的 `persist_to_session_makes_owner_only_directories` 在 Windows 上不编译（`#[cfg(unix)]`）。
+   - `pi-pager` 里名字含 `effects`、`unified_log`、`mermaid_worker` 或 `paste` 的测试：301 个跑了，298 通过，3 失败（另有 4,911 个没有选）。
+   - `pi-acp-lib`、`pi-telemetry`、`pi-shared`：370 个通过，2 个跳过。
+
+   before 列（`26ffb9b`）：`pi-pager-render` 1,071 个跑了，1,037 通过，34 失败，2 跳过；`pi-pager` 按同一个名字选出 300 个，297 通过，3 失败。**两列失败的测试逐个相同：37 个**（`render::osc8` 19、`prompt_images` 5、`render::tool_paths` 4、`glyphs` 3、`shell_completion` 2、`theme::color_support` 2、`paste` 1、`clipboard` 1）。我读了 `pi-pager-render` 的 34 个失败的信息：测试假设 Unix 的路径（`/tmp/a b.rs`、`/etc/hosts`、`/Users/me/…`、`src/main.rs`、`~/.grok/…`、`file://localhost/…`）、文件名里有 `?`（Windows 不许；`os error 123`）、反斜杠转义，或现代的终端（`is_legacy_windows_console()`、颜色等级）。`pi-pager` 的 3 个（`paste` 1 个，`shell_completion` 2 个；后两个因为测试名里有 `paste_chip` 被选中）我没有细查原因。before 列的 `pi-acp-lib`、`pi-telemetry`、`pi-shared` 一步：nextest 打印「Starting 369 tests across 3 binaries」之后，13 分钟没有结束（after 列同一步含编译共 3 分 20 秒）；我用 `gh run cancel` 取消了运行，其余的结果与产物都保存了。原因没有找到：可能是审计之前的代码里有一个测试在 Windows 上挂住，也可能是偶发；我没有再跑。after 列的这一步通过了一次。没有跑的：`pi-pager` 其余 4,911 个单元测试；各 crate 的集成测试目标（如 `python_agent_e2e`）；审计没有动的 crate 的测试。所以「在 Windows 上失败的单元测试」是「至少 37 个」，不是「37 个」。
+5. **缓存目录的代码单独在 Windows 上通过**（standalone，两次运行相同）。7 个测试通过：审计的 4 个（`session_cache_dir_is_outside_the_session_store`、`session_cache_dir_needs_an_id_that_is_one_name`、`remove_session_cache_removes_that_session_only`、`remove_session_cache_ignores_an_id_that_climbs_out`），加我写的 2 个（`create_dir_all_private_makes_nested_directories_and_can_run_twice`：嵌套目录可建、重复调用不报错；`a_file_can_be_written_and_the_session_cache_removed`：写一个文件，再删整个会话缓存）和 1 个探针（下一条）。0700 在 Windows 上不设，设计如此（`cfg(not(unix))` 分支）。
+6. **Windows 的保留名**（探针；不影响 Python agent）。`is_one_dir_name` 接受 `A-Za-z0-9-_.` 组成的名字，所以 `CON`、`NUL`、`AUX`、`COM1`、`LPT1` 也算「一个名字」。探针的结果：`CON`、`AUX`、`COM1`、`LPT1`、`con.txt`、`x.`、`x..`、`a.b` 建得出来、删得掉；`NUL`：`create_dir_all` 返回 Ok，但目录不存在，`remove_dir_all` 返回 `os error 87`。Python agent 只收 UUID 形式的会话号（`_chosen_session_id`：`must be a UUID`），所以它不会给出这样的名字；别的 ACP agent 若给出 `NUL` 这样的号，粘图会失败。没有改。
+
+**复现。** 两个一次性的 workflow 不在仓库里（分支已删）。要再做一遍：用 `windows-latest` 与 `bash`，`CARGO_TARGET_DIR` 设成 `D:\cargo-target`，先执行 `git config --system core.longpaths true`；检出要查的提交；装 `tui/rust-toolchain.toml` 的工具链、`protoc` 28.x、`cargo-nextest` 0.9.148；然后：
+1. 补丁一：在 `tui/crates/build/pi-proto-build/src/lib.rs` 里，`let includes = Vec::from_iter(includes);` 之前加一行 `if cfg!(windows) { return Ok(()); }`。
+2. 补丁二（只在要跑测试时）：在 `pi-pager-render/src/link_opener.rs` 里，给 `open_path_command_passes_path_as_a_single_arg` 的 `#[test]` 前面加 `#[cfg(not(windows))]`；在 `pi-pager/src/diagnostics/fix_tests.rs` 里，把 `windows_is_manual_only_before_shell_selection` 前面的 `#[cfg(windows)]` 改成 `#[cfg(any())]`。
+3. 在 `tui/` 里运行：`cargo check --keep-going -p pi-acp-lib -p pi-pager-render -p pi-pager -p pi-shared -p pi-telemetry --all-targets`；`cargo check -p pi-pager-bin`；每个 crate 单独运行一次 `cargo nextest run --lib --no-fail-fast -p <crate>`（几个 crate 放在一次调用里时，一个编译错误会使全部停下）。`pi-pager` 再加 `-E 'test(/effects/) | test(/unified_log/) | test(/mermaid_worker/) | test(/paste/)'`。
+
+单独切出的那一份：把 `prompt_images.rs`（`a83bf5f`）里从 `PAGER_CACHE_DIR` 到 `remove_session_cache_in` 的代码与审计的 4 个测试逐字复制进一个新 crate（依赖 `tempfile`），运行 `cargo +1.94.0 test -- --test-threads=1`。
+
+**发布准备**（PR [#116](https://github.com/zy1233/pi-python/pull/116)）。
+- 分支 `chore/prepare-0.9.0`（基于 `a83bf5f`），提交 `67a392c`，12 个文件，+70/−35；后来加了提交 `331013d`：只改 `CHANGELOG.md` 里 Windows 一条的写法（「至少 37 个」；写明跑了什么、没跑什么；`pi-pager` 的测试是按名字选的，不是「四个模块」）。做法同 v0.8.0 的 [#72](https://github.com/zy1233/pi-python/pull/72)：核心、harness、cli 从 0.8.0 到 0.9.0，互相用 `==` 固定；三个扩展包 `pi-web-access`、`pi-goal-x`、`pi-dynamic-workflows` 从 0.5.0 到 0.6.0，`pi-mcp` 从 0.3.0 到 0.4.0（它们的下限改成 `pi-agent-core-lc>=0.9.0`；PyPI 不重发已有的版本，所以要新版本）；TUI 的 `pi-pager-bin`、`pi-version` 与 `tui/Cargo.lock` 跟 cli 同版本（`scripts/tests/test_release_versions.py` 查这一条）；`packages/pi-mcp/README.md` 里的一句。
+- `CHANGELOG.md`：`[Unreleased]` 变成 `[0.9.0] - 2026-11-11`；加一段开头；`### Fixed` 原来有两组，并成一组；补上提交里漏掉的 8 条（Added 1、Changed 3、Fixed 4）；加 `### Known issues`（20 条）；末尾加 `[0.9.0]` 的链接。发布说明由 `release.yml` 用 awk 从这一节切出来：我用同一条规则数，`331013d` 上是 65,926 个字符（`67a392c` 上是 65,603；GitHub 的上限是 125,000）。
+- 已知问题里新的：B2 与 `--setup` 的对话（用户定了不再验证）；缓存目录（用户说「先记录」）；Windows 的一条（上面的发现 1 至 4）。Windows 上反斜杠开头的参数多问，是 r46 的决定。
+- 测试：版本的两个测试文件 16 个通过；Windows 整套 `6107 passed, 87 skipped, 31 deselected in 685.40s`；WSL（tmpfs 里的 `git archive` 副本，清了 `PI_HOME`、`GROK_HOME`、`REAL_LLM_API_KEY`）`5984 passed, 18 skipped, 31 deselected in 328.99s`；`ruff check .` 与 `ruff format --check .` 通过。这两个整套是在加 Windows 一条之前的提交（`1bdd010`）上跑的；之后只改了 `CHANGELOG.md` 的这一条（先加，后改写法），版本测试在最后的提交上重跑了（16 个通过）。
+- CI 与演练（PR 里的[评论](https://github.com/zy1233/pi-python/pull/116#issuecomment-6792468892)有同样的表）。第一个头 `67a392c`：`CI`（[42991323673](https://github.com/zy1233/pi-python/actions/runs/42991323673)）`Ruff` 9 秒，pytest（Python 3.11、3.12、3.13）5m35s、6m20s、4m59s；`TUI CI`（[42991323640](https://github.com/zy1233/pi-python/actions/runs/42991323640)）门禁加 `cargo check` 3m31s，`cargo nextest (Linux x86_64)` 16m21s；`Agent binaries`（[42991323635](https://github.com/zy1233/pi-python/actions/runs/42991323635)）五个构建 3m09s 至 7m38s，三个测试 1m27s 至 2m40s；全部通过。第二个头 `331013d`（只改 `CHANGELOG.md` 里 Windows 一条的写法）：`CI`（[42994359383](https://github.com/zy1233/pi-python/actions/runs/42994359383)）`Ruff` 10 秒，pytest 4m24s、4m59s、5m39s；`TUI CI`（[42994359381](https://github.com/zy1233/pi-python/actions/runs/42994359381)）门禁加 `cargo check` 3m36s，`cargo nextest` 19m06s；`Agent binaries`（[42994359445](https://github.com/zy1233/pi-python/actions/runs/42994359445)）五个构建 3m01s 至 5m54s，三个测试 2m18s 至 2m33s；全部通过。`Release` 的演练（[42991332239](https://github.com/zy1233/pi-python/actions/runs/42991332239)；`workflow_dispatch`，分支 `chore/prepare-0.9.0`，头 `67a392c`；不发布任何东西）：成功，共约 22 分钟：`Pre-release tests` 6m11s，`Build Python packages` 28 秒，Linux x86_64 的 TUI 7m41s，macOS arm64 的 TUI 16m18s；`Publish to PyPI` 与 `GitHub Release` 跳过（它们只在 tag 上跑）。我下载了演练的 `dist`，读了 wheel 的元数据：7 个包共 14 个文件（`pi-agent-core-lc`、`pi-agent-harness-lc`、`pi-agent-cli-lc` 0.9.0；`pi-web-access-py`、`pi-goal-x-py`、`pi-dynamic-workflows-py` 0.6.0；`pi-mcp-py` 0.4.0）；三个主包互相用 `==0.9.0` 固定，扩展用 `>=0.9.0`。演练没有查：上传到 PyPI 与 Release 页（只在 tag 上跑）；TUI 二进制里的版本字符串（下载超过 11 分钟没有完成，我停了它）。
+
+**这一轮改了什么。**
+- PR #116（12 个文件）：版本号、下限、`CHANGELOG.md`。
+- 本 PR：计划（头部、「当前状态」、「下一步」、「还没有验证的」、§10 索引、修订记录、链接定义）；本文新增 §10.50，目录、「10.」的标题与修订记录跟着改，§10.49 的「没有验证的」末尾加一句补记；审计报告头部与「Linux 与 Windows」一条加补记。没有改代码，没有改 `web/`，没有改 `CHANGELOG.md`（#116 带了条目）。
+
+**核对。**
+- `check_plan_docs.py`（我的临时脚本，不在仓库里）：计划里每个 `[文字][ref]` 都有定义；两个文件里每个指向本文件标题的锚点链接都有对应的标题；计划里指向本文的每个定义，锚点都在。结果：0 个错误（166 个定义，计划 33 个标题，本文 100 个标题）。
+- 渲染：用 GitHub 的 markdown 接口（`gfm`）渲染本文的 §10.49 与 §10.50（含表格与编号列表）、本文的目录、本文的最后三行、计划全文和审计报告；代码以外没有留下未配对的粗体标记。目录里 §10.50 的链接指向 `#1050-r47-…`，与标题按 GitHub 的规则算出的锚点相同；接口的输出里没有标题的 id，所以这一条是算出来的，没有在页面上点过。
+- 行尾：三个文件在工作树里都是 CRLF（提交时 git 转成 LF），没有单独的 CR，没有 BOM。
+- 内容扫描：改动的行里没有 IP 地址、非 GitHub 的网址、密钥、模型名。
+- `ruff check .` 与 `ruff format --check .`：通过（312 个文件已格式化）。
+- 事实：`git rev-list --count v0.8.0..origin/main` 是 39；`main` 是 `a83bf5f`；#116 是开着的，除它外没有开着的 PR（`gh pr list`）。运行的用时，我从 `gh pr checks` 与 `gh run view` 读；Windows 的数，我从各运行的 `summary.txt` 与 nextest 日志读，并逐个核对了失败的测试名（两列各 37 个，名字相同）。
+- 清理：两个一次性的分支已用 API 删除，本地的工作树与分支也已删除；我自己的临时文件（产物、tar 包、日志）已删除。
+- 我没有改 Python 代码，所以本 PR 没有在本机跑 pytest；本 PR 的 CI 在 Linux 上跑。
+
+**没有验证的。**
+- `zypi` 在 Windows 上的运行（没有二进制）；原生 Windows 上整个 workspace 的构建（补丁一与补丁二是一次性的，没有进仓库）；那 37 个失败的测试没有修；`pi-pager` 其余 4,911 个单元测试与各集成测试目标在 Windows 上的结果（没有跑）。
+- before 列 `pi-acp-lib`、`pi-telemetry`、`pi-shared` 一步为什么挂住。
+- macOS 上除作者那一次外的编译。
+- F-2（`zypi` 里粘图、删会话）：先记录，没有验证（用户）。B2、`--setup` 的改动：不再验证（用户）。
+- 0.9 的日期（用户没有定）；tag、PyPI、Release 页、`Agent binaries` 挂档案、ACP registry 的新条目：都在 tag 之后，还没有发生。
 
 ## 附录 A（摘录）：A.4
 
@@ -4176,3 +4250,4 @@ r42 把计划里已发布的发布里程碑（V0.5 至 V0.7）、头部的状态
 - r44：修 `pi.exec`，建扩展的登记处（2026-11-05；`2235210`，#106 合入后是 `2426452`；分支 `fix/windows-exec-kill-tree` 与 `docs/acp-extension-registry`；PR [#107](https://github.com/zy1233/pi-python/pull/107)、[#108](https://github.com/zy1233/pi-python/pull/108)）。用户答复跟进的问题，两项都选。#107：Windows 上 `LocalExecutionEnv.exec` 超时或被中止时，终止整个进程树（`ProcessTreeKiller`），加两个测试；Windows 与 WSL 的整套 pytest 通过（6086 与 5959 个通过）。#108：把在用的 `pi/` 扩展的登记迁到新的 `docs/specs/2026-11-05-acp-extension-registry.md`（八项）；核对五条准入规则：四项不满足第 ① 条，没有一项在 `initialize` 里协商，六项的类型不在 `pi-acp-lib`；用户答复了登记里的问题（Q1）：第 ④、⑤ 条只对新项适用，八项保持原样（2026-11-05）。`docs/DESIGN.md` 的 §8.5、两个 `AGENTS.md` 与 Auto 设计的头部同步。#107 改代码；#108 只改文档。见 [§10.47](#1047-r44-追加修-windows-上的-piexec把扩展的登记迁到-docsspecs)。
 - r45：审计计划与代码的偏差（2026-11-08；`26ffb9b`；分支 `fix/audit-rust-runtime-findings`；当时没有推送，没有 PR；2026-11-11 开 PR [#115](https://github.com/zy1233/pi-python/pull/115)，合入为 `f0d4976`）。用户要我审计代码与设计有没有偏差；我报告了五处（F-1 至 F-5），用户五项都选：写报告、给 F-4 加门禁、改文档、修 F-2、修 F-1。F-1：pager 把自己的日志当作 `x.ai/log` 通知发给 agent；`acp_send` 里挡它的守卫读的是序列化之后的请求，扩展的方法名不在里面，所以从不触发；删了转发，守卫改读类型里的名字，被清单 `--skip` 的测试恢复了。F-2：图片与图表的缓存写在 agent 的会话目录里，删会话时留在磁盘上；移到 `<home>/pager-cache/<会话号>/`，agent 确认删会话之后清掉，读盘门禁多看两个 crate。F-4：Rust 的权限管理器没有调用者，加了门禁 `no_callers`。F-3 与 F-5：P6、ADR4、ADR5、附录 A 与几处状态的文字对齐代码。数：清单合计 8,232 → 8,240，跳过 25 → 24，`x.ai` 的上限 245 → 240。审计报告：[`AUDIT-RUST-RUNTIME-REMOVAL-2026-11-08.md`](../../AUDIT/AUDIT-RUST-RUNTIME-REMOVAL-2026-11-08.md)。见 [§10.48](#1048-r45-追加审计计划与代码的偏差修-xailog图片缓存的位置加权限管理器的门禁)。
 - r46：用户的实测、0.9 的范围与合并（2026-11-11；`26ffb9b`，合入之后是 `bae3a5e`；分支 `docs/plan-r45-hands-on-results`；本 PR [#114](https://github.com/zy1233/pi-python/pull/114)；补记 PR [#112](https://github.com/zy1233/pi-python/pull/112)、[#113](https://github.com/zy1233/pi-python/pull/113)、[#115](https://github.com/zy1233/pi-python/pull/115)）。用户在 Windows 上做了 0.9 的实测：回报 23 项，22 通过，B2（Auto 下 `git status` 与 `ls` 本应直接运行）失败，原因没有找到（规则探针、会话检查、信任匹配都查了；缺卡片上的原因句）；D1 附了一条建议，改成 PR #112（键变量已有值时 `--setup` 不再问 key）；B10 至 B15 没有回报，E 组没有重测。两个云端演练（`b0a55cb`）成功。发现 Windows 上以反斜杠开头的参数被规则当成盘根路径而多问（没有改）。发现 `agent-client-protocol` 1.0.0（2026-11-09）使新装的 v0.8.0 与 CI 起不来；修复是另一个运行的 PR #113（加上界 `<1.0.0`）。记 #110、#111（2026-11-08 合入，不是这一轮做的）。用户随后答复了六个问题：B2 出现的是询问卡片（原因句不记得）；B10 至 B15 在 0.9 之前不测；反斜杠多问留到 0.9 之后；#112 的读法对；不发 0.8.1，#113 并入 0.9；他还说明了「怪事」是他的 `git push` hook 触发的 CI 失败流程（我从文件里只能证实一部分）。13:50 他定了 0.9 的范围（主要含 Auto 模式与审计项修复，别的小问题可以并入），并要我合并 PR：我合入了 #113（`afb80a5`）、#115（`f0d4976`；r45 的审计分支原来没有 PR，我开了它）与 #112（bae3a5e），各自等 CI 通过后合入；13:55 他改了 hook 里 autofix 用的模型，要我一起提交（`e30282f`）。改文档与 hook 的一行设置。见 [§10.49](#1049-r46-追加用户的实测b2-的调查setup-对话的一处改动acp-100-的断裂与-09-的合并)。
+- r47：审计代码在 Windows 上的检查与 0.9 的发布准备（2026-11-11；`a83bf5f`；分支 `docs/plan-r47-windows-check-0.9-prep`；本 PR [#117](https://github.com/zy1233/pi-python/pull/117)；发布准备的 PR [#116](https://github.com/zy1233/pi-python/pull/116)）。用户定了 B2 与 `--setup` 的改动不再验证，#115 的 F-2 先记录，并要我验证审计的 Rust 代码在 Windows 上的表现、准备 0.9 的发布。Windows：GitHub 的 `windows-latest` 上两个一次性的 CI 分支（五次运行）。整个 workspace 在原生 Windows 上编不过（`pi-tools-api` 的 build script 要 `/dev/stdout`；审计之前就是这样）；补一处之后，非测试代码编得过；两处测试代码编不过，关掉之后，`pi-pager-render` 的 1,075 个与 `pi-pager` 按名字选的 301 个测试里，37 个失败，审计前后逐个相同；缓存目录的 6 个测试通过，单独切出的代码的 4 个测试也通过；保留名 `NUL` 不影响 Python agent；`before` 列的一步 13 分钟没有结束，取消了，原因没有找到。发布准备：PR #116（版本号、下限、`CHANGELOG.md` 的 `[0.9.0]` 与 20 条已知问题；Windows 整套 pytest 6107 个通过，WSL 5984 个通过）；没有打 tag，没有发布。只改文档。见 [§10.50](#1050-r47-追加审计代码在-windows-上的检查与-09-的发布准备)。

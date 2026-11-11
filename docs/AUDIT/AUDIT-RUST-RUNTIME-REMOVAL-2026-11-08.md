@@ -10,7 +10,7 @@
 >
 > **修复**：本地分支 `fix/audit-rust-runtime-findings`，基于 `origin/main` 的 `26ffb9b`，每个主题一个提交（`git log 26ffb9b..fix/audit-rust-runtime-findings`）。没有推送，没有 PR。用户没有要求推送。（2026-11-11 补记：分支后来推到了远端；用户要求合并，我在 2026-11-11 开了 PR [#115](https://github.com/zy1233/pi-python/pull/115) 并合入。经过见执行记录的 [§10.48](../PLAN/archive/PLAN-RUST-AGENT-RUNTIME-REMOVAL-EXECUTION-LOG.md#1048-r45-追加审计计划与代码的偏差修-xailog图片缓存的位置加权限管理器的门禁)「r46 补记」。）
 >
-> **测试状态**：见第五节。只在 macOS 上跑；Linux 与 Windows 没有跑。（2026-11-11 补记：PR #115 的 CI 在 Linux 上跑了，全部通过：Ruff、pytest、`TUI CI` 的门禁与 `cargo check`、`cargo nextest`。`TUI CI` 只在 Linux 上构建：Rust 代码在 Windows 上的编译没有人跑过；macOS 上只有作者的那一次。）
+> **测试状态**：见第五节。只在 macOS 上跑；Linux 与 Windows 没有跑。（2026-11-11 补记：PR #115 的 CI 在 Linux 上跑了，全部通过：Ruff、pytest、`TUI CI` 的门禁与 `cargo check`、`cargo nextest`。`TUI CI` 只在 Linux 上构建：Rust 代码在 Windows 上的编译没有人跑过；macOS 上只有作者的那一次。）（2026-11-11 再补记：Windows 上查了，在 GitHub 的 `windows-latest` 上跑一次性的 CI：整个 workspace 在原生 Windows 上编不过，审计之前就是这样（`pi-tools-api` 的 build script 要 `/dev/stdout`）；补一处之后，非测试代码编得过，含缓存目录的非 Unix 分支；缓存目录的 6 个测试通过；跑过的单元测试里，37 个别的在 Windows 上失败（只跑了一部分），审计之前的 `26ffb9b` 上是同样的 37 个。过程与数在执行记录的 [§10.50](../PLAN/archive/PLAN-RUST-AGENT-RUNTIME-REMOVAL-EXECUTION-LOG.md#1050-r47-追加审计代码在-windows-上的检查与-09-的发布准备)。）
 >
 > **状态图例**：`[x]` 已修复并验证 · `[x/~]` 已修复，有已记录的残留（第四节）
 
@@ -145,7 +145,7 @@
 7. **守卫只认 `x.ai/` 前缀。** 别的未登记的扩展名没有同样的守卫。登记里的八项由 [ACP 扩展登记](../specs/2026-11-05-acp-extension-registry.md) 管。
 
 **没有验证的。**
-- **Linux 与 Windows。** 所有的测试只在 macOS 上跑过。清单里 `pi-pager-render` 的 1,097 与 `pi-pager` 的 5,519 是 Linux 的旧数加上净增的个数，不是在 Linux 上量的，等 CI 对账。
+- **Linux 与 Windows。** 所有的测试只在 macOS 上跑过。清单里 `pi-pager-render` 的 1,097 与 `pi-pager` 的 5,519 是 Linux 的旧数加上净增的个数，不是在 Linux 上量的，等 CI 对账。（2026-11-11 补记：Windows 上的检查见头部的补记；那里的测试数是 Windows 上的数，不是这里的 Linux 数。）
 - **nextest。** 本机没有 `cargo-nextest`，用的是 `cargo test`；同一个测试二进制里的测试是线程，环境变量与 `static` 的竞争可能只在某些运行里出现。新加的 `pi-pager` 用例设 `PI_HOME`，所以用 `in_own_process` 在自己的进程里跑。
 - **F-4 的门禁认的是名字。** 它挡 `spawn_permission_manager` 这个子串，也就是两个公开的入口。我没有查管理器里的类型能不能被 `permission/` 之外的代码直接构造并启动，绕过这两个函数。
 - **真的终端。** 在 `zypi` 里粘一张图、再删会话，看缓存目录有没有被清：没有做。缓存的路径与清理只有单元测试与对着假 agent 的测试看过。
