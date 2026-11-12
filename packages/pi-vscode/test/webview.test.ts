@@ -219,6 +219,56 @@ describe.skipIf(!chrome || !built)("webview in headless Chrome", () => {
     });
   });
 
+  it("draws the first piece of a streamed answer at once, joins the next pieces into one later draw, and draws the last one", () => {
+    const out = run(`${state}
+      state({});
+      const text = () => document.querySelector(".msg.agent .body").textContent;
+      const bold = () => document.querySelectorAll(".msg.agent .body strong").length;
+      host({ type: "agentText", messageId: "a", text: "**one" });
+      const first = { text: text(), bold: bold() };
+      host({ type: "agentText", messageId: "a", text: "** two" });
+      host({ type: "agentText", messageId: "a", text: " three" });
+      const during = { text: text(), bold: bold() };
+      setTimeout(() => {
+        document.getElementById("result").textContent = JSON.stringify({ ok: true, first, during, after: { text: text(), bold: bold() } });
+      }, 500);`);
+    expect(out).toMatchObject({
+      ok: true,
+      first: { text: "**one", bold: 0 }, // drawn at once; the bold is not closed yet
+      during: { text: "**one", bold: 0 }, // the next two pieces wait
+      after: { text: "one two three", bold: 1 }, // one draw with both pieces
+    });
+  });
+
+  it("does not draw an old answer after the chat was reset, and draws the new one at once", () => {
+    const out = run(`${state}
+      state({});
+      host({ type: "agentText", messageId: "old", text: "first" });
+      host({ type: "agentText", messageId: "old", text: " second" });
+      const oldBody = document.querySelector(".msg.agent .body");
+      host({ type: "reset", transcript: [{ type: "agent", id: "new", text: "fresh", thought: "" }] });
+      const now = [...document.querySelectorAll(".msg.agent .body")].map((b) => b.textContent);
+      setTimeout(() => {
+        document.getElementById("result").textContent = JSON.stringify({ ok: true, now, oldBody: oldBody.textContent });
+      }, 500);`);
+    // The planned draw of the old answer was cancelled: its (removed) element never gets " second".
+    expect(out).toMatchObject({ ok: true, now: ["fresh"], oldBody: "first" });
+  });
+
+  it("does not draw the text again when only the thinking grows", () => {
+    const out = run(`${state}
+      state({});
+      host({ type: "agentText", messageId: "a", text: "answer" });
+      const body = document.querySelector(".msg.agent .body");
+      const node = body.firstChild;
+      host({ type: "agentThought", messageId: "a", text: "hm" });
+      host({ type: "agentThought", messageId: "a", text: "mm" });
+      setTimeout(() => {
+        document.getElementById("result").textContent = JSON.stringify({ ok: true, same: body.firstChild === node, thought: document.querySelector(".thought-body").textContent });
+      }, 500);`);
+    expect(out).toMatchObject({ ok: true, same: true, thought: "hmmm" });
+  });
+
   it("sends openLink for a clicked link and nothing for a plain click", () => {
     const out = run(`${state}
       state({});

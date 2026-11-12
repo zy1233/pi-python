@@ -8,6 +8,7 @@
 
 ### Changed
 
+- The chat draws a streamed answer at most once each 80 ms (the first piece at once, the last piece always). A long answer then needs less work while it streams in.
 - `THIRD-PARTY-NOTICES` lists the packages of the Markdown parser. It also lists a bundled package that sits inside another one (`entities`, inside `markdown-it`).
 
 ## 1.0.0

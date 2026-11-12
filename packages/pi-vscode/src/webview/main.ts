@@ -8,6 +8,7 @@ import type {
   TranscriptItem,
   WebviewMessage,
 } from "../core/protocol.js";
+import { throttle, type Scheduler, type Throttled } from "../core/throttle.js";
 import { el, renderBlocks } from "./dom.js";
 
 declare function acquireVsCodeApi(): { postMessage(message: WebviewMessage): void };
@@ -40,8 +41,31 @@ const stopButton = el("button", { class: "secondary", text: "Stop", type: "butto
 const composer = el("footer", { class: "composer" }, input, el("div", { class: "actions" }, stopButton, sendButton));
 root.append(header, banner, transcript, composer);
 
+/**
+ * The text of an answer is drawn at most once in this time. A draw reads the whole text again and makes
+ * the whole message again, so it costs more as the answer gets longer, and the model sends a new piece
+ * many times in a second. The first piece is drawn at once; the pieces after it join into one draw.
+ */
+const DRAW_INTERVAL_MS = 80;
+const scheduler: Scheduler = {
+  now: () => performance.now(),
+  setTimeout: (callback, ms) => window.setTimeout(callback, ms),
+  clearTimeout: (handle) => window.clearTimeout(handle as number),
+};
+
+type MessageEntry = {
+  root: HTMLElement;
+  text: HTMLElement;
+  thought: HTMLElement;
+  raw: { text: string; thought: string };
+  /** The text that `text` shows now. */
+  drawn: string;
+  /** Draws `raw.text` into `text`. */
+  draw: Throttled;
+};
+
 let state: StateMessage = { type: "state", status: "stopped", canRestart: true };
-const messageEls = new Map<string, { root: HTMLElement; text: HTMLElement; thought: HTMLElement; raw: { text: string; thought: string } }>();
+const messageEls = new Map<string, MessageEntry>();
 const toolEls = new Map<string, HTMLElement>();
 const permissionEls = new Map<string, HTMLElement>();
 const permissionViews = new Map<string, PermissionRequestView>();
@@ -203,7 +227,15 @@ function addUser(id: string, text: string): void {
   messageEls.delete(id);
 }
 
-function agentMessage(id: string) {
+function drawText(entry: MessageEntry): void {
+  if (entry.drawn === entry.raw.text) return;
+  entry.drawn = entry.raw.text;
+  fill(entry.text, entry.raw.text);
+  // A draw that waited changed the height after the message that asked for it was handled.
+  scrollToEnd();
+}
+
+function agentMessage(id: string): MessageEntry {
   let entry = messageEls.get(id);
   if (!entry) {
     const thought = el("details", { class: "thought" }, el("summary", { text: "Thinking" }));
@@ -213,7 +245,15 @@ function agentMessage(id: string) {
     const text = el("div", { class: "body" });
     const rootEl = el("article", { class: "msg agent" }, el("div", { class: "who", text: "zycode" }), thought, text);
     transcript.append(rootEl);
-    entry = { root: rootEl, text, thought: thoughtBody, raw: { text: "", thought: "" } };
+    const created: MessageEntry = {
+      root: rootEl,
+      text,
+      thought: thoughtBody,
+      raw: { text: "", thought: "" },
+      drawn: "",
+      draw: throttle(() => drawText(created), DRAW_INTERVAL_MS, scheduler),
+    };
+    entry = created;
     messageEls.set(id, entry);
   }
   return entry;
@@ -223,7 +263,7 @@ function setAgentText(id: string, text: string, thought: string): void {
   const entry = agentMessage(id);
   entry.raw.text = text;
   entry.raw.thought = thought;
-  fill(entry.text, text);
+  entry.draw.request();
   const details = entry.thought.parentElement as HTMLElement;
   details.hidden = thought === "" || state.showThinking === false;
   entry.thought.textContent = thought;
@@ -333,6 +373,7 @@ function renderItem(item: TranscriptItem): void {
 
 function resetTranscript(items: TranscriptItem[]): void {
   transcript.replaceChildren();
+  for (const entry of messageEls.values()) entry.draw.cancel();
   messageEls.clear();
   toolEls.clear();
   permissionEls.clear();
