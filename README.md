@@ -41,6 +41,7 @@ This repository is a monorepo containing:
 | `pi-dynamic-workflows-py` | **Beta** | [PyPI](https://pypi.org/project/pi-dynamic-workflows-py/) |
 | `pi-mcp-py` | **Alpha** | [PyPI](https://pypi.org/project/pi-mcp-py/) (from 0.6.0) |
 | `zypi` (Rust TUI) | **Beta** | [GitHub Releases](https://github.com/zy1233/pi-python/releases) (Linux x86_64) |
+| `zycode.zycode` (VS Code extension) | **Beta** | [VS Code Marketplace](https://marketplace.visualstudio.com/items?itemName=zycode.zycode) and [Open VSX](https://open-vsx.org/extension/zycode/zycode) (version 1.0.0, five platforms; Windows and macOS not verified) |
 
 ## Features
 

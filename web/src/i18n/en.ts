@@ -228,7 +228,7 @@ zypi`,
         label: 'VS Code',
         heading: 'VS Code extension',
         codeLabel: 'bash',
-        code: `# Or open the Extensions view and search for zycode
+        code: `# Or search for zycode in Extensions
 code --install-extension ${links.vscodeExtensionId}`,
         notes: [
           `The extension \`${links.vscodeExtensionId}\` puts the zycode agent in a chat view in VS Code. It has the agent program inside, so you do not install the Python agent first. Install it from the [Visual Studio Marketplace](${links.vscodeMarketplace}). For VSCodium and other editors that use Open VSX, install it from [Open VSX](${links.openVsx}).`,
@@ -283,12 +283,13 @@ PI_USE_MOCK=1 python -m pi_agent_cli -p "hello" --cwd .`,
     lead: 'zycode is in beta. This table shows what is stable and what is not.',
     columns: { component: 'Component', level: 'Status', role: 'What it does', source: 'Get it from' },
     levels: { stable: 'Stable', beta: 'Beta', alpha: 'Alpha' },
-    where: { pypi: 'PyPI', releases: 'GitHub Releases' },
+    where: { pypi: 'PyPI', releases: 'GitHub Releases', marketplace: 'VS Code Marketplace', openVsx: 'Open VSX' },
     descriptions: {
       core: 'Agent loop, events, tools, LangChain adapter',
       harness: 'Sessions, compaction, skills, execution environment',
       cli: 'ACP agent and headless mode',
       zypi: 'Terminal UI (prebuilt for Linux x86_64)',
+      vscode: 'VS Code extension. Version 1.0.0 is published on both registries for five platforms. The bundled agent is Beta. Windows and macOS are not verified.',
       webAccess: 'Web search and fetch',
       goalX: 'Goal planning',
       workflows: 'Workflows',

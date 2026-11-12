@@ -228,7 +228,7 @@ zypi`,
         label: 'VS Code',
         heading: 'VS Code 扩展',
         codeLabel: 'bash',
-        code: `# 或者打开“扩展”视图，搜索 zycode
+        code: `# 或在“扩展”视图搜索 zycode
 code --install-extension ${links.vscodeExtensionId}`,
         notes: [
           `扩展 \`${links.vscodeExtensionId}\` 把 zycode 智能体放进 VS Code 的聊天视图。它自带智能体程序，所以不必先安装 Python 智能体。请从 [Visual Studio Marketplace](${links.vscodeMarketplace}) 安装。VSCodium 和其他使用 Open VSX 的编辑器，请从 [Open VSX](${links.openVsx}) 安装。`,
@@ -283,12 +283,13 @@ PI_USE_MOCK=1 python -m pi_agent_cli -p "hello" --cwd .`,
     lead: 'zycode 处于测试阶段。下表说明哪些部分稳定，哪些还不稳定。',
     columns: { component: '组件', level: '状态', role: '作用', source: '获取方式' },
     levels: { stable: '稳定', beta: '测试', alpha: '早期' },
-    where: { pypi: 'PyPI', releases: 'GitHub Releases' },
+    where: { pypi: 'PyPI', releases: 'GitHub Releases', marketplace: 'VS Code Marketplace', openVsx: 'Open VSX' },
     descriptions: {
       core: '智能体循环、事件、工具、LangChain 适配器',
       harness: '会话、压缩、技能、执行环境',
       cli: 'ACP 智能体与无界面模式',
       zypi: '终端界面（预编译版：Linux x86_64）',
+      vscode: 'VS Code 扩展。1.0.0 版已在两个注册表上发布，覆盖五个平台。内置的智能体为测试级。Windows 和 macOS 尚未验证。',
       webAccess: '联网搜索与抓取',
       goalX: '目标规划',
       workflows: '工作流',

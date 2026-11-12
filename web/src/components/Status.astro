@@ -39,9 +39,14 @@ const t = messages[locale].status;
                 {t.descriptions[pkg.id]}
               </span>
               <span role="cell" data-label={t.columns.source}>
-                <a href={pkg.href} rel="noopener">
-                  {t.where[pkg.source]}
-                </a>
+                {pkg.sources.map((source, index) => (
+                  <>
+                    {index > 0 && ' · '}
+                    <a href={source.href} rel="noopener">
+                      {t.where[source.where]}
+                    </a>
+                  </>
+                ))}
               </span>
             </div>
           ))

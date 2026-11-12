@@ -1,4 +1,4 @@
-import type { Level, PackageId } from '~/i18n/types';
+import type { Level, PackageId, WhereId } from '~/i18n/types';
 
 /** The GitHub repository. Every link to the source starts here. */
 export const repo = 'https://github.com/zy1233/pi-python';
@@ -31,8 +31,8 @@ export interface PackageInfo {
   /** The name on PyPI, or the name of the binary. */
   name: string;
   level: Level;
-  source: 'pypi' | 'releases';
-  href: string;
+  /** Where to get it. Most rows have one place; the extension has two registries. */
+  sources: { where: WhereId; href: string }[];
 }
 
 /**
@@ -40,14 +40,23 @@ export interface PackageInfo {
  * README.md. The text for each row is in the message files, under status.descriptions.
  */
 export const packages: PackageInfo[] = [
-  { id: 'core', name: 'pi-agent-core-lc', level: 'stable', source: 'pypi', href: 'https://pypi.org/project/pi-agent-core-lc/' },
-  { id: 'harness', name: 'pi-agent-harness-lc', level: 'stable', source: 'pypi', href: 'https://pypi.org/project/pi-agent-harness-lc/' },
-  { id: 'cli', name: 'pi-agent-cli-lc', level: 'beta', source: 'pypi', href: 'https://pypi.org/project/pi-agent-cli-lc/' },
-  { id: 'zypi', name: 'zypi', level: 'beta', source: 'releases', href: links.releases },
-  { id: 'webAccess', name: 'pi-web-access-py', level: 'beta', source: 'pypi', href: 'https://pypi.org/project/pi-web-access-py/' },
-  { id: 'goalX', name: 'pi-goal-x-py', level: 'beta', source: 'pypi', href: 'https://pypi.org/project/pi-goal-x-py/' },
-  { id: 'workflows', name: 'pi-dynamic-workflows-py', level: 'beta', source: 'pypi', href: 'https://pypi.org/project/pi-dynamic-workflows-py/' },
-  { id: 'mcp', name: 'pi-mcp-py', level: 'alpha', source: 'pypi', href: 'https://pypi.org/project/pi-mcp-py/' },
+  { id: 'core', name: 'pi-agent-core-lc', level: 'stable', sources: [{ where: 'pypi', href: 'https://pypi.org/project/pi-agent-core-lc/' }] },
+  { id: 'harness', name: 'pi-agent-harness-lc', level: 'stable', sources: [{ where: 'pypi', href: 'https://pypi.org/project/pi-agent-harness-lc/' }] },
+  { id: 'cli', name: 'pi-agent-cli-lc', level: 'beta', sources: [{ where: 'pypi', href: 'https://pypi.org/project/pi-agent-cli-lc/' }] },
+  { id: 'zypi', name: 'zypi', level: 'beta', sources: [{ where: 'releases', href: links.releases }] },
+  {
+    id: 'vscode',
+    name: 'zycode.zycode',
+    level: 'beta',
+    sources: [
+      { where: 'marketplace', href: links.vscodeMarketplace },
+      { where: 'openVsx', href: links.openVsx },
+    ],
+  },
+  { id: 'webAccess', name: 'pi-web-access-py', level: 'beta', sources: [{ where: 'pypi', href: 'https://pypi.org/project/pi-web-access-py/' }] },
+  { id: 'goalX', name: 'pi-goal-x-py', level: 'beta', sources: [{ where: 'pypi', href: 'https://pypi.org/project/pi-goal-x-py/' }] },
+  { id: 'workflows', name: 'pi-dynamic-workflows-py', level: 'beta', sources: [{ where: 'pypi', href: 'https://pypi.org/project/pi-dynamic-workflows-py/' }] },
+  { id: 'mcp', name: 'pi-mcp-py', level: 'alpha', sources: [{ where: 'pypi', href: 'https://pypi.org/project/pi-mcp-py/' }] },
 ];
 
 /** Code that is the same in every language. */
