@@ -146,7 +146,7 @@ agent_start → turn_start → message_start(user) → message_end(user)
 
 ### 5.2 Thinking / Reasoning
 
-`ThinkingLevel`（off/minimal/low/medium/high/xhigh）映射为 provider 参数：Anthropic `thinking.budget_tokens` + 联动 `max_tokens`；OpenAI `reasoning_effort`；DeepSeek 官方 API 经 `extra_body` 发 `thinking: enabled|disabled` 与 `reasoning_effort`（它默认开启思考，所以闸门关闭时显式发 `disabled`；网关不发。见 Phase 6 规格 §5.4）。Anthropic thinking 块流式捕获为 `ThinkingContent`（含 `signature` 用于多轮工具回放），以 `thinking_delta` 事件实时发射。DeepSeek `reasoning_content` 同样捕获；DeepSeek 官方 API 开启思考时，之前 assistant 消息的这部分在后续请求里按 `reasoning_content` 回传（不回传会 400；`adapters/deepseek_replay.py`，Phase 6 规格 §5.5），网关不回传。
+`ThinkingLevel`（off/minimal/low/medium/high/xhigh）映射为 provider 参数：Anthropic `thinking.budget_tokens` + 联动 `max_tokens`；OpenAI `reasoning_effort`；DeepSeek 官方 API 经 `extra_body` 发 `thinking: enabled|disabled` 与 `reasoning_effort`（它默认开启思考，所以闸门关闭时显式发 `disabled`；网关不发。见 Phase 6 规格 §5.4）。Anthropic thinking 块流式捕获为 `ThinkingContent`（含 `signature` 用于多轮工具回放），以 `thinking_delta` 事件实时发射。DeepSeek 风格网关流式返回的 `reasoning_content`（或 `reasoning`）同样捕获：`provider="deepseek"` 由 `ChatDeepSeek` 保留，`provider="openai"` 由 `adapters/openai_reasoning.py` 的 `ChatOpenAI` 子类保留（普通 `ChatOpenAI` 会丢掉它；冻结版只有 openai provider，靠这个才能显示思考；该子类只保留流，不回传）。DeepSeek 官方 API 开启思考时，之前 assistant 消息的这部分在后续请求里按 `reasoning_content` 回传（不回传会 400；`adapters/deepseek_replay.py`，Phase 6 规格 §5.5），网关不回传。
 
 ### 5.3 跨 Provider 消息回放 (`transform.py`)
 

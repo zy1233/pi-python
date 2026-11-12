@@ -40,7 +40,8 @@ API_KEY = (
 )
 MODEL_ID = os.environ.get("SMOKE_MODEL", "Qwen/Qwen3-8B")
 # "deepseek" preserves reasoning_content thinking on OpenAI-compatible
-# gateways; set SMOKE_PROVIDER=openai to exercise the plain ChatOpenAI path.
+# gateways (and sends it back on DeepSeek's own API); set SMOKE_PROVIDER=openai to exercise
+# the "openai" provider (a ChatOpenAI that keeps reasoning_content too, sends nothing back).
 PROVIDER = os.environ.get("SMOKE_PROVIDER", "deepseek")
 
 
