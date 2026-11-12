@@ -256,7 +256,7 @@ Other facts:
 
 - The key is typed in the terminal. It never goes through the webview, the host's own variables or the log. The extension does not use `SecretStorage` in Phase 1: the agent and `zypi` read `~/.pi-python`, and a second place for the key would make the two disagree (report section 5).
 - The command is also available when a session exists, to change the model or key later. It then ends with a restart of the agent and a new chat. While a setup terminal is open, a second click does nothing.
-- `shellPath` with a binary and `shellArgs` makes VS Code run the binary directly in the pty. On Windows the agent binary is a console program, and this works the same. (Not verified on Windows or macOS: section 13.)
+- `shellPath` with a binary and `shellArgs` makes VS Code run the binary directly in the pty. On Windows the agent binary is a console program, and this works the same. (Not verified on Windows or macOS: section 13. The owner's Windows test covers the install and the update only.)
 
 ## 7a. The first-run guide (1.0.0)
 
@@ -489,7 +489,7 @@ From the report, section 3.3 (Phase 2 and later), and from the limits above:
 
 **Commands** (run from `packages/pi-vscode`, and pasted into each pull request): `npm ci`, `npm run typecheck`, `npm run lint`, `npm test`, and for the real agent `npm run test:agent`. The workflow in section 11 runs the same checks on a pull request that changes the extension.
 
-**Result (2026-11-12): the Open VSX and Marketplace publish path is now measured (1.0.0, five targets, OIDC, no token); an install of 1.0.0 in a real VS Code is not.** **Not verified on any machine of ours:** Windows and macOS (the extension host, the terminal for `--setup`, the exec bit after a VS Code install, the first start of an unsigned binary under Gatekeeper and SmartScreen, a Windows antivirus on a PyInstaller file), Remote-SSH, WSL and dev containers, the Marketplace scan of the VSIX, Open VSX. The README lists the limits that remain.
+**Result (2026-11-12): the Open VSX and Marketplace publish path is now measured (1.0.0, five targets, OIDC, no token); the project owner tested, on Windows, the install of 1.0.0 and the update from 0.1.0 to 1.0.0 (his word, 2026-11-12, 18:17 Asia/Shanghai; nothing else is claimed from that test).** **Not verified on any machine of ours:** the rest of the Windows flow (the extension host, the terminal for `--setup`, a chat with a model, the first start of an unsigned binary under SmartScreen on other machines, a Windows antivirus on a PyInstaller file) and all macOS flows (the extension host, the terminal for `--setup`, the exec bit after a VS Code install, the first start of an unsigned binary under Gatekeeper), Linux in a real VS Code, Remote-SSH, WSL and dev containers, the Marketplace scan of the VSIX, Open VSX. The README lists the limits that remain.
 
 ## 14. Decisions
 
