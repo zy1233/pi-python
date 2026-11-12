@@ -1,0 +1,203 @@
+# The zycode VS Code extension (packages/pi-vscode).
+#
+# On a pull request that touches the extension: tests, and a linux-x64 VSIX with its smoke test.
+# By hand (Actions > "VS Code extension" > Run workflow): the same for the chosen targets, and,
+# with `publish` ticked, a publish to Open VSX and then the Visual Studio Marketplace.
+#
+# Publishing uses Trusted Publishing (OIDC) on both registries. No token is stored anywhere.
+# - The job `publish` runs in the GitHub environment `vscode-publish`: its reviewer must approve,
+#   and the environment allows deployments from `main` only.
+# - Both registries name THIS FILE by its file name (`vscode-extension.yml`) in their trusted
+#   publisher entries. Do not rename it without changing both entries.
+# - The first upload to each registry is a hand upload (packages/pi-vscode/RELEASING.md).
+
+name: VS Code extension
+
+on:
+  pull_request:
+    paths:
+      - ".github/workflows/vscode-extension.yml"
+      - "packages/pi-vscode/**"
+  workflow_dispatch:
+    inputs:
+      publish:
+        description: "Publish after the build (main only; the reviewer of the environment vscode-publish must approve)"
+        type: boolean
+        default: false
+      registries:
+        description: "Where to publish, in this order"
+        type: choice
+        options: [both, open-vsx, marketplace]
+        default: both
+      targets:
+        description: "Targets to build and publish, separated by spaces"
+        type: string
+        default: "linux-x64 linux-arm64 darwin-arm64 darwin-x64 win32-x64"
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+permissions:
+  contents: read
+
+jobs:
+  guard:
+    name: Publish only from main
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Refuse a publish that is not from main
+        if: github.event_name == 'workflow_dispatch' && inputs.publish && github.ref != 'refs/heads/main'
+        run: |
+          echo "A publish runs from main only. This run is on ${GITHUB_REF}." >&2
+          echo "The environment vscode-publish refuses every other ref, so start the run on main." >&2
+          exit 1
+
+  test:
+    name: Type check, lint, unit tests
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 22
+      - run: npm ci
+        working-directory: packages/pi-vscode
+      - run: npm run check
+        working-directory: packages/pi-vscode
+
+  plan:
+    name: Targets
+    runs-on: ubuntu-24.04
+    outputs:
+      targets: ${{ steps.targets.outputs.json }}
+    steps:
+      - id: targets
+        env:
+          TARGETS: ${{ github.event_name == 'workflow_dispatch' && inputs.targets || 'linux-x64' }}
+        run: |
+          set -eu
+          [ -n "$TARGETS" ] || { echo "no target" >&2; exit 1; }
+          for t in $TARGETS; do
+            case "$t" in
+              linux-x64|linux-arm64|darwin-arm64|darwin-x64|win32-x64) ;;
+              *) echo "unknown target: $t" >&2; exit 1 ;;
+            esac
+          done
+          echo "json=$(printf '%s\n' $TARGETS | jq -R . | jq -sc .)" >> "$GITHUB_OUTPUT"
+
+  package:
+    name: VSIX ${{ matrix.target }}
+    needs: [guard, test, plan]
+    # Linux for every target: the exec bit of the agent program survives only when packaging on Linux.
+    runs-on: ubuntu-24.04
+    strategy:
+      fail-fast: false
+      matrix:
+        target: ${{ fromJSON(needs.plan.outputs.targets) }}
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 22
+      - uses: actions/setup-python@v6
+        with:
+          python-version: "3.12" # for THIRD-PARTY-NOTICES
+      - run: npm ci
+        working-directory: packages/pi-vscode
+      - name: Download the agent, check its sha256, build, write the notices, package, check the VSIX
+        run: node scripts/package.mjs "$TARGET"
+        working-directory: packages/pi-vscode
+        env:
+          TARGET: ${{ matrix.target }}
+      - uses: actions/upload-artifact@v6
+        with:
+          name: vsix-${{ matrix.target }}
+          path: packages/pi-vscode/out/*.vsix
+          if-no-files-found: error
+          retention-days: 14
+
+  smoke:
+    name: Start the linux-x64 agent from its VSIX
+    needs: [plan, package]
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Is linux-x64 in this run?
+        id: has
+        env:
+          TARGETS: ${{ needs.plan.outputs.targets }}
+        run: echo "linux_x64=$(echo "$TARGETS" | jq 'index("linux-x64") != null')" >> "$GITHUB_OUTPUT"
+      - uses: actions/checkout@v7
+        if: steps.has.outputs.linux_x64 == 'true'
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@v7
+        if: steps.has.outputs.linux_x64 == 'true'
+        with:
+          node-version: 22
+      - uses: actions/download-artifact@v7
+        if: steps.has.outputs.linux_x64 == 'true'
+        with:
+          name: vsix-linux-x64
+          path: vsix
+      - name: Smoke test
+        if: steps.has.outputs.linux_x64 == 'true'
+        run: |
+          npm ci
+          node scripts/smoke-vsix.mjs ../../vsix/*.vsix
+        working-directory: packages/pi-vscode
+
+  publish:
+    name: Publish
+    if: github.event_name == 'workflow_dispatch' && inputs.publish
+    needs: [guard, package, smoke]
+    runs-on: ubuntu-24.04
+    timeout-minutes: 60
+    # One job, so the reviewer approves once. Open VSX first, then the Marketplace.
+    environment: vscode-publish
+    concurrency:
+      group: vscode-extension-publish
+      cancel-in-progress: false
+    permissions:
+      contents: read
+      id-token: write # Trusted Publishing (OIDC) on both registries
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 22
+      - uses: actions/download-artifact@v7
+        with:
+          pattern: vsix-*
+          path: vsix
+          merge-multiple: true
+      - name: Install the pinned vsce and ovsx
+        run: npm ci
+        working-directory: packages/pi-vscode
+      - name: Files to publish
+        run: |
+          ls -l vsix
+          sha256sum vsix/*.vsix
+      # A repeat of a half-done publish skips what is already there (--skip-duplicate).
+      - name: Open VSX
+        if: inputs.registries != 'marketplace'
+        working-directory: packages/pi-vscode
+        run: |
+          set -eu
+          for f in ../../vsix/*.vsix; do
+            npx --no-install ovsx publish --trusted-publishing --skip-duplicate "$f"
+          done
+      - name: Visual Studio Marketplace
+        if: inputs.registries != 'open-vsx'
+        working-directory: packages/pi-vscode
+        run: |
+          set -eu
+          for f in ../../vsix/*.vsix; do
+            npx --no-install vsce publish --oidc --pre-release --skip-duplicate --packagePath "$f"
+          done

@@ -26,19 +26,15 @@ The files in `out/` are ready for a hand upload. Do not edit them.
 node scripts/smoke-vsix.mjs out/zycode-linux-x64-0.1.0.vsix
 ```
 
-It unpacks the agent from the VSIX, starts it with an empty home folder, sends ACP `initialize`, checks the agent name and version (the pin), and sends `session/new`. With no model set, the correct answer is the error `auth_required`. Use a VSIX of the platform that you run on.
+It unpacks the agent from the VSIX and starts it twice, with a new home folder each time. First with an empty home: ACP `initialize` must return the pinned agent name and version, and `session/new` must fail with `auth_required` (no model). Then with an `agent.toml` that says `permission = "always-approve"` and a model on a closed local port: `session/new` must open, the session must offer the `mode` option with `ask` and `auto`, and the client must be able to change it from `always-approve` to `ask`. The extension does the same for its sessions. Use a VSIX of the platform that you run on.
 
 To try a VSIX in VS Code: `code --install-extension out/zycode-linux-x64-0.1.0.vsix --pre-release`.
 
-## Upload by hand (first upload of each registry)
+## Publish
 
-The first upload of a registry is a manual upload of one VSIX. After it, the workflow `vscode-extension.yml` can publish (see `docs/specs/2026-11-04-vscode-extension-design.md`).
+The first release goes out by hand, in an exact order. Later releases go out from the workflow `.github/workflows/vscode-extension.yml` (Trusted Publishing, started by hand on `main`). The steps are in `RELEASING.md`.
 
-1. **Open VSX first.** Upload `zycode-linux-x64-<version>.vsix` on the extension page of <https://open-vsx.org>. Then register the workflow `vscode-extension.yml` as the Trusted Publisher of the extension.
-2. **Then the Marketplace.** Upload the same file on <https://marketplace.visualstudio.com/manage>.
-3. Upload the other four files the same way, or let the workflow do it with its `targets` input.
-
-Check before you upload: `sha256sum -c out/SHA256SUMS`. Each VSIX is between 39 and 73 MiB.
+Check before you upload a file made on your machine: `sha256sum -c out/SHA256SUMS`. The sha256 of a VSIX is not the same from build to build, so compare only with the `SHA256SUMS` of the same build. Each VSIX is between 39 and 73 MiB.
 
 ## Change the agent version
 

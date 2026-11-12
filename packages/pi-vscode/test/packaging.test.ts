@@ -100,3 +100,35 @@ describe("archive readers", () => {
     expect(() => readZip(Buffer.from("not a zip file at all, just text"))).toThrow(/not a zip/);
   });
 });
+
+describe("release files", () => {
+  const root = path.join(__dirname, "..");
+  const manifest = JSON.parse(readFileSync(path.join(root, "package.json"), "utf8"));
+  const workflow = readFileSync(path.join(root, "..", "..", ".github", "workflows", "vscode-extension.yml"), "utf8");
+
+  it("is the extension zycode.zycode that the registry entries name", () => {
+    expect(manifest.publisher).toBe("zycode");
+    expect(manifest.name).toBe("zycode");
+  });
+
+  it("has a CHANGELOG entry for the version in package.json", () => {
+    const changelog = readFileSync(path.join(root, "CHANGELOG.md"), "utf8");
+    expect(changelog).toMatch(new RegExp(`^## ${manifest.version.replace(/\./g, "\\.")}( |$)`, "m"));
+  });
+
+  it("publishes with Trusted Publishing from the environment, and stores no token", () => {
+    expect(workflow).toContain("environment: vscode-publish");
+    expect(workflow.match(/id-token: write/g)).toHaveLength(1);
+    expect(workflow).toContain("ovsx publish --trusted-publishing");
+    expect(workflow).toContain("vsce publish --oidc");
+    expect(workflow).not.toMatch(/secrets\./);
+    expect(workflow).not.toMatch(/OVSX_PAT|VSCE_PAT|--pat\b|-p "/);
+  });
+
+  it("starts a publish by hand only, from main", () => {
+    expect(workflow).toContain("workflow_dispatch:");
+    expect(workflow).not.toMatch(/^\s*(workflow_run|release|push|schedule):/m);
+    expect(workflow).not.toMatch(/tags:/);
+    expect(workflow).toContain("github.ref != 'refs/heads/main'");
+  });
+});

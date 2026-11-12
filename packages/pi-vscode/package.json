@@ -19,7 +19,7 @@
   "bugs": {
     "url": "https://github.com/zy1233/pi-python/issues"
   },
-  "zycodeAgentVersion": "0.8.0",
+  "zycodeAgentVersion": "0.9.0",
   "engines": {
     "vscode": "^1.90.0"
   },
@@ -114,7 +114,7 @@
           ],
           "default": "ask",
           "scope": "application",
-          "markdownDescription": "Which tool calls the agent runs without asking. When the agent offers a `mode` option, this overrides `permission` in `agent.toml`, including `always-approve`, which this extension never sets. The bundled agent 0.8.0 has no such option: it reads `permission` from `agent.toml`."
+          "markdownDescription": "Which tool calls the agent runs without asking. The extension sets this mode for each session through the `mode` option of the agent. It overrides `permission` in `agent.toml`, including `always-approve`, which this extension never sets. An agent without a `mode` option keeps the mode of `agent.toml`. `auto` can send your messages and some `bash` commands to a model (see the README)."
         },
         "zycode.showThinking": {
           "type": "boolean",
@@ -164,6 +164,7 @@
     "@vscode/vsce": "^4.1.0",
     "esbuild": "^0.25.12",
     "eslint": "^9.39.5",
+    "ovsx": "1.4.0",
     "typescript": "^5.9.3",
     "typescript-eslint": "^8.72.1",
     "vitest": "^3.2.7"

@@ -23,9 +23,9 @@ The agent keeps its settings in `~/.pi-python` (`agent.toml` and `local.env`). T
 ## Permissions
 
 - The setting `zycode.permissionMode` has two values. `ask` (default) asks about every call that is not read-only. `auto` runs the calls that are clearly inside the scope and asks about the rest.
-- The extension can change the mode only when the agent offers a `mode` option. **The bundled agent 0.8.0 does not offer it.** It reads `permission` from `agent.toml` (default `ask`). If you set `always-approve` there, this agent runs every call with no question, and this extension cannot stop it. Do not set it. With an agent that has the option, the extension sets `ask` or `auto` by itself and never `always-approve`.
+- The extension sets the mode of each session with the `mode` option of the agent, and it never sets `always-approve`. This overrides `permission` in `agent.toml`, also when `agent.toml` says `always-approve`. An agent that has no `mode` option (an older `zycode.agentPath` program) keeps the mode of `agent.toml`, and the chat says so for `auto`.
 - **Auto is not a sandbox.** It guards what a call writes or runs. It does not guard what a call reads or sends: `read`, `grep`, `find`, `ls`, web fetch, and recursive reads in `bash` run with no question. They can show a secret to the model or send it to a server. If you need a boundary, use a container or a virtual machine.
-- With the bundled agent 0.8.0, `auto` has no effect. The chat then says "This agent version has no Auto mode."
+- **Auto sends data to a model.** For a `bash` command that no rule decides, Auto sends your messages and that command to the model service of the session (or to the model named in `[auto] model` of `agent.toml`). `[auto] classifier = "rules"` in `agent.toml` turns this off. In `ask` mode this does not happen.
 
 ## Two kinds of trust
 
@@ -45,7 +45,7 @@ The agent keeps its settings in `~/.pi-python` (`agent.toml` and `local.env`). T
 
 ## Privacy
 
-The extension has no telemetry and sends nothing to its authors. The agent sends your conversation, and the files that it reads, to the model service that you chose in `agent.toml`. The extension and the authors see none of it.
+The extension has no telemetry and sends nothing to its authors. The agent sends your conversation, and the files that it reads, to the model service that you chose in `agent.toml`. In `auto` mode it also sends some `bash` commands to a model (see Permissions). The extension and the authors see none of it.
 
 ## Limits of this pre-release
 

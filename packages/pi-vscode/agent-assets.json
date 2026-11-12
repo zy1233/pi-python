@@ -1,43 +1,43 @@
 {
-  "version": "0.8.0",
-  "tag": "v0.8.0",
+  "version": "0.9.0",
+  "tag": "v0.9.0",
   "repository": "zy1233/pi-python",
   "pythonPackages": [
-    "pi-agent-cli-lc==0.8.0",
-    "pi-web-access-py==0.5.0",
-    "pi-goal-x-py==0.5.0",
-    "pi-dynamic-workflows-py==0.5.0",
-    "pi-mcp-py==0.3.0"
+    "pi-agent-cli-lc==0.9.0",
+    "pi-web-access-py==0.6.0",
+    "pi-goal-x-py==0.6.0",
+    "pi-dynamic-workflows-py==0.6.0",
+    "pi-mcp-py==0.4.0"
   ],
   "targets": {
     "linux-x64": {
-      "asset": "zycode-agent-linux-x86_64-0.8.0.tar.gz",
-      "size": 75987803,
-      "sha256": "4ab0adec5d2ed3519ed0372862497c6a4efd75c5215138ebaf967cc59a92c5cf",
+      "asset": "zycode-agent-linux-x86_64-0.9.0.tar.gz",
+      "size": 76449624,
+      "sha256": "ba8759308f707e6bdec4b2f1dc3cff1e692bd185236252713068a954fee851eb",
       "program": "zycode-agent"
     },
     "linux-arm64": {
-      "asset": "zycode-agent-linux-aarch64-0.8.0.tar.gz",
-      "size": 73480728,
-      "sha256": "af9ecddc0cd8f8493d6d6d1c87e2f0bee7165cf91e49c18eb74ee7fb09e8d370",
+      "asset": "zycode-agent-linux-aarch64-0.9.0.tar.gz",
+      "size": 73700817,
+      "sha256": "78e7c19b816ec0eb5f910a0ed309091f55ce7a06f094645b903eb54fd6ecdc0b",
       "program": "zycode-agent"
     },
     "darwin-arm64": {
-      "asset": "zycode-agent-darwin-aarch64-0.8.0.tar.gz",
-      "size": 40622800,
-      "sha256": "f2fddfc36432deafdef5705db858a15500ba293abd07df9e8c9145017ce63661",
+      "asset": "zycode-agent-darwin-aarch64-0.9.0.tar.gz",
+      "size": 40847742,
+      "sha256": "6e1af408bef6e7fe55d872e0ca2b0f7af289d907c3114a3e5c7a3857b4100701",
       "program": "zycode-agent"
     },
     "darwin-x64": {
-      "asset": "zycode-agent-darwin-x86_64-0.8.0.tar.gz",
-      "size": 40508792,
-      "sha256": "35dd2ebbf457b9cb5f339bc7de6fc5ec412be7883379ec20f1543d20e307ea52",
+      "asset": "zycode-agent-darwin-x86_64-0.9.0.tar.gz",
+      "size": 40743439,
+      "sha256": "66f436569412f7ead24b5b11c53a1ac6ad174839dd18edb59a337d23d1e08183",
       "program": "zycode-agent"
     },
     "win32-x64": {
-      "asset": "zycode-agent-windows-x86_64-0.8.0.zip",
-      "size": 42107681,
-      "sha256": "972059ec552fe92f219e39508907073a8e5ffec5d685826a5c6cfcf970a8383e",
+      "asset": "zycode-agent-windows-x86_64-0.9.0.zip",
+      "size": 42335862,
+      "sha256": "2948e0fc789760c4ab4d234767da5ea9894661f14e2acb7f5eb8c242ce50a088",
       "program": "zycode-agent.exe"
     }
   }
