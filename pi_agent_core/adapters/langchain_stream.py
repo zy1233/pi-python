@@ -15,6 +15,7 @@ from urllib.parse import urlsplit
 
 from pi_agent_core.adapters.deepseek_replay import replaying_chat_deepseek
 from pi_agent_core.adapters.langchain_convert import agent_tool_to_lc_schema, convert_to_langchain
+from pi_agent_core.adapters.openai_reasoning import reasoning_chat_openai
 from pi_agent_core.event_stream import AssistantMessageEventStream
 from pi_agent_core.frozen import is_frozen
 from pi_agent_core.messages import (
@@ -362,7 +363,8 @@ def _extract_reasoning_content_delta(chunk: Any) -> str:
     DeepSeek-style OpenAI-compatible providers (DeepSeek, SiliconFlow, many
     vLLM gateways) stream thinking as `delta.reasoning_content` instead of
     content blocks. langchain-deepseek preserves it in additional_kwargs;
-    plain ChatOpenAI drops it (use provider="deepseek" for such endpoints).
+    plain ChatOpenAI drops it, so provider="openai" uses a subclass that
+    keeps it too (`openai_reasoning`).
     """
     ak = getattr(chunk, "additional_kwargs", None) or {}
     value = ak.get("reasoning_content")
@@ -458,12 +460,13 @@ def resolve_chat_model(
     provider = model.provider.lower()
     if provider == "openai":
         try:
-            from langchain_openai import ChatOpenAI
+            # A ChatOpenAI that also keeps the ``reasoning_content`` of a gateway.
+            chat_cls = reasoning_chat_openai()
         except ImportError as e:
             raise _provider_missing("openai", "langchain-openai") from e
         # Chat Completions does not stream usage stats unless asked to.
         kwargs.setdefault("stream_usage", True)
-        return ChatOpenAI(**kwargs)
+        return chat_cls(**kwargs)
     if provider == "anthropic":
         try:
             from langchain_anthropic import ChatAnthropic
@@ -472,8 +475,9 @@ def resolve_chat_model(
         return ChatAnthropic(**kwargs)
     if provider == "deepseek":
         # Also the right provider for DeepSeek-style OpenAI-compatible gateways
-        # (SiliconFlow, vLLM, ...): unlike ChatOpenAI it preserves the
-        # reasoning_content thinking stream in additional_kwargs.
+        # (SiliconFlow, vLLM, ...): it preserves the reasoning_content thinking
+        # stream in additional_kwargs, and it can send the thinking back (the
+        # "openai" provider keeps the stream too, but sends nothing back).
         try:
             chat_cls = replaying_chat_deepseek()
         except ImportError as e:
