@@ -1,4 +1,4 @@
-import { readFileSync } from "node:fs";
+import { existsSync, readFileSync, readdirSync } from "node:fs";
 import path from "node:path";
 import { gzipSync } from "node:zlib";
 import { describe, expect, it } from "vitest";
@@ -125,10 +125,78 @@ describe("release files", () => {
     expect(workflow).not.toMatch(/OVSX_PAT|VSCE_PAT|--pat\b|-p "/);
   });
 
+  it("is a stable release: no pre-release flag in the scripts or the workflow, and an even minor", () => {
+    expect(manifest.version).toMatch(/^\d+\.\d+\.\d+$/);
+    expect(Number(manifest.version.split(".")[1]) % 2).toBe(0);
+    expect(workflow).not.toMatch(/pre-release/i);
+    for (const script of ["package.mjs", "check-vsix.mjs"]) {
+      const text = readFileSync(path.join(root, "scripts", script), "utf8");
+      expect(text).not.toContain('"--pre-release"');
+    }
+    expect(readFileSync(path.join(root, "scripts", "check-vsix.mjs"), "utf8")).toMatch(/must not have it/);
+  });
+
+  it("is above the pre-release 0.1.0 that is published", () => {
+    const [major = 0, minor = 0] = manifest.version.split(".").map(Number);
+    expect(major * 1000 + minor).toBeGreaterThan(0 * 1000 + 1);
+  });
+
+  it("names a CHANGELOG entry without the word pre-release", () => {
+    const changelog = readFileSync(path.join(root, "CHANGELOG.md"), "utf8");
+    const entry = new RegExp(`^## ${manifest.version.replace(/\./g, "\\.")}.*$`, "m").exec(changelog)?.[0] ?? "";
+    expect(entry).not.toMatch(/pre-release/i);
+  });
+
   it("starts a publish by hand only, from main", () => {
     expect(workflow).toContain("workflow_dispatch:");
     expect(workflow).not.toMatch(/^\s*(workflow_run|release|push|schedule):/m);
     expect(workflow).not.toMatch(/tags:/);
     expect(workflow).toContain("github.ref != 'refs/heads/main'");
+  });
+});
+
+describe("manifest contributions", () => {
+  const root = path.join(__dirname, "..");
+  const manifest = JSON.parse(readFileSync(path.join(root, "package.json"), "utf8"));
+  const ignore = readFileSync(path.join(root, ".vscodeignore"), "utf8");
+
+  it("declares every command that a menu or the guide uses", () => {
+    const declared = new Set<string>(manifest.contributes.commands.map((c: { command: string }) => c.command));
+    const used: string[] = [];
+    for (const items of Object.values(manifest.contributes.menus) as { command: string }[][]) for (const item of items) used.push(item.command);
+    for (const walkthrough of manifest.contributes.walkthroughs) {
+      for (const step of walkthrough.steps) for (const m of step.description.matchAll(/command:(zycode\.[A-Za-z.]+)/g)) used.push(m[1]!);
+    }
+    for (const command of used) {
+      if (command === "zycode.sessions.focus") continue;
+      expect(declared.has(command), command).toBe(true);
+    }
+  });
+
+  it("has a walkthrough whose pages are in the package", () => {
+    const [walkthrough] = manifest.contributes.walkthroughs;
+    expect(walkthrough.id).toBe("zycode.gettingStarted");
+    expect(walkthrough.steps.length).toBeGreaterThanOrEqual(5);
+    expect(ignore).toContain("!media/walkthrough/**");
+    for (const step of walkthrough.steps) {
+      const file = path.join(root, step.media.markdown);
+      expect(existsSync(file), step.media.markdown).toBe(true);
+    }
+  });
+
+  it("has the view of past chats in the zycode container", () => {
+    expect(manifest.contributes.views.zycode.map((v: { id: string }) => v.id)).toEqual(["zycode.chat", "zycode.sessions"]);
+    expect(manifest.activationEvents).toContain("onView:zycode.sessions");
+  });
+
+  it("offers ask and auto in the setting, never always-approve", () => {
+    const setting = manifest.contributes.configuration.properties["zycode.permissionMode"];
+    expect(setting.enum).toEqual(["ask", "auto"]);
+    expect(setting.default).toBe("ask");
+  });
+
+  it("does not use any walkthrough text that asks for a key in the chat", () => {
+    const text = readdirSync(path.join(root, "media", "walkthrough")).map((f) => readFileSync(path.join(root, "media", "walkthrough", f), "utf8")).join("\n");
+    expect(text).toMatch(/Never type it in the chat/);
   });
 });

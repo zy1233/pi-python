@@ -18,13 +18,47 @@ export type Status =
   | "untrusted"
   | "unavailable";
 
-export type PermissionModeName = "ask" | "auto";
+/** The modes of the mode menu. `zycode.permissionMode` offers `ask` and `auto` only. */
+export type PermissionModeName = "ask" | "auto" | "always-approve";
+
+/** The modes that a start can have: the setting never holds `always-approve`. */
+export type StartModeName = "ask" | "auto";
+
+export const ALWAYS_APPROVE = "always-approve" as const;
 
 export interface ModeState {
-  /** The mode the session is in. `always-approve` shows only when `agent.toml` sets it. */
+  /** The mode the session is in. It can be `always-approve`, also when `agent.toml` sets it. */
   current: string;
-  /** The values a client may choose. Empty when the agent has no `mode` option. */
+  /** The values the menu offers. Empty when the agent has no `mode` option. `always-approve` is in the list only when it can be chosen. */
   options: { id: string; name: string }[];
+}
+
+/** The levels of `thinking_level` in agent.toml. */
+export type ThinkingLevel = "off" | "minimal" | "low" | "medium" | "high" | "xhigh";
+
+export interface ThinkingLevelOption {
+  id: ThinkingLevel;
+  name: string;
+  description: string;
+}
+
+export interface ThinkingState {
+  /** The level the running agent uses. Absent when the file cannot be read. */
+  current?: ThinkingLevel;
+  levels: ThinkingLevelOption[];
+  /** Set when the picker is off, with the reason. */
+  disabled?: string;
+  /** Something the user should know about the file (for example an invalid value). */
+  note?: string;
+}
+
+/** Why the agent has no model yet, from its `auth_required` answer to `session/new`. */
+export type SetupReason = "no-model" | "no-key" | "unknown";
+
+export interface SetupInfo {
+  reason: SetupReason;
+  /** The variable that has no value (`no-key`). */
+  variable?: string;
 }
 
 export interface StateMessage {
@@ -35,6 +69,10 @@ export interface StateMessage {
   cwd?: string;
   mode?: ModeState;
   model?: string;
+  /** The thinking level picker. Absent while the agent is not up. */
+  thinking?: ThinkingState;
+  /** Set while `status` is `needs-setup`: what is missing. */
+  setup?: SetupInfo;
   canRestart: boolean;
   /** `zycode.showThinking`: show the thinking blocks (collapsed). */
   showThinking?: boolean;
@@ -76,12 +114,19 @@ export interface PermissionRequestView {
 
 export type PermissionOutcome = "selected" | "cancelled";
 
+export type NoticeActionId = "runSetup" | "openGuide" | "openAgentConfig" | "openLog";
+
+export interface NoticeAction {
+  id: NoticeActionId;
+  label: string;
+}
+
 export type TranscriptItem =
   | { type: "user"; id: string; text: string }
   | { type: "agent"; id: string; text: string; thought: string }
   | { type: "tool"; toolCall: ToolCallView }
   | { type: "permission"; request: PermissionRequestView; done?: { outcome: PermissionOutcome; optionId?: string } }
-  | { type: "notice"; level: NoticeLevel; text: string };
+  | { type: "notice"; level: NoticeLevel; text: string; actions?: NoticeAction[] };
 
 export type NoticeLevel = "info" | "warning" | "error";
 
@@ -94,7 +139,7 @@ export type HostMessage =
   | { type: "toolCall"; toolCall: ToolCallView }
   | ({ type: "permission" } & PermissionRequestView)
   | { type: "permissionDone"; requestId: string; outcome: PermissionOutcome; optionId?: string }
-  | { type: "notice"; level: NoticeLevel; text: string }
+  | { type: "notice"; level: NoticeLevel; text: string; actions?: NoticeAction[] }
   | { type: "turnEnd"; stopReason: string }
   | { type: "diffState"; toolCallId: string; available: boolean };
 
@@ -106,7 +151,10 @@ export type WebviewMessage =
   | { type: "permissionAnswer"; requestId: string; optionId: string }
   | { type: "showDiff"; toolCallId: string }
   | { type: "setMode"; value: PermissionModeName }
+  | { type: "setThinking"; value: ThinkingLevel }
   | { type: "runSetup" }
+  | { type: "openGuide" }
+  | { type: "openAgentConfig" }
   | { type: "restartAgent" }
   | { type: "openLog" }
   | { type: "openLink"; url: string };
@@ -131,6 +179,8 @@ export function parseWebviewMessage(value: unknown): WebviewMessage | undefined 
     case "cancel":
     case "newChat":
     case "runSetup":
+    case "openGuide":
+    case "openAgentConfig":
     case "restartAgent":
     case "openLog":
       return { type: value.type };
@@ -147,8 +197,20 @@ export function parseWebviewMessage(value: unknown): WebviewMessage | undefined 
       if (!shortString(value.toolCallId, MAX_ID_CHARS)) return undefined;
       return { type: "showDiff", toolCallId: value.toolCallId };
     case "setMode":
-      if (value.value !== "ask" && value.value !== "auto") return undefined;
+      if (value.value !== "ask" && value.value !== "auto" && value.value !== "always-approve") return undefined;
       return { type: "setMode", value: value.value };
+    case "setThinking":
+      if (
+        value.value !== "off" &&
+        value.value !== "minimal" &&
+        value.value !== "low" &&
+        value.value !== "medium" &&
+        value.value !== "high" &&
+        value.value !== "xhigh"
+      ) {
+        return undefined;
+      }
+      return { type: "setThinking", value: value.value };
     case "openLink":
       if (!shortString(value.url, MAX_URL_CHARS)) return undefined;
       return { type: "openLink", url: value.url };

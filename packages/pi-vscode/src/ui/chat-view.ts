@@ -29,7 +29,13 @@ export class ChatViewProvider implements vscode.WebviewViewProvider, vscode.Disp
   constructor(
     private readonly extensionUri: vscode.Uri,
     private readonly controller: ChatController,
-    private readonly actions: { showLog(): void; showDiff(info: DiffInfo): Promise<void>; notify(text: string): void },
+    private readonly actions: {
+      showLog(): void;
+      showDiff(info: DiffInfo): Promise<void>;
+      notify(text: string): void;
+      openGuide(): void;
+      openAgentConfig(): void;
+    },
   ) {
     this.subscription = controller.onMessage((message) => this.post(message));
   }
@@ -87,8 +93,17 @@ export class ChatViewProvider implements vscode.WebviewViewProvider, vscode.Disp
       case "setMode":
         await controller.applyPermissionMode(message.value);
         return;
+      case "setThinking":
+        await controller.applyThinkingLevel(message.value);
+        return;
       case "runSetup":
         await controller.runSetup();
+        return;
+      case "openGuide":
+        this.actions.openGuide();
+        return;
+      case "openAgentConfig":
+        this.actions.openAgentConfig();
         return;
       case "restartAgent":
         await controller.restart(true);

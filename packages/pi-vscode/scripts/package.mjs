@@ -35,7 +35,7 @@ export async function packageTarget(target, { prebuilt = false } = {}) {
   const out = path.join(OUT_DIR, `zycode-${target}-${manifest.version}.vsix`);
   rmSync(out, { force: true });
   const [node, vsce] = vsceCommand();
-  run(node, [vsce, "package", "--target", target, "--pre-release", "--no-dependencies", "--out", out]);
+  run(node, [vsce, "package", "--target", target, "--no-dependencies", "--out", out]);
   const problems = checkVsix(out, target);
   if (problems.length > 0) throw new Error(`${out} is not as promised:\n  ${problems.join("\n  ")}`);
   return describeVsix(out);

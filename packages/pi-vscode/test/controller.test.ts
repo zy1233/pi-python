@@ -55,7 +55,14 @@ describe("start", () => {
     expect(state.status).toBe("ready");
     expect(state.agent).toEqual({ version: "0.8.0", source: "setting" });
     expect(state.cwd).toBe(host.sessionFolder());
-    expect(state.mode).toEqual({ current: "ask", options: [{ id: "ask", name: "Ask" }, { id: "auto", name: "Auto" }] });
+    expect(state.mode).toEqual({
+      current: "ask",
+      options: [
+        { id: "ask", name: "Ask" },
+        { id: "auto", name: "Auto" },
+        { id: "always-approve", name: "Always approve" },
+      ],
+    });
     expect(state.model).toBe("Fake model");
   });
 
@@ -316,7 +323,7 @@ describe("setup", () => {
     await controller.start();
     await controller.runSetup();
     expect(controller.currentStatus).toBe("needs-setup");
-    expect(ofType(messages, "notice").some((n) => n.text === "Setup did not finish.")).toBe(true);
+    expect(ofType(messages, "notice").some((n) => n.text.startsWith("Setup did not finish."))).toBe(true);
   });
 });
 

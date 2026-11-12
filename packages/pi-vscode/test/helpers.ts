@@ -4,7 +4,7 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 
 import { ChatController, type ControllerOptions } from "../src/core/chat-controller.js";
-import type { Host, Logger, Settings, SetupTerminalRequest } from "../src/core/host.js";
+import type { ConfirmRequest, Host, Logger, Settings, SetupTerminalRequest } from "../src/core/host.js";
 import type { HostMessage } from "../src/core/protocol.js";
 
 export const FAKE_AGENT = path.join(path.dirname(fileURLToPath(import.meta.url)), "fake-agent.mjs");
@@ -28,9 +28,13 @@ export interface TestHostOptions {
   folder?: string | null;
   dirty?: string[];
   pin?: string;
+  /** The path `agent.toml` has for the thinking level (default: a file in a temp folder that does not exist). */
+  agentConfig?: string;
   extensionPath?: string;
   readFile?: (file: string) => Promise<string | null | undefined>;
   setup?: (request: SetupTerminalRequest) => Promise<{ exitCode: number | undefined }>;
+  /** The answer to a modal question (default: no). */
+  confirm?: boolean | ((request: ConfirmRequest) => boolean);
 }
 
 export function tempDir(registry: string[] | undefined, prefix: string): string {
@@ -47,12 +51,15 @@ export class TestHost implements Host {
   readonly platform = process.platform;
   readonly notifications: { level: string; text: string }[] = [];
   readonly setupRequests: SetupTerminalRequest[] = [];
+  readonly confirmations: ConfirmRequest[] = [];
+  trusted: boolean;
   private readonly folder: string | undefined;
   private readonly tempDirs: string[] = [];
 
   constructor(private readonly options: TestHostOptions = {}) {
     this.extensionPath = options.extensionPath ?? tempDir(this.tempDirs, "ext-");
     this.agentVersionPin = options.pin ?? "0.8.0";
+    this.trusted = options.trusted ?? true;
     this.folder = options.folder === null ? undefined : (options.folder ?? tempDir(this.tempDirs, "proj-"));
   }
 
@@ -60,7 +67,10 @@ export class TestHost implements Host {
     return { agentPath: process.execPath, agentArgs: [FAKE_AGENT], permissionMode: "ask", showThinking: true, ...this.options.settings };
   }
   isTrusted(): boolean {
-    return this.options.trusted ?? true;
+    return this.trusted;
+  }
+  agentConfigPath(): string {
+    return this.options.agentConfig ?? path.join(this.extensionPath, "no-agent.toml");
   }
   sessionFolder(): string | undefined {
     return this.folder;
@@ -77,6 +87,11 @@ export class TestHost implements Host {
   async runSetupTerminal(request: SetupTerminalRequest): Promise<{ exitCode: number | undefined }> {
     this.setupRequests.push(request);
     return this.options.setup ? this.options.setup(request) : { exitCode: 0 };
+  }
+  async confirm(request: ConfirmRequest): Promise<boolean> {
+    this.confirmations.push(request);
+    const answer = this.options.confirm;
+    return typeof answer === "function" ? answer(request) : (answer ?? false);
   }
   notify(level: "info" | "warning" | "error", text: string): void {
     this.notifications.push({ level, text });

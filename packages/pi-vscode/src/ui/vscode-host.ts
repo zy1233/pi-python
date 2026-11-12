@@ -1,9 +1,11 @@
+import os from "node:os";
 import path from "node:path";
 
 import * as vscode from "vscode";
 
-import type { Host, Logger, Settings, SetupTerminalRequest } from "../core/host.js";
-import type { PermissionModeName } from "../core/protocol.js";
+import { agentConfigPath } from "../core/first-run.js";
+import type { ConfirmRequest, Host, Logger, Settings, SetupTerminalRequest } from "../core/host.js";
+import type { StartModeName } from "../core/protocol.js";
 
 export interface HostInfo {
   extensionPath: string;
@@ -52,7 +54,7 @@ export class VsCodeHost implements Host {
   settings(): Settings {
     const config = vscode.workspace.getConfiguration("zycode");
     const mode = config.get<string>("permissionMode", "ask");
-    const permissionMode: PermissionModeName = mode === "auto" ? "auto" : "ask";
+    const permissionMode: StartModeName = mode === "auto" ? "auto" : "ask";
     return {
       agentPath: config.get<string>("agentPath", ""),
       agentArgs: config.get<string[]>("agentArgs", []).filter((arg) => typeof arg === "string"),
@@ -63,6 +65,10 @@ export class VsCodeHost implements Host {
 
   isTrusted(): boolean {
     return vscode.workspace.isTrusted;
+  }
+
+  agentConfigPath(): string {
+    return agentConfigPath();
   }
 
   sessionFolder(): string | undefined {
@@ -92,7 +98,7 @@ export class VsCodeHost implements Host {
       shellPath: request.command,
       shellArgs: request.args,
       env: request.env,
-      cwd: request.cwd,
+      cwd: request.cwd ?? os.homedir(),
     });
     terminal.show();
     return new Promise((resolve) => {
@@ -102,6 +108,11 @@ export class VsCodeHost implements Host {
         resolve({ exitCode: closed.exitStatus?.code });
       });
     });
+  }
+
+  async confirm(request: ConfirmRequest): Promise<boolean> {
+    const choice = await vscode.window.showWarningMessage(request.message, { modal: true, detail: request.detail }, request.action);
+    return choice === request.action;
   }
 
   notify(level: "info" | "warning" | "error", text: string): void {

@@ -4,7 +4,7 @@ import { isSafeLink, parseWebviewMessage } from "../src/core/protocol.js";
 
 describe("parseWebviewMessage", () => {
   it("accepts the simple messages", () => {
-    for (const type of ["ready", "cancel", "newChat", "runSetup", "restartAgent", "openLog"]) {
+    for (const type of ["ready", "cancel", "newChat", "runSetup", "restartAgent", "openLog", "openGuide", "openAgentConfig"]) {
       expect(parseWebviewMessage({ type })).toEqual({ type });
     }
   });
@@ -16,6 +16,13 @@ describe("parseWebviewMessage", () => {
       requestId: "r",
       optionId: "o",
     });
+  });
+
+  it("accepts the three modes and no other", () => {
+    for (const value of ["ask", "auto", "always-approve"]) {
+      expect(parseWebviewMessage({ type: "setMode", value })).toEqual({ type: "setMode", value });
+    }
+    for (const value of ["yolo", "", 1, undefined]) expect(parseWebviewMessage({ type: "setMode", value })).toBeUndefined();
   });
 
   it("refuses bad input", () => {

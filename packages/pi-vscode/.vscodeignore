@@ -3,6 +3,7 @@
 !dist/webview.js
 !bin/**
 !media/chat.css
+!media/walkthrough/**
 !media/icon.png
 !media/zycode.svg
 !package.json

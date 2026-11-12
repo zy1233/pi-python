@@ -199,5 +199,5 @@ jobs:
         run: |
           set -eu
           for f in ../../vsix/*.vsix; do
-            npx --no-install vsce publish --oidc --pre-release --skip-duplicate --packagePath "$f"
+            npx --no-install vsce publish --oidc --skip-duplicate --packagePath "$f"
           done
