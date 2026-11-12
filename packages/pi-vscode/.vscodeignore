@@ -1,0 +1,12 @@
+**
+!dist/extension.js
+!dist/webview.js
+!bin/**
+!media/chat.css
+!media/icon.png
+!media/zycode.svg
+!package.json
+!README.md
+!CHANGELOG.md
+!LICENSE
+!THIRD-PARTY-NOTICES

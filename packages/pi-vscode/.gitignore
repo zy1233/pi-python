@@ -1,0 +1,9 @@
+node_modules/
+dist/
+bin/
+*.vsix
+THIRD-PARTY-NOTICES
+.vsix-cache/
+.vscode-test/
+out/
+LICENSE
