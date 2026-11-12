@@ -4,8 +4,10 @@
 > `binary` entry of the [ACP registry](https://github.com/agentclientprotocol/registry).
 > Decision: 2026-10-31. The user chose the `binary` route, PyInstaller one-file, five targets,
 > no signing in the first version, and a workflow of its own. Release 0.8.0 is the first release
-> that has the archives (section 7). The registry entry is binary only (section 4); the registry
-> pull request is [#735](https://github.com/agentclientprotocol/registry/pull/735) (opened on 2026-10-31; still open on 2026-11-04).
+> that has the archives, and 0.9.0 has them too (section 7). The registry entry is binary only
+> (section 4); the registry pull request is
+> [#735](https://github.com/agentclientprotocol/registry/pull/735) (opened on 2026-10-31; still
+> open on 2026-11-11, and since then it carries the entry for 0.9.0: section 7.3).
 >
 > Code: `packaging/agent/{build.py,zycode-agent.spec,entry.py,smoke.py}`,
 > `.github/workflows/agent-binaries.yml`. Changes for a frozen build:
@@ -103,8 +105,8 @@ Windows and on macOS (Apple silicon and Intel), where the sandbox layers differ 
 ## 4. Registry entry (final for 0.8.0; submitted as registry pull request #735)
 
 Directory `zycode/` in the registry, files `agent.json` and `icon.svg`. The pull request is
-[#735](https://github.com/agentclientprotocol/registry/pull/735) (opened on 2026-10-31; on 2026-11-04 it is open, with no
-comment, no review and no check). The entry is binary only. `sha256` is set for each archive (the digest of the
+[#735](https://github.com/agentclientprotocol/registry/pull/735) (opened on 2026-10-31; on 2026-11-04 and on
+2026-11-11 it is open, with no comment, no review and no check). The entry is binary only. `sha256` is set for each archive (the digest of the
 release asset). There is no `icon` field: the registry build makes it from `icon.svg`
 (16x16, monochrome, `currentColor` only).
 
@@ -153,6 +155,10 @@ release asset). There is no `icon` field: the registry build makes it from `icon
 
 The files are in the Project Agent Store (`docs/registry-entry/`: `agent.json`, `icon.svg`,
 `submit.md` with the steps and the text of the pull request).
+
+The entry above is the one for 0.8.0. For 0.9.0 (2026-11-11) only `version`, the five `archive`
+URLs and the five `sha256` values changed. The pull request branch has the change as its second
+commit (section 7.3).
 
 Rules of the registry (read again on 2026-10-31, registry commit `6772a52`; they did not
 change between the first and the second read):
@@ -277,6 +283,9 @@ user, who submits it by hand):
   archive, read from the release (`gh release view v<version> --json assets`).
   The versions in the URLs must equal `version`; every URL must answer with HTTP 200.
 - `icon.svg` next to `agent.json`: 16x16, monochrome, `currentColor` (the file exists).
+- While the registry pull request is open, a new release changes the same entry in the same
+  branch (a new commit with `version`, the five URLs and the five `sha256` values). It needs no
+  new pull request. The change for 0.9.0 was made that way (section 7.3).
 - After the first pull request, the bot makes the version bumps (hourly). It needs the PyPI package
   and the GitHub assets at the new version, so a release without archives stops the bump.
   That bump is not seen yet.
@@ -346,3 +355,28 @@ What this shows:
 - A real download and start from Zed or JetBrains (and whether JetBrains starts a `binary` entry).
 - The registry's update bot (first version bump after the entry is merged).
 - `workflow_dispatch` with a `tag` for an existing release (the repair path).
+
+### 7.3 The release of 0.9.0 (2026-11-11)
+
+The user merged #117 and #116 (the version and the changelog) and set the date to the same day. The tag was made after that. All times are UTC. The full record is section 10.51 of the execution log of the removal plan (`docs/PLAN/archive/PLAN-RUST-AGENT-RUNTIME-REMOVAL-EXECUTION-LOG.md`).
+
+| Time (UTC) | Step |
+|------------|------|
+| 09:56 and 09:57 | The user merged #117 and then #116 into `main` (`6e96066`). |
+| 10:05 | The tag `v0.9.0` was pushed. `Release` (run 43000730108) started at 10:06. |
+| 10:12 | `Publish to PyPI` finished (7 packages, 14 files), 6 minutes after the start. |
+| 10:25 | The TUI build for Linux x86_64 finished (14 minutes). |
+| 10:40 | The TUI build for macOS arm64 finished after 28 minutes, the slowest job. `GitHub Release` made the release (16 assets) at 10:40:06, 28 minutes after the PyPI upload. |
+| 10:40 | `Agent binaries` (run 43005548536) started by `workflow_run`, 4 seconds after `Release` ended. `plan` passed the tag check. |
+| 10:43 to 10:50 | The five build jobs passed (four within 5 minutes 16 seconds; `darwin-x86_64` took 10 minutes 12 seconds). |
+| 10:50 | `Attach to the release` uploaded the five archives (11 seconds). The release has 21 assets. |
+| 11:01 | Registry pull request #735 has the entry for 0.9.0 (commit `59da183`) and a new description. |
+
+What this shows:
+
+- `workflow_run` worked again, with no manual step. The last archive came 10 minutes 41 seconds after the release (0.8.0: about 11 minutes).
+- PyPI was up 28 minutes before the release (0.8.0: about 34 minutes), so a user could install the packages before the TUI programs and the archives were there.
+- The 14 Python files on the release have the same sha256 as the files on PyPI.
+- The five archive URLs answer HTTP 200 without credentials. Each download has the size and the sha256 of the release digest. The Windows program passes `smoke.py --frozen` on Windows (`initialize` took 10.9 s on its first start on that machine; the Linux program of 0.8.0 took about 2.2 s).
+- The registry's own checks pass for the 0.9.0 entry, against the registry `main` at `d4db163`: `build_registry.py --agents zycode` (URL checks on), `verify_agents.py --agent zycode --type binary` and its `--auth-check`. The pull request has two commits; the second one moves the entry to 0.9.0 and changes only `version`, the five `archive` URLs and the five `sha256` values. Nobody has reviewed it yet.
+- A clean install of the seven PyPI packages (Python 3.12, Windows) passes the ACP smoke test.

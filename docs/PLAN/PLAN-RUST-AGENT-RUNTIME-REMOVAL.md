@@ -1,6 +1,6 @@
 # Rust Agent Runtime 剥离计划
 
-> **状态：截至 r47（2026-11-11）：计划完成，含已知缺口。** §7 里没有 `[ ]` 的项：最后七项在 r43 由用户答复（[§10.46][l10-46]）；没做的部分记在[还没有验证的](#还没有验证的)。r44：Windows 上 `pi.exec` 不终止子进程的缺口修了（PR [#107][pr-107]）；扩展的登记建在 `docs/specs/`（PR [#108][pr-108]；[§10.47][l10-47]）；两个 PR 都已合入。r45：对照代码审计了一遍（[审计报告](../AUDIT/AUDIT-RUST-RUNTIME-REMOVAL-2026-11-08.md)），找到五处偏差；三处改了代码（pager 对 agent 发 `x.ai/log`；图片与图表的缓存放在 agent 的会话目录里；没有门禁拦着 Rust 的权限管理器被接回去），两处只改文档（P6 的写法，和几行过期的状态）；改动在 PR [#115][pr-115]，已合入（[§10.48][l10-48]）。r46：用户在 Windows 上做了 0.9 的实测（Zed 里的 Auto 与终端登录、单文件 exe 等）：回报的 23 项里 22 项通过，B2 失败，原因没有找到；还发现 `agent-client-protocol` 1.0.0（2026-11-09）使新装的包与 CI 起不来，PR [#113][pr-113] 加了上界 `<1.0.0`，已合入；`--setup` 的一处改动在 PR [#112][pr-112]，已合入（[§10.49][l10-49]）。用户随后答复了六个问题：不发 0.8.1，#113 并入 0.9；B10 至 B15 在 0.9 之前不测；反斜杠多问留到 0.9 之后；#112 的读法对。他还定了 0.9 的范围：主要含 Auto 模式与审计项修复，别的小问题可以并入（[下一步](#下一步)）。r47：用户定了 B2 与 `--setup` 的改动不再验证；#115 的 F-2，他说「先记录」，我读成只记录、不验证（三条都记为已知问题）。审计的 Rust 代码在 Windows 上查过了（GitHub 的 `windows-latest`）：整个 workspace 在原生 Windows 上编不过，审计之前就是这样；补一处之后，非测试代码编得过；跑过的单元测试里 37 个失败，审计前后逐个相同（只跑了一部分）；缓存目录的代码通过（[§10.50][l10-50]）。0.9 的发布准备在 PR [#116][pr-116]（开着）。v0.5.0（2026-10-13）、v0.6.0（2026-10-25）、v0.7.0（2026-10-30）与 v0.8.0（2026-10-31）都已发布；它们的发布里程碑已归档，计划里每版只留几行（[发布里程碑](#发布里程碑-v05)）。`main`（`a83bf5f`）比 v0.8.0 多 39 个提交，还没有新的 tag；下一个版本是 0.9；发布前的实测，用户做了一部分，其余不再做（[下一步](#下一步)）。阶段 A、C 完成；阶段 0、1 完成（1.P3、1.R2、1.R3、1.R5 关闭）；阶段 B 完成（B.2 关闭，B.4 不做）；阶段 D 关闭（D.3 的语音与 xAI 登录机器：用户选 A，留着不动）（[当前状态](#当前状态)）。决策 7 的 (c)（真的 Auto）在 r39 至 r41 做完，已合入 `main`，还没有发布；pager 继续用旧的 `pi/yolo_mode_changed`（用户，2026-11-04），1.P3 因此关闭（[待决策](#待决策)）。每一轮的过程在[执行记录（归档）][log]。
+> **状态：截至 r48（2026-11-11）：计划完成，含已知缺口；v0.9.0 已发布。** §7 里没有 `[ ]` 的项：最后七项在 r43 由用户答复（[§10.46][l10-46]）；没做的部分记在[还没有验证的](#还没有验证的)。v0.5.0（2026-10-13）、v0.6.0（2026-10-25）、v0.7.0（2026-10-30）、v0.8.0（2026-10-31）与 v0.9.0（2026-11-11）都已发布；它们的发布里程碑已归档，计划里每版只留几行（[发布里程碑](#发布里程碑-v05)）。v0.9.0 的 tag 在 `6e96066`；之后没有别的功能提交；下一个版本还没有定（[下一步](#下一步)）。阶段 A、C 完成；阶段 0、1 完成（1.P3、1.R2、1.R3、1.R5 关闭）；阶段 B 完成（B.2 关闭，B.4 不做）；阶段 D 关闭（D.3 的语音与 xAI 登录机器：用户选 A，留着不动）（[当前状态](#当前状态)）。决策 7 的 (c)（真的 Auto）在 r39 至 r41 做完，随 v0.9.0 发布；pager 继续用旧的 `pi/yolo_mode_changed`（用户，2026-11-04），1.P3 因此关闭（[待决策](#待决策)）。每一轮的过程在[执行记录（归档）][log]。
 >
 > **这份文档只写计划和状态。** 每一轮做了什么、怎么测的、数字是多少，在[执行记录（归档）][log]里。§1–§3、§6–§9 保留 r2 原文作为决策依据（§7 的每一项后面加了一行状态）。§4、§5 是 r2 的源码事实与规模估计，描述拆除之前的代码，原文在归档里。与执行记录冲突处，以执行记录和 ADR3（r3）为准。
 >
@@ -13,20 +13,20 @@
 | 想知道 | 看哪里 |
 |---|---|
 | 做到哪了，下一步做什么 | [当前状态](#当前状态) |
-| 已发布的版本（v0.5.0 到 v0.8.0）发布了什么、带着什么问题发 | [V0.5](#发布里程碑-v05)、[V0.6](#发布里程碑-v06)、[V0.7](#发布里程碑-v07)、[V0.8](#发布里程碑-v08)（每版几行；全文在[归档的附录 G][logG]） |
+| 已发布的版本（v0.5.0 到 v0.9.0）发布了什么、带着什么问题发 | [V0.5](#发布里程碑-v05)、[V0.6](#发布里程碑-v06)、[V0.7](#发布里程碑-v07)、[V0.8](#发布里程碑-v08)、[V0.9](#发布里程碑-v09)（每版几行；V0.5 至 V0.7 的全文在[归档的附录 G][logG]；V0.9 发布之前的文字在[附录 H][logH]） |
 | 有哪些事在等用户决定 | [待决策](#待决策) |
 | 为什么这样设计 | §1–§3（目标、架构、与现有文档的关系）、§6（ADR1–ADR7） |
 | r2 核对过的源码事实、改动规模的估计 | §4、§5（只剩索引，原文在[归档的附录 E][logE]） |
 | 每个阶段还剩什么 | §7（每项一行状态） |
 | 某一轮怎么做的、测了什么、数字是多少 | [执行记录（归档）][log]；§10 有索引 |
-| 整理前的状态文字（逐轮的过程、里程碑的证据） | [归档的附录 F][logF]（r22 续 1）、[附录 G][logG]（r42） |
+| 整理前的状态文字（逐轮的过程、里程碑的证据） | [归档的附录 F][logF]（r22 续 1）、[附录 G][logG]（r42）、[附录 H][logH]（r48） |
 | 能力矩阵、ACP 版本配对 | 附录 A |
 
 ## 当前状态
 
 这一节只写现在是什么。一轮做了什么，写在[执行记录][log]的 §10.x 里，不要写回这里；发布里程碑与「下一步」也一样。
 
-截至 r47：**v0.5.0、v0.6.0、v0.7.0 与 v0.8.0 都已发布。** 最新的是 v0.8.0（2026-10-31；tag 在 `a5d32d5`；[GitHub Release][rel-v080]）。`main`（`a83bf5f`）比它多 39 个提交；没有新的 tag，下一个版本也还没有里程碑。这 39 个提交里：Auto 模式（决策 7 的 (c)；PR [#80][pr-80]、[#81][pr-81]、[#87][pr-87]、[#89][pr-89]、[#95][pr-95]、[#94][pr-94]；[§10.41][l10-41] 至 [§10.44][l10-44]）；TUI 的瘦身（D.9、`pi-update`、`pi-workflow`、指南查看器、`async-openai`、B.3、D.3、一个死设置；PR [#75][pr-75]、[#78][pr-78]、[#83][pr-83]、[#86][pr-86]、[#84][pr-84]、[#85][pr-85]、[#91][pr-91]、[#82][pr-82]）；七个修复：PR [#93][pr-93] 与 [#97][pr-97] 是安全问题（v0.8.0 带着它们），PR [#96][pr-96] 是 Auto 的限额，r44 的 PR [#107][pr-107] 是 Windows 上 `pi.exec` 不终止子进程（[§10.47][l10-47]），PR [#111][pr-111] 是 Python 3.11 上选扩展入口的方式（[§10.49][l10-49]），r45 的 PR [#115][pr-115] 是审计的修复（pager 不再发 `x.ai/log`；图片与图表的缓存移到 `<home>/pager-cache/`；给权限管理器加门禁；[§10.48][l10-48]），r46 的 PR [#113][pr-113] 给 `agent-client-protocol` 加上界 `<1.0.0`（1.0.0 使新装的包与 CI 起不来；[§10.49][l10-49]）；一处对话的改动：r46 的 PR [#112][pr-112]（`--setup` 在键变量已有值时不再问 key；[§10.49][l10-49]）；其余是文档与测试，含 PR [#105][pr-105]（修 Windows 整套 pytest 的 9 个失败，只改测试；[§10.46][l10-46]）、r43 的 PR [#106][pr-106]（收尾计划，只改文档；[§10.46][l10-46]）、r44 的 PR [#108][pr-108]（扩展的登记，只改文档；[§10.47][l10-47]）、PR [#110][pr-110]（一个测试在 macOS 上跳过；[§10.49][l10-49]）与 r46 的 PR [#114][pr-114]（记 r46，只改文档；[§10.49][l10-49]）。发布准备在 PR [#116][pr-116]（开着；版本号 0.9.0 与 `CHANGELOG.md` 的 `[0.9.0]`；[§10.50][l10-50]）。清单与用户能看到的变化：`CHANGELOG.md` 的 `[Unreleased]`（#116 把它们移到 `[0.9.0]`）；对前 28 个的核对：[§10.45][l10-45]。已发布版本的发布里程碑全文：[归档的附录 G][logG]。
+截至 r48：**v0.5.0、v0.6.0、v0.7.0、v0.8.0 与 v0.9.0 都已发布。** 最新的是 v0.9.0（2026-11-11；tag 在 `6e96066`；[GitHub Release][rel-v090]）。v0.8.0 之后的 41 个提交都在它里面（r47 时数的 39 个，加发布用的 [#116][pr-116] 与 [#117][pr-117]）；tag 之后没有别的功能提交，r48 只改文档。v0.9.0 的内容与证据：[发布里程碑 V0.9](#发布里程碑-v09)；r47 时逐个列出那 39 个提交的段落：[归档的附录 H.2][logH2]。已发布版本的发布里程碑全文：[归档的附录 G][logG]、[附录 H][logH]。
 
 | 阶段 | 状态 | 已完成 | 还差 |
 |---|---|---|---|
@@ -53,19 +53,23 @@
 
 **状态：已发布，已归档。** v0.8.0 在 2026-10-31 发布：tag `v0.8.0` 在 `a5d32d5`，[GitHub Release][rel-v080]，`Release` 的[运行][run-release-v080]（六个 job 都成功），`Agent binaries` 的[运行][run-agent-binaries-v080]（五个平台，把五个压缩包挂到 Release）。没有 GitHub 里程碑，也没有退出条件的清单。它发 `main` 上 v0.7.0 之后的 14 个提交：r28 用一次 `gh stack` 合入的十个 PR（[#56][pr-56] 至 [#65][pr-65]；其中 r27 的旗标与设置页的修、选择器的截止、一批清理）和四个发布用的 PR：macOS arm64 的 TUI 构建换到 `macos-15` 的 runner（[#69][pr-69]）；让 agent 能作为冻结的可执行文件运行（[#70][pr-70]）；在五个平台上构建它（[#71][pr-71]）；版本号与发布说明（[#72][pr-72]）。发布页有 21 个资产：七个 wheel 与七个 sdist（核心、harness、cli 0.8.0；三个扩展包 0.5.0；`pi-mcp-py` 0.3.0）、五个 agent 压缩包、`zypi-linux-x86_64` 与 `zypi-macos-arm64`；PyPI 的七个包是这些版本。ACP registry 的条目：PR [agentclientprotocol/registry#735][reg-735] 在 2026-10-31 开，2026-11-04 仍开着，没有人回复。已知问题与用户能看到的变化：`CHANGELOG.md` 的 `[0.8.0]`。发布之后在 `main` 上发现并修了两个安全问题，v0.8.0 带着它们：PR [#93][pr-93]（会话开始时的 `git status`）与 [#97][pr-97]（`workflow` 的 `isolation`）。发布记录与证据：[§10.45][l10-45]。这一版没有写过里程碑，所以没有可归档的原文。
 
+### 发布里程碑 V0.9
+
+**状态：已发布，已归档。** v0.9.0 在 2026-11-11 发布：tag `v0.9.0` 在 `6e96066`，[GitHub Release][rel-v090]，`Release` 的[运行][run-release-v090]（六个 job 都成功），`Agent binaries` 的[运行][run-agent-binaries-v090]（五个平台，把五个压缩包挂到 Release）。没有 GitHub 里程碑，也没有退出条件的清单。它发 `main` 上 v0.8.0 之后的 41 个提交：39 个功能、修复、测试与文档的提交（清单：[附录 H.2][logH2]），和两个发布用的 PR：版本号与发布说明（[#116][pr-116]）、记 r47（[#117][pr-117]）。内容：Auto 成为真的权限模式（规则加一个模型步骤；`zypi` 提供它）；TUI 的瘦身（删 `pi-update`、`pi-workflow`、指南查看器、`async-openai`，和 xAI 的计费与云同步代码）；安全与审计的修复（没人担保的项目里不运行 `git status`，`workflow` 的 `isolation` 被拒绝；`pi.exec` 在 Windows 上终止子进程；`x.ai/log` 不再发给 agent；图片与图表的缓存移到 `<home>/pager-cache/`）；`--setup` 在键变量已有值时不再问 key；`agent-client-protocol` 的上界 `<1.0.0`。发布页有 21 个资产：七个 wheel 与七个 sdist（核心、harness、cli 0.9.0；三个扩展包 0.6.0；`pi-mcp-py` 0.4.0）、五个 agent 压缩包、`zypi-linux-x86_64` 与 `zypi-macos-arm64`；PyPI 的七个包是这些版本。ACP registry 的条目：PR [agentclientprotocol/registry#735][reg-735] 开着，条目已改成 0.9.0（提交 `59da183`），等维护者。已知问题（20 条）与用户能看到的变化：`CHANGELOG.md` 的 `[0.9.0]`。发布记录与证据：[§10.51][l10-51]；准备：[§10.50][l10-50]。这一版没有单独写过里程碑；发布之前的头部、「当前状态」、「下一步」与「还没有验证的」里 0.9 的文字，原样存在[附录 H][logH]。
+
 ### 下一步
 
-- **已发布：** v0.5.0（2026-10-13）、v0.6.0（2026-10-25）、v0.7.0（2026-10-30）与 v0.8.0（2026-10-31）。GitHub 里程碑 [v0.5.0][ms-v050] 与 [v0.6.0][ms-v060] 都已关闭；v0.7.0 与 v0.8.0 没有里程碑。各版的发布里程碑已归档（[发布里程碑](#发布里程碑-v05)）。
-- **已处理（r46）：** `agent-client-protocol` 1.0.0（2026-11-09）使新装的包起不来，也使新开的 PR 的 CI 红；PR [#113][pr-113]（上界 `<1.0.0`）已合入，`main` 的 CI 回绿。**已定：** 不发 0.8.1；上界随 0.9 发布（用户，2026-11-11）。迁到 acp 1.0 的接口：答复没有涉及，没有排期（[§10.49][l10-49]）。
-- **要等用户决定：** 下一个版本：带什么、版本号、日期、要不要里程碑（v0.8.0 之后还没有）。次序已定（用户，2026-11-04）：先收尾计划（r43），再发版；版本是 0.9，发布之前由用户自己做实测（要测什么：见[还没有验证的](#还没有验证的)；r46 做了一部分）。**已定：** 0.9 主要含 Auto 模式与审计项修复；别的小问题可以并入（用户，2026-11-11）。日期与里程碑还没有定。r46 留下的，用户在 2026-11-11 答复了：B2 当时出现的是询问卡片，卡片上的原因句他不记得，所以 B2 的原因仍没有找到；**已定：** 不再验证 B2（要找原因，只能再测：B2 之后立刻输入 `/auto-log`），记为已知问题（用户，2026-11-11 15:33）；PR [#112][pr-112] 的做法（键变量已有值时不再问 key）**已确认**，已合入，**已定：** 它的对话不再在真终端或 Zed 里验证，记为已知问题（用户，2026-11-11 15:33）；**已定：** B10 至 B15 在 0.9 之前不测；Windows 上以反斜杠开头的参数多问，记为 0.9 之后的待办，不修；不发 0.8.1（见上）。#115 的 F-2（在真的 `zypi` 里粘图、再删会话）：用户说「先记录」（2026-11-11 15:33），我读成只记录，不验证，记为已知问题。没有答复的：要不要迁到 acp 1.0 的接口；0.9 的日期与里程碑（`CHANGELOG.md` 里暂写 2026-11-11，是我选的）（[§10.49][l10-49]、[§10.50][l10-50]）。
-- **已合入 `main`，还没有发布（r47）：** v0.8.0 之后的 39 个提交（[当前状态](#当前状态)）。`CHANGELOG.md` 的 `[Unreleased]` 有它们的条目：Auto 模式、TUI 的删除、安全与限额的修复、缓存的新位置、`--setup` 的一处改动、`agent-client-protocol` 的上界。**用户会看到的变化：** `permission = "auto"` 不再等于「不问」（要「不问」，写 `always-approve`）；Auto 默认把用户自己的消息与命令发给一个模型；默认设置下，什么都没交付的项目的系统提示里不再有 `<git_status>` 块；在这样的项目里，`workflow` 的 `isolation` 被拒绝；`zypi` 提供 Auto；`zypi` 把粘贴的图片与渲染的图表放在 `<home>/pager-cache/<会话号>/`，不再放在 `sessions/`（旧文件留在原处，不会被清）；`zypi` 不再向 agent 发 `x.ai/log` 通知（agent 本来就丢掉它）；`--setup` 在键变量已有值时不再问 key；新装的包不再装到 `agent-client-protocol` 1.0.0。两个安全问题（PR [#93][pr-93]、[#97][pr-97]）是 v0.8.0 带着的。版本是 0.9（用户，2026-11-04）；范围见上（用户，2026-11-11）；日期没有定。发布准备在 PR [#116][pr-116]（开着；[§10.50][l10-50]）：版本号 0.9.0（三个扩展包 0.6.0，`pi-mcp` 0.4.0），`CHANGELOG.md` 的 `[0.9.0] - 2026-11-11`（日期是我选的）与 20 条已知问题；`Release` 的演练：成功，没有发布任何东西（运行见 [§10.50][l10-50]）。tag 与发布还没有做，等用户。PR [#107][pr-107] 已合入，也在 0.9 里（自带 `CHANGELOG.md` 的条目；只有 Windows 上用 `pi.exec` 的第三方扩展会看到变化）；PR [#110][pr-110] 与 [#111][pr-111] 没有条目（一个只改测试，一个去掉 Python 3.11 上的警告）。
+- **已发布：** v0.5.0（2026-10-13）、v0.6.0（2026-10-25）、v0.7.0（2026-10-30）、v0.8.0（2026-10-31）与 v0.9.0（2026-11-11）。GitHub 里程碑 [v0.5.0][ms-v050] 与 [v0.6.0][ms-v060] 都已关闭；v0.7.0、v0.8.0 与 v0.9.0 没有里程碑。各版的发布里程碑已归档（[发布里程碑](#发布里程碑-v05)）。
+- **已处理（r46）：** `agent-client-protocol` 1.0.0（2026-11-09）使新装的包起不来，也使新开的 PR 的 CI 红；PR [#113][pr-113]（上界 `<1.0.0`）已合入，`main` 的 CI 回绿。**已定：** 不发 0.8.1；上界随 0.9 发布（用户，2026-11-11）；v0.9.0 带着它。迁到 acp 1.0 的接口：答复没有涉及，没有排期（[§10.49][l10-49]）。
+- **要等用户决定：** 下一个版本：带什么、版本号、日期（v0.9.0 之后还没有）。迁到 acp 1.0 的接口：没有答复，没有排期（[§10.49][l10-49]）。**已定（用户，2026-11-11）：** v0.9.0 的发布日期是 2026-11-11（`CHANGELOG.md` 里的日期原来是我选的）。v0.9.0 没有建 GitHub 里程碑（用户没有提）。r46 与 r47 的几项已定的事，已记进 `CHANGELOG.md` 的已知问题或「还没有验证的」：B2 与 `--setup` 的对话不再验证；#115 的 F-2 先记录（我读成不验证）；B10 至 B15 在 0.9 之前不测；Windows 上以反斜杠开头的参数多问，记为 0.9 之后的待办，不修。这一条在 r47 时的原文：[附录 H.3][logH3]。
+- **v0.9.0 之后（r48）：** 没有已合入而未发布的功能。ACP registry 的 PR [agentclientprotocol/registry#735][reg-735] 开着，等维护者；r48 把它的条目改成了 0.9.0（提交 `59da183`；[§10.51][l10-51]）。0.9 的内容、用户会看到的变化与已知问题：[发布里程碑 V0.9](#发布里程碑-v09) 与 `CHANGELOG.md` 的 `[0.9.0]`。这一条在 r47 时的原文（列出 0.9 的变化与发布准备）：[附录 H.3][logH3]。
 - **发布之后留下的（r22；这一轮没有重查）：** `release.yml` 里 `arduino/setup-protoc` 没有 Node 24 的版本，Node.js 20 弃用的警告还点它；PyPI 一侧的 Trusted Publishing 没做（要账号所有人在 PyPI 上设）。**r46 加的（已定；用户，2026-11-11）：** Windows 上以反斜杠开头的引号参数被规则当成盘根路径，所以 Auto 多问（`grep '\bTODO\b'`、`printf '\n'`；[§10.49][l10-49]）；0.9 之后再处理，不进 0.9。
 - **不用等决定：** 阶段 D 在 r38 关闭，没有候选（用户，2026-11-03）。§7 没有待办（r43）。
 - **已定，不做：** 翻页的代价（决策 18；用户在 2026-10-18 答复：不做，1,000 个会话以内够用）；选择器边翻边显示（决策 11）与会话目录的列举太慢（决策 13）（用户，2026-10-27：不做）；真的 Plan（决策 7 的 (b)；用户，2026-11-02）；pager 改用标准的 `mode` 配置项（1.P3 的收尾）、`initialize._meta` 解码精简（1.R5）、按能力隐藏入口（1.R2）、1.R3 余下的部分（用户，2026-11-04）。
 
 ### 还没有验证的
 
-发布 0.9 之前，用户自己做实测（用户，2026-11-04）；r46 做了一部分：Windows 上的 Zed 与单文件 exe（回报 23 项，22 通过，B2 失败；[§10.49][l10-49]）。r47：用户定了 B2 与 `--setup` 的改动不再验证；#115 的 F-2，他说「先记录」，我读成不验证（2026-11-11 15:33）。下面是还没有验证的事；做过的，和不再验证的，在各条里标了。
+v0.9.0 发布之前，用户自己做了一部分实测（用户，2026-11-04）：Windows 上的 Zed 与单文件 exe（r46：回报 23 项，22 通过，B2 失败；[§10.49][l10-49]）。r47：用户定了 B2 与 `--setup` 的改动不再验证；#115 的 F-2，他说「先记录」，我读成不验证（2026-11-11 15:33）。下面是还没有验证的事；做过的，和不再验证的，在各条里标了。
 
 - **平台。** Rust 的 e2e 用例与 `scripts/tui_pty/` 的 PTY 脚本只在 Linux（WSL2）上跑过；macOS 与 Windows 上没有。Windows 上只量了 Python 一侧的延迟，TUI 没有参与；Python 的整套 pytest 在 Windows 与 WSL 上都通过（r43，[§10.46][l10-46]）。r46：Windows 上的 Zed 与单文件 exe 用户测了（见下面各条）；macOS 上 Python 的整套 pytest 在 `b0a55cb` 上跑过一次（PR [#110][pr-110] 的正文，不是我跑的）：1 个失败，已修。r47：审计的 Rust 代码在 Windows 上查了（GitHub 的 `windows-latest`；[§10.50][l10-50]）：整个 workspace 在原生 Windows 上编不过（`pi-tools-api` 的 build script 要 `/dev/stdout`），审计之前就是这样，所以没有 Windows 的 `zypi`；补一处之后，非测试代码编得过；两处测试代码编不过，关掉之后，`pi-pager-render` 的 1,075 个与 `pi-pager` 按名字选的 301 个单元测试里，37 个失败，审计前后逐个相同；`pi-pager` 其余 4,911 个单元测试与各集成测试目标没有跑。
 - **真实 LLM。** r9、r10 的实测都用 mock。r11 用真模型跑了一轮网络审计（C.1，只看 `zypi` 有没有外连），没有用它验证别的功能。r46：用户在 Windows 的 Zed 里用真模型试了 Auto、项目信任、`--setup` 与会话恢复（[§10.49][l10-49]）。
@@ -83,14 +87,14 @@
 - **`smoke.py --sandbox workspace` 的标签。** PR [#77][pr-77] 把内核有 Landlock 时的检查从欢迎页挪到第一轮对话之后，本地 24/24（[§10.34][l10-34]）。没有确认的：欢迎页该不该显示标签；没有在 WSL2 5.x（没有 Landlock）上跑过，只在 Landlock 内核上模拟过。
 - **D.3 的删除（r38）。** 只在 Linux 的发行构建上验证：没有网络，没有 xAI 的令牌与账号，没有真模型。语音没有从头到尾测过（连不到 `api.x.ai`）。别的 ACP agent 对「带 HTTP 402 的 `retry_state`」只有单元测试，没有用真的 agent 试过。macOS 与 Windows 没有测（[§10.40][l10-40]）。
 - **Auto（r39 至 r41）。** 云端的 Linux VM 上测过：规则、语料、变异、整套 pytest、`python_agent_e2e`、`zypi` 的 PTY 脚本（替身 LLM）；真模型只在评估脚本里用过（一个网关上的几个模型）。**r43：** Windows 与 WSL 的整套 pytest 也跑过（Windows 的 9 个失败是测试假设了 Linux，PR [#105][pr-105] 修了；[§10.46][l10-46]）。**r46：** 用户在 Windows 的 Zed 里用真模型试了 B1 至 B9：除 B2（`git status` 与 `ls` 本应直接运行；出现的是询问卡片，原因句他不记得，原因没有找到；用户定了不再验证，2026-11-11 15:33）外都符合预期；B10 至 B15（入口消息、`classifier = "rules"`、未信任项目里的 git、ask 模式、Windows 路径探测、普通工作的询问次数）没有回报，用户决定 0.9 之前不测（2026-11-11）。我另外量到：Windows 上以反斜杠开头的参数（`grep '\bfoo\b'`、`printf '\n'`）被规则当成盘根路径，会询问（Linux 上放行；Python 3.11、3.12、3.13 上结果相同）；方向是安全的，代价是多问（[§10.49][l10-49]）。没有验证的：JetBrains 与真的 `zypi` 会话里加真模型步骤；真的 agent 在没有规则能证明只读的调用里多常写注释；`zypi` 在会话由第一条消息创建时很少显示 Auto 的进入消息（原因没找到）；M-06 只收窄，没有关：注释通道有一条窄规则，字符串参数的通道仍开着，别的位置（程序代码里的注释、文件名、分支名、环境值）只探过一次。
-- **v0.8.0 的 agent 单文件程序与 registry 条目。** 五个平台的程序只在 CI 里启动过（冒烟测试，替身模型服务器）；Windows 的 exe 用户在 Zed 里用过（r46，F1 至 F3 通过；那个 exe 来自 `b0a55cb` 的演练）；JetBrains 与其余四个平台没有人用过；没有签名；Linux x86_64 的 glibc 下限没有量；冻结的 agent 只带 OpenAI 格式的 provider。registry 的 PR [agentclientprotocol/registry#735][reg-735] 开着，没有人回复（r42）。见 `CHANGELOG.md` 的 `[0.8.0]` 与 [§10.45][l10-45]。
+- **v0.8.0 与 v0.9.0 的 agent 单文件程序与 registry 条目。** 五个平台的程序在 CI 里启动过（冒烟测试，替身模型服务器）；除此之外，r48 在 Windows 上跑了发布页的 exe 的冒烟测试，registry 的校验器在 WSL 里下载并启动了 Linux x86_64 的程序；Windows 的 exe 用户在 Zed 里用过（r46，F1 至 F3 通过；那个 exe 来自 `b0a55cb` 的演练，不是 v0.9.0 的）；JetBrains 与其余平台没有人用过；没有签名；Linux x86_64 的 glibc 下限没有量；冻结的 agent 只带 OpenAI 格式的 provider。registry 的 PR [agentclientprotocol/registry#735][reg-735] 开着，没有人回复；r48 把条目改成了 0.9.0（[§10.51][l10-51]）。见 `CHANGELOG.md` 的 `[0.8.0]`、`[0.9.0]` 与 [§10.45][l10-45]。
 - **子进程的生命周期（1.R3 余下的部分；r43 记为已知缺口）。** Windows 上，agent 与它的工具进程在 `zypi` 退出、崩溃、Ctrl-C 之后的下场没有测（Windows 没有 `zypi` 二进制）。`pi-mcp-py` 起的 MCP 子进程：agent 被强杀或 `zypi` 退出时的下场没有测。r46：Zed 一侧测了：取消一次运行（D4）、退出 Zed 后没有残留进程（D5）都通过（用户，Windows）。
 - **Windows 上扩展的 `pi.exec`（r43 发现，r44 修，已合入）。** `LocalExecutionEnv.exec` 在 Windows 上超时或被中止时只终止 shell，不终止它的子进程：管道还开着，调用要等到子进程自己结束。修复在 PR [#107][pr-107]：`exec` 改用核心 Bash 工具的 `ProcessTreeKiller`（Windows 上是 Job Object）；Windows 与 WSL 的整套 pytest 通过（[§10.47][l10-47]）。PR 已合入（r46）；这一条只剩下面没有验证的：真的第三方扩展在 Windows 上调用 `pi.exec`；有意离开进程组或 Job 的程序（POSIX 上的 `setsid`）仍可能占着管道。`packages/` 里没有代码调用 `pi.exec`，模型的 `bash` 工具不经这条路（[§10.46][l10-46]）。
 - **Compaction。** 附录 A.1 的 compaction 一行仍是「未定」（r9 起）：Python 一侧由 `max_turns >= 30` 推导 `auto_compact`（`factory.py`；r43 核对过）；pager 一侧的触发与展示没有重新核对。owner：用户；2026-11-04 起记为已知缺口。
 - **扩展的登记（P2 的第 ③ 条；r44 建了登记处，Q1 已答复）。** 登记处是 [ACP 扩展登记](../specs/2026-11-05-acp-extension-registry.md)（PR [#108][pr-108]）：八项（`pi/session/delete`、`_meta.sessionId`、`_meta["pi/cwd"]`、三个模型提示键、`_meta.isReplay`、终端键、`_meta.yoloMode` 与 `_meta.autoMode`、`pi/yolo_mode_changed`），每项有方向、schema、发送方、读取方、测试与状态。核对的结果：四项不满足第 ① 条（`pi/session/delete`、三个模型提示键、`_meta.yoloMode` 与 `_meta.autoMode`、`pi/yolo_mode_changed`；它们有标准等价物），保留它们是已有的决定（ADR4；D5 与用户，2026-11-04）；有 Rust 一方的六项，没有一项的类型在 `pi-acp-lib`（第 ④ 条）；没有一项在 `initialize` 里协商（第 ⑤ 条；agent 的 `initialize` 没有 `_meta`）。**已定**（用户，2026-11-05；登记 §7 的 Q1）：第 ④、⑤ 条只对新项适用，这八个旧项保持原样，缺口记在登记的 §4。没有待办。没有查的：pager 的 Rust 库（ACP 0.10.4）有没有 `session/delete`；Zed 怎么读终端键，只读了源码，没有运行（[§10.47][l10-47]）。
 - **审计的修复（r45；PR [#115][pr-115] 已合入）。** 作者的测试只在 macOS 上跑过：`pi-acp-lib` 68 个、`pi-telemetry` 218 个、`pi-pager-render` 的 `--lib` 1,094 个、`pi-pager` 的 `--lib` 5,243 个、`pi-pager` 的五个集成目标 272 个（含 `python_agent_e2e` 的 15 个，对着真的 Python agent）都通过。PR 的 CI 在 Linux 上跑了：Ruff、pytest（Python 3.11、3.12、3.13）、`TUI CI` 的门禁与 `cargo check`、`cargo nextest (Linux x86_64)` 都通过（运行与用时见 [§10.49][l10-49]）；清单里 `pi-pager-render` 的 1,097 与 `pi-pager` 的 5,519 是 Linux 的旧数加上净增的个数，nextest 通过说明没有测试失败，数本身我没有对过。r47 在 Windows 上查了（GitHub 的 `windows-latest`，一次性的 CI；[§10.50][l10-50]）：补一处 build script 之后，非测试代码编得过，含缓存目录的非 Unix 分支；缓存目录的 6 个测试通过，单独切出的代码的 4 个测试也通过；`pi-pager-render`（1,075 个）与 `pi-pager` 里按名字选的 301 个测试有 37 个失败，审计之前的 `26ffb9b` 上是同样的 37 个。没有跑：`pi-pager` 其余 4,911 个单元测试与各集成测试目标在 Windows 上；macOS 上除作者那一次外的编译；`scripts/tui_pty/`；`zypi` 在 Windows 上的运行（没有二进制）。没有看过（F-2；用户说「先记录」，我读成不验证；2026-11-11 15:33）：在真的终端里粘一张图、再删会话，看缓存目录有没有被清；只有单元测试与对着假 agent 的测试看过缓存的路径与清理。F-4 的门禁认的是函数名：没有查管理器里的类型能不能被 `permission/` 之外的代码直接构造并启动。没有处理：旧版本写进 `sessions/<目录>/<会话号>/{images,mermaid}` 的文件不会被迁移，也不会被清；代码里两条过期的注释（`agent_modes.rs` 开头；`session_startup.rs` 第 164 行）（[§10.48][l10-48]）。
 - **新装包的依赖解析（r46 发现）。** `pi-agent-cli` 对 `agent-client-protocol` 没有上界，CI 每次从 PyPI 装最新的，所以上游的一次大版本发布就能使新装的包与新的 CI 运行失败：1.0.0（2026-11-09）就是这样；修复在 PR [#113][pr-113]（已合入；上界 `<1.0.0`）。其余依赖有没有同样的风险，没有查。迁到 1.0 的接口没有做，也没有估工作量（[§10.49][l10-49]）。
-- **0.9 的发布准备（r47）。** PR [#116][pr-116] 开着：版本号、扩展的下限、`CHANGELOG.md`（[§10.50][l10-50]）。测试：版本的两个测试 16 个通过；Windows 整套 6107 个通过，WSL 5984 个通过。PR 的 CI 与 `Release` 的演练：头 `331013d` 上，`CI`、`TUI CI`、`Agent binaries` 都通过；演练成功，没有发布任何东西（[§10.50][l10-50]）。没有验证的：发布本身（tag、PyPI 的七个包、Release 页、`Agent binaries` 挂五个档案）；ACP registry 的新条目；日期没有定（`CHANGELOG.md` 里暂写 2026-11-11）。
+- **v0.9.0 的发布（r48）。** tag、PyPI、发布页、五个 agent 档案都做完了（[§10.51][l10-51]）。还没有验证的：两个 TUI 程序（`zypi-linux-x86_64`、`zypi-macos-arm64`）没有下载也没有运行；macOS 与 Linux aarch64 的 agent 程序只在 CI 里跑过；PyPI 的新装只在 Windows 上做过，没有真模型；registry 的 PR 没有人看过，合入之后的版本更新机器人没有见过。0.9 的 20 条已知问题还在（`CHANGELOG.md` 的 `[0.9.0]`）。
 
 出处：执行记录 [§10.10][l10-10]–[§10.15][l10-15] 各节的「没有验证」。
 
@@ -127,7 +131,7 @@
     - 详情：[§10.11][l10-11]、[§10.15][l10-15]
 7. **模式映射（1.P3）。** (a) 只提供 agent 会照做的模式；(b) 做 `session/set_mode`，Plan = 把工具集裁到只读；(c) 定义 Python 的 `auto`（今天等于 always-approve，设置页却说是分类器：改名、删除，或真做分类器）。
     - 倾向：(a) 先行，因为 Plan 现在给用户的是虚假的安全感；(b) 另议。
-    - 状态：(a) **已做**（r10，PR [#12][pr-12]；用户在 2026-10-16 确认倾向）；(b) **已定，不做**（用户，2026-11-02：不要真的 Plan；`PLAN` 与 `DEFAULT` 常量保持 `false`，休眠的 Plan 代码怎么处理另议）；(c) **已做**（用户，2026-11-02：做真的 Auto，按设计的全部倾向，见 [Auto 模式设计](../specs/2026-11-02-auto-mode-design.md) 的第 8 节；r33、r39 至 r41；五个 PR 在 2026-11-02 至 2026-11-04 合入 `main`，还没有发布）。Python 的 `auto` 是规则加模型的分类器，不替用户拒绝，只放行或询问；`pi/yolo_mode_changed` 与 `_meta.autoMode` 作为旧项登记，pager 继续用它们，不改用标准的 `mode` 配置项（用户，2026-11-04；1.P3 关闭）；`zypi` 提供 Auto，干净的启动仍是 `ask`（Normal）。五个 PR：0 设计记录与准入（[#80][pr-80]）、1a 规则与语料（[#81][pr-81]；第一次红队 [#87][pr-87]）、1b 接进 agent（[#89][pr-89]；`permission = "auto"` 不再等于「不问」）、2 模型步骤（[#95][pr-95]；默认 `[auto] classifier = "model"`）、3 `zypi` 提供 Auto（[#94][pr-94]）；后续：[#93][pr-93]、[#96][pr-96]、[#97][pr-97]。Plan 在界面里已经看不到，所以 PR [#24][pr-24] 把 Plan 预览读 `plan.md` 的代码一起删了（r13）：预览只用审批请求带来的内容。以后做 (b) 时，Plan 的内容要走 ACP，不读盘。
+    - 状态：(a) **已做**（r10，PR [#12][pr-12]；用户在 2026-10-16 确认倾向）；(b) **已定，不做**（用户，2026-11-02：不要真的 Plan；`PLAN` 与 `DEFAULT` 常量保持 `false`，休眠的 Plan 代码怎么处理另议）；(c) **已做**（用户，2026-11-02：做真的 Auto，按设计的全部倾向，见 [Auto 模式设计](../specs/2026-11-02-auto-mode-design.md) 的第 8 节；r33、r39 至 r41；五个 PR 在 2026-11-02 至 2026-11-04 合入 `main`，随 v0.9.0 发布，2026-11-11）。Python 的 `auto` 是规则加模型的分类器，不替用户拒绝，只放行或询问；`pi/yolo_mode_changed` 与 `_meta.autoMode` 作为旧项登记，pager 继续用它们，不改用标准的 `mode` 配置项（用户，2026-11-04；1.P3 关闭）；`zypi` 提供 Auto，干净的启动仍是 `ask`（Normal）。五个 PR：0 设计记录与准入（[#80][pr-80]）、1a 规则与语料（[#81][pr-81]；第一次红队 [#87][pr-87]）、1b 接进 agent（[#89][pr-89]；`permission = "auto"` 不再等于「不问」）、2 模型步骤（[#95][pr-95]；默认 `[auto] classifier = "model"`）、3 `zypi` 提供 Auto（[#94][pr-94]）；后续：[#93][pr-93]、[#96][pr-96]、[#97][pr-97]。Plan 在界面里已经看不到，所以 PR [#24][pr-24] 把 Plan 预览读 `plan.md` 的代码一起删了（r13）：预览只用审批请求带来的内容。以后做 (b) 时，Plan 的内容要走 ACP，不读盘。
     - 详情：[§10.11][l10-11]、[§10.13][l10-13]、[§10.41][l10-41]、[§10.42][l10-42]、[§10.43][l10-43]、[§10.44][l10-44]
 8. **旗标契约（1.P6）。** `--system-prompt-override`、`--rules` 在交互模式下无效；`--allow` / `--deny` 没有传给 agent；`-m` 的路径没有查清。`--permission-mode` 已在 r10 收窄到 `default` 与 `bypassPermissions`。
     - 选项：Python 读 `initialize._meta`（前两项各几行）；或 pager 对着 Python agent 拒绝这些旗标并说明；`-p` 另行定义。要定哪些旗标属于产品契约。
@@ -451,6 +455,7 @@ Rust（pager）：
 | [§10.48][l10-48] | r45 | 审计计划与代码的偏差：删 `x.ai/log` 的转发并修好出站守卫；图片与图表的缓存移出 `sessions/`；给 Rust 的权限管理器加「没有调用者」的门禁；改 P6、ADR4、ADR5、附录 A 与几处状态的文字；r46 补记：开 PR 并合入 | PR [#115][pr-115] |
 | [§10.49][l10-49] | r46 | 用户在 Windows 上的实测（回报 23 项，22 通过，B2 失败，原因没有找到）与两个云端演练；`--setup` 的一处改动；`agent-client-protocol` 1.0.0 使新装的包与 CI 起不来；记 #110、#111；用户定 0.9 的范围；合入 #113、#115（r45 的审计）与 #112；提交用户对 hook 的一行改动 | PR [#112][pr-112]、[#113][pr-113]、[#115][pr-115]；本 PR [#114][pr-114] |
 | [§10.50][l10-50] | r47 | 用户定 B2 与 `--setup` 的改动不再验证、F-2 先记录；审计的 Rust 代码在 Windows 上编译与测试（GitHub 的 `windows-latest`：workspace 在原生 Windows 上编不过，审计之前就是这样；跑过的测试里 37 个失败，审计前后相同；缓存目录的代码通过）；0.9 的发布准备（版本号、`CHANGELOG.md`、`Release` 的演练） | PR [#116][pr-116]；本 PR [#117][pr-117] |
+| [§10.51][l10-51] | r48 | v0.9.0 的发布（tag、`Release`、PyPI、发布页）、`Agent binaries` 挂五个档案、ACP registry 的条目改成 0.9.0；归档发布里程碑（附录 H） | 本 PR [#118][pr-118] |
 | [附录 A.4][logA4] | r5 | 入口审计的 r5 执行结果 | [#7][pr-7] |
 | [附录 B][logB] | r2–r17 | 复现方法（依赖图、模块级闭包、各轮的测量与测试命令） | — |
 | [附录 C][logC] | r10 | §7 的逐项注释（原文） | — |
@@ -458,7 +463,8 @@ Rust（pager）：
 | [附录 E][logE] | r2 | §4、§5 的原文（源码事实基线与改动规模估计） | — |
 | [附录 F][logF] | r22 续 1 | 计划整理前的状态文字（原文）：头部、「当前状态」逐轮、两个里程碑、「下一步」，「还没有验证的」「待决策」「§7」「§10 索引」里改短的条目，「修订记录（摘要）」的长条目 | — |
 | [附录 G][logG] | r42 | 计划整理前的文字（原文）：头部、「当前状态」里「截至 r28」的一段、三个发布里程碑、「下一步」、决策 7 的状态 | — |
-| [修订记录][logRev] | r1–r47 | 逐轮的完整说明 | — |
+| [附录 H][logH] | r48 | 计划整理前的文字（原文）：头部、「当前状态」里「截至 r47」的一段、「下一步」的四条、「还没有验证的」里被改写的三段 | — |
+| [修订记录][logRev] | r1–r48 | 逐轮的完整说明 | — |
 
 ## 附录 A：能力矩阵与 ACP 版本配对（阶段 0.8，r9 定稿）
 
@@ -584,6 +590,7 @@ Rust（pager）：
 - r45：审计计划与代码的偏差（2026-11-08；分支 `fix/audit-rust-runtime-findings`，基于 `26ffb9b`；当时没有推送，没有 PR；2026-11-11 开 PR [#115][pr-115]，合入）：用户要我审计代码与设计有没有偏差。我报告了五处（F-1 至 F-5），用户五项都选：写报告、给 F-4 加门禁、改文档、修 F-2、修 F-1。F-1：pager 把自己的日志当作 `x.ai/log` 通知发给 agent；`acp_send` 里挡它的守卫读的是序列化之后的请求，扩展的方法名不在里面，所以从不触发；删了转发，守卫改读类型里的名字，被清单 `--skip` 的那个测试恢复了。F-2：图片与图表的缓存写在 agent 的会话目录里，删会话时留在磁盘上；移到 `<home>/pager-cache/<会话号>/`，agent 确认删会话之后清掉，读盘门禁多看两个 crate。F-4：Rust 的权限管理器没有调用者，加了门禁。F-3 与 F-5：P6、ADR4、ADR5、附录 A 与几处状态的文字对齐代码。数：清单合计 8,232 → 8,240，跳过 25 → 24，`x.ai` 的上限 245 → 240。审计报告：[`AUDIT-RUST-RUNTIME-REMOVAL-2026-11-08.md`](../AUDIT/AUDIT-RUST-RUNTIME-REMOVAL-2026-11-08.md)。见 [§10.48][l10-48]。
 - r46：用户的实测、0.9 的范围与合并（2026-11-11；`26ffb9b`，合入之后是 `bae3a5e`；分支 `docs/plan-r45-hands-on-results`；本 PR [#114][pr-114]；补记 PR [#112][pr-112]、[#113][pr-113]、[#115][pr-115]）：用户在 Windows 上做了 0.9 的实测，回报 23 项，22 通过，B2 失败（Auto 下 `git status` 与 `ls` 本应直接运行；原因没有找到）；B10 至 B15 没有回报，E 组没有重测；D1 的建议做成 PR #112（键变量已有值时 `--setup` 不再问 key）。两个云端演练成功。发现 Windows 上以反斜杠开头的参数多问（没有改），发现 `agent-client-protocol` 1.0.0 使新装的包与 CI 起不来（PR #113 修）。记 #110、#111。计划里过时的事实改了（38 个提交；`bae3a5e`；#107、#108、#112、#113、#115 已合入）。用户随后答复了六个问题，记进同一轮：B2 出现的是询问卡片（原因句不记得）；B10 至 B15 在 0.9 之前不测；反斜杠多问留到 0.9 之后；#112 的读法对；不发 0.8.1，#113 并入 0.9。他定了 0.9 的范围（主要含 Auto 模式与审计项修复，别的小问题可以并入），并要我合入这些 PR：#113、#115（r45 的审计分支没有 PR，我开了）与 #112，各自等 CI 通过；他改了 hook 里 autofix 用的模型，一起提交。改文档与一个设置文件（`.cursor/hooks.json` 的一行，用户自己的改动）。见 [§10.49][l10-49]。
 - r47：审计代码在 Windows 上的检查与 0.9 的发布准备（2026-11-11；`a83bf5f`；分支 `docs/plan-r47-windows-check-0.9-prep`；本 PR [#117][pr-117]；发布准备的 PR [#116][pr-116]）：用户定了 B2 与 `--setup` 的改动不再验证，#115 的 F-2 先记录，并要我验证审计的 Rust 代码在 Windows 上的表现、准备 0.9 的发布。Windows：GitHub 的 `windows-latest` 上两个一次性的 CI 分支（五次运行）。整个 workspace 在原生 Windows 上编不过（`pi-tools-api` 的 build script 要 `/dev/stdout`；审计之前就是这样）；补一处之后，非测试代码编得过；两处测试代码编不过，关掉之后，跑过的单元测试里 37 个失败（只跑了一部分），审计前后逐个相同；缓存目录的 6 个测试通过，单独切出的代码的 4 个测试也通过；保留名 `NUL` 不影响 Python agent。发布准备：PR #116（版本号、下限、`CHANGELOG.md` 的 `[0.9.0]` 与 20 条已知问题；Windows 整套 pytest 6107 个通过，WSL 5984 个通过）；没有打 tag，没有发布。只改文档。见 [§10.50][l10-50]。
+- r48：v0.9.0 的发布，`Agent binaries` 挂档案，ACP registry 的条目，归档发布里程碑（2026-11-11；`6e96066`；分支 `docs/plan-r48-release-0.9.0`；本 PR [#118][pr-118]）：用户合入 #117 与 #116，定发布日期为今天，并要我打 tag、让 `Agent binaries` 挂档案、做 registry 的新条目、做归档里程碑的文档轮次、清理本地的临时工作树与分支。tag `v0.9.0` 在 `6e96066`；`Release` 的六个 job 与 `Agent binaries` 都成功；发布页 21 个资产；PyPI 的七个包；registry 的 PR #735 改成 0.9.0（`59da183`）。计划：头部、「当前状态」、「下一步」、「还没有验证的」缩成现在的状态，加「发布里程碑 V0.9」，缩短前的文字存入附录 H。只改文档。见 [§10.51][l10-51]。
 
 <!-- 链接定义 -->
 [log]: archive/PLAN-RUST-AGENT-RUNTIME-REMOVAL-EXECUTION-LOG.md
@@ -637,6 +644,7 @@ Rust（pager）：
 [l10-48]: archive/PLAN-RUST-AGENT-RUNTIME-REMOVAL-EXECUTION-LOG.md#1048-r45-追加审计计划与代码的偏差修-xailog图片缓存的位置加权限管理器的门禁
 [l10-49]: archive/PLAN-RUST-AGENT-RUNTIME-REMOVAL-EXECUTION-LOG.md#1049-r46-追加用户的实测b2-的调查setup-对话的一处改动acp-100-的断裂与-09-的合并
 [l10-50]: archive/PLAN-RUST-AGENT-RUNTIME-REMOVAL-EXECUTION-LOG.md#1050-r47-追加审计代码在-windows-上的检查与-09-的发布准备
+[l10-51]: archive/PLAN-RUST-AGENT-RUNTIME-REMOVAL-EXECUTION-LOG.md#1051-r48-追加打-tag-v090-并发布agent-binaries-的档案acp-registry-的条目归档发布里程碑
 [l4-1]: archive/PLAN-RUST-AGENT-RUNTIME-REMOVAL-EXECUTION-LOG.md#41-运行路径
 [l4-2]: archive/PLAN-RUST-AGENT-RUNTIME-REMOVAL-EXECUTION-LOG.md#42-rust-runtime-与耦合面
 [l4-3]: archive/PLAN-RUST-AGENT-RUNTIME-REMOVAL-EXECUTION-LOG.md#43-python-侧pi_agent_cli共-4114-行agentpy-472-行
@@ -726,13 +734,13 @@ Rust（pager）：
 [pr-107]: https://github.com/zy1233/pi-python/pull/107
 [pr-108]: https://github.com/zy1233/pi-python/pull/108
 [pr-110]: https://github.com/zy1233/pi-python/pull/110
-[pr-111]: https://github.com/zy1233/pi-python/pull/111
 [pr-112]: https://github.com/zy1233/pi-python/pull/112
 [pr-113]: https://github.com/zy1233/pi-python/pull/113
 [pr-114]: https://github.com/zy1233/pi-python/pull/114
 [pr-115]: https://github.com/zy1233/pi-python/pull/115
 [pr-116]: https://github.com/zy1233/pi-python/pull/116
 [pr-117]: https://github.com/zy1233/pi-python/pull/117
+[pr-118]: https://github.com/zy1233/pi-python/pull/118
 [run-release-v060]: https://github.com/zy1233/pi-python/actions/runs/40180264121
 [rel-v060]: https://github.com/zy1233/pi-python/releases/tag/v0.6.0
 [run-release-v070]: https://github.com/zy1233/pi-python/actions/runs/41049069065
@@ -740,6 +748,9 @@ Rust（pager）：
 [run-release-v080]: https://github.com/zy1233/pi-python/actions/runs/41190427666
 [rel-v080]: https://github.com/zy1233/pi-python/releases/tag/v0.8.0
 [run-agent-binaries-v080]: https://github.com/zy1233/pi-python/actions/runs/41193119162
+[run-release-v090]: https://github.com/zy1233/pi-python/actions/runs/43000730108
+[rel-v090]: https://github.com/zy1233/pi-python/releases/tag/v0.9.0
+[run-agent-binaries-v090]: https://github.com/zy1233/pi-python/actions/runs/43005548536
 [reg-735]: https://github.com/agentclientprotocol/registry/pull/735
 [ci-run-r5]: https://github.com/zy1233/pi-python/actions/runs/37379203134
 [ms-v050]: https://github.com/zy1233/pi-python/milestone/1
@@ -753,3 +764,6 @@ Rust（pager）：
 [logG3]: archive/PLAN-RUST-AGENT-RUNTIME-REMOVAL-EXECUTION-LOG.md#g3-发布里程碑-v05
 [logG4]: archive/PLAN-RUST-AGENT-RUNTIME-REMOVAL-EXECUTION-LOG.md#g4-发布里程碑-v06
 [logG5]: archive/PLAN-RUST-AGENT-RUNTIME-REMOVAL-EXECUTION-LOG.md#g5-发布里程碑-v07
+[logH]: archive/PLAN-RUST-AGENT-RUNTIME-REMOVAL-EXECUTION-LOG.md#附录-h计划整理前的文字r48-原文
+[logH2]: archive/PLAN-RUST-AGENT-RUNTIME-REMOVAL-EXECUTION-LOG.md#h2-当前状态里截至-r47的一段
+[logH3]: archive/PLAN-RUST-AGENT-RUNTIME-REMOVAL-EXECUTION-LOG.md#h3-下一步的四条r47-的版本
