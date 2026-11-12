@@ -49,6 +49,9 @@ function run(script: string): Record<string, unknown> {
 
 const state = `const state = (o) => host({ type: "state", status: "ready", canRestart: true, ...o });`;
 
+/** A JavaScript string literal for the page script. `<` is escaped, so that `</script>` cannot end the script early. */
+const lit = (value: string) => JSON.stringify(value).replace(/</g, "\\u003c");
+
 describe.skipIf(!chrome || !built)("webview in headless Chrome", () => {
   it("sends ready first and renders markdown as DOM, never as HTML", () => {
     const out = run(`${state}
@@ -122,6 +125,98 @@ describe.skipIf(!chrome || !built)("webview in headless Chrome", () => {
       window.__result = { posted: window.__posted.map((m) => m.type), errorText, selectAfter: document.querySelector("select") !== null, modeText: document.querySelector(".controls .mode").textContent };`);
     expect(out).toMatchObject({ ok: true, errorText: "The agent exited (exit code 3).\nboom", selectAfter: false, modeText: "Mode: set by the agent" });
     expect(out.posted).toEqual(["ready", "runSetup", "setMode"]);
+  });
+
+  it("renders headings, emphasis, lists, a quote, a rule and a table as elements, with no raw marks left", () => {
+    const source = [
+      "## Title",
+      "**bold** *em* ~~del~~ `code`",
+      "- a\n  - b",
+      "3. x\n4. y",
+      "> quote",
+      "---",
+      "| h1 | h2 | h3 |\n|:--|:-:|--:|\n| c1 | c2 | c3 |",
+    ].join("\n\n");
+    const out = run(`${state}
+      state({});
+      host({ type: "agentText", messageId: "a", text: ${lit(source)} });
+      const body = document.querySelector(".msg.agent .body");
+      const q = (s) => body.querySelector(s);
+      window.__result = {
+        h2: q("h2")?.textContent,
+        strong: q("strong")?.textContent, em: q("em")?.textContent, del: q("del")?.textContent, code: q("p code")?.textContent,
+        nested: body.querySelectorAll("ul ul li").length,
+        olStart: q("ol")?.start, olItems: body.querySelectorAll("ol li").length,
+        tightItem: q("ul > li").firstChild.nodeType,
+        quote: q("blockquote")?.textContent,
+        hr: body.querySelectorAll("hr").length,
+        th: [...body.querySelectorAll("table th")].map((c) => c.textContent),
+        td: [...body.querySelectorAll("table td")].map((c) => c.textContent),
+        align: [...body.querySelectorAll("table th, table td")].map((c) => c.className),
+        wrapped: q(".table-wrap > table") !== null,
+        marks: /[#*|~>]/.test(body.textContent),
+      };`);
+    expect(out).toMatchObject({
+      ok: true,
+      h2: "Title",
+      strong: "bold",
+      em: "em",
+      del: "del",
+      code: "code",
+      nested: 1,
+      olStart: 3,
+      olItems: 2,
+      tightItem: 3, // a text node: a tight item has no <p>
+      quote: "quote",
+      hr: 1,
+      th: ["h1", "h2", "h3"],
+      td: ["c1", "c2", "c3"],
+      align: ["align-left", "align-center", "align-right", "align-left", "align-center", "align-right"],
+      wrapped: true,
+      marks: false,
+    });
+  });
+
+  it("keeps hostile Markdown from becoming elements: HTML, an image, a javascript: link, a table cell", () => {
+    const source = [
+      "<img src=x onerror=window.__pwn=1> <iframe src=//example.com></iframe>",
+      "<script>window.__pwn=2</script>",
+      "![pic](https://example.com/a.png) [bad](javascript:window.__pwn=3)",
+      "| a |\n|---|\n| <b>x</b><script>window.__pwn=4</script> |",
+    ].join("\n\n");
+    const out = run(`${state}
+      state({});
+      host({ type: "agentText", messageId: "a", text: ${lit(source)} });
+      const body = document.querySelector(".msg.agent .body");
+      window.__result = {
+        imgs: document.querySelectorAll("img").length,
+        frames: document.querySelectorAll("iframe").length,
+        scripts: body.querySelectorAll("script").length,
+        bold: body.querySelectorAll("b").length,
+        pwn: window.__pwn ?? null,
+        links: [...body.querySelectorAll("a")].map((a) => ({ url: a.dataset.url, text: a.textContent, href: a.getAttribute("href") })),
+        text: body.textContent,
+      };`);
+    expect(out).toMatchObject({ ok: true, imgs: 0, frames: 0, scripts: 0, bold: 0, pwn: null });
+    // The image is a link with its description. It loads nothing. The javascript: link is not a link.
+    expect(out.links).toEqual([{ url: "https://example.com/a.png", text: "pic", href: "#" }]);
+    expect(out.text).toContain("<iframe src=//example.com></iframe>");
+    expect(out.text).toContain("[bad](javascript:window.__pwn=3)");
+    expect(out.text).toContain("<b>x</b><script>window.__pwn=4</script>");
+  });
+
+  it("shows an address that the host would refuse as text, with the address, and not as a link", () => {
+    const out = run(`${state}
+      state({});
+      host({ type: "agentText", messageId: "a", text: ${lit("open [the file](vscode://file/etc/hosts) now, or [src/a.ts](src/a.ts)")} });
+      const body = document.querySelector(".msg.agent .body");
+      window.__result = { links: body.querySelectorAll("a").length, text: body.textContent };`);
+    expect(out).toMatchObject({
+      ok: true,
+      links: 0,
+      // The text of a link that is the same as its address is shown once.
+      text: "open the file (vscode://file/etc/hosts) now, or src/a.ts",
+    });
   });
 
   it("sends openLink for a clicked link and nothing for a plain click", () => {

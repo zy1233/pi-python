@@ -7,6 +7,7 @@ zycode is a coding agent. This extension puts it in a chat view in VS Code. The 
 ## What you get
 
 - A chat view in the activity bar, with the status of the agent, its version, the model, and the permission mode.
+- Markdown in the answers: headings, bold, italic, strikethrough, lists, quotes, tables, code blocks and links. A link opens through VS Code, and only `http`, `https` and `mailto` links open.
 - A question card for every tool call that is not read-only. You choose *Allow once* or *Reject*.
 - A **Show diff** button for `write` and `edit` calls, before the call (what it would change) and after it (what it changed). The diff is for reading. The extension never writes your files.
 - A getting-started guide for the first start (a VS Code walkthrough), and help in the chat when the agent has no model, no key, or a key that is refused. The setup runs in a VS Code terminal, and you type the key there.
@@ -92,6 +93,7 @@ The extension has no telemetry and sends nothing to its authors. The agent sends
 - On Linux the bundled agent needs glibc 2.35 or newer. There is no package for Alpine (musl), 32-bit ARM, or Windows on ARM.
 - The thinking level is a line of `agent.toml`, and a change restarts the agent (the chat is opened again; a running answer must end first; Always approve is off again after the restart). A live setting needs a change in the agent.
 - One chat at a time (open a past chat to switch). No model choice, no images, no `@file` mentions yet.
+- Markdown in an answer: raw HTML shows as text, and an image is not loaded (it shows as a link). There is no math, no footnote and no task-list box: their marks show as text (but the line of a footnote definition, `[^1]: …`, does not show, because Markdown reads it as the definition of a link). A link with an address that the extension does not open (for example `javascript:`) shows its text and its address as plain text.
 
 ## Third-party software
 

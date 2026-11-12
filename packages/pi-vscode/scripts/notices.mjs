@@ -53,21 +53,32 @@ function pythonDistributions(assets) {
   return JSON.parse(json);
 }
 
-function npmPackages() {
+/**
+ * The npm packages that esbuild bundled, from the input paths of its metafile. The last `node_modules/`
+ * in a path names the package: `node_modules/a/node_modules/b/x.js` is in `b`, not in `a`. There is one
+ * entry for each folder, so two versions of one name both show, and each one has its own license text.
+ */
+export function bundledPackages(inputs) {
   const found = new Map();
+  for (const input of inputs) {
+    const match = /^(.*(?:^|\/)node_modules\/((?:@[^/]+\/)?[^/]+))\//.exec(input);
+    if (match) found.set(match[1], match[2]);
+  }
+  return [...found]
+    .map(([dir, name]) => ({ name, dir }))
+    .sort((a, b) => a.name.localeCompare(b.name) || a.dir.localeCompare(b.dir));
+}
+
+function npmPackages() {
+  const inputs = [];
   for (const name of ["extension", "webview"]) {
     const metaFile = path.join(CACHE_DIR, `meta-${name}.json`);
     if (!existsSync(metaFile)) throw new Error(`${metaFile} is missing: run \`node esbuild.mjs --production --metafile\` first`);
-    for (const input of Object.keys(readJson(metaFile).inputs)) {
-      const match = /(^|\/)node_modules\/((?:@[^/]+\/)?[^/]+)\//.exec(input);
-      if (!match) continue;
-      const root = input.slice(0, match.index + match[0].length - 1 - 0);
-      const dir = path.join(ROOT, root.replace(/^\//, ""));
-      found.set(match[2], dir);
-    }
+    inputs.push(...Object.keys(readJson(metaFile).inputs));
   }
   const out = [];
-  for (const [name, dir] of [...found].sort(([a], [b]) => a.localeCompare(b))) {
+  for (const { name, dir: relative } of bundledPackages(inputs)) {
+    const dir = path.join(ROOT, relative);
     const manifest = readJson(path.join(dir, "package.json"));
     const files = readdirSync(dir)
       .filter((f) => /^(licen[cs]e|copying|notice)/i.test(f))

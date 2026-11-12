@@ -4,6 +4,7 @@ import { gzipSync } from "node:zlib";
 import { describe, expect, it } from "vitest";
 
 import { TARGETS, loadAssets, readSingleTarGzFile, readZip } from "../scripts/lib.mjs";
+import { bundledPackages } from "../scripts/notices.mjs";
 
 function tarEntry(name: string, type: string, data: Buffer, mode = 0o755): Buffer {
   const header = Buffer.alloc(512);
@@ -98,6 +99,46 @@ describe("archive readers", () => {
 
   it("refuses data that is not a zip file", () => {
     expect(() => readZip(Buffer.from("not a zip file at all, just text"))).toThrow(/not a zip/);
+  });
+});
+
+describe("bundledPackages (the npm part of THIRD-PARTY-NOTICES)", () => {
+  const byDir = (inputs: string[]) => Object.fromEntries(bundledPackages(inputs).map((p) => [p.dir, p.name]));
+
+  it("names a package from the folder under the last node_modules, so a nested package is not lost", () => {
+    expect(
+      byDir([
+        "node_modules/mdurl/lib/index.mjs",
+        "node_modules/@scope/pkg/dist/a.js",
+        "node_modules/markdown-it/lib/index.mjs",
+        "node_modules/markdown-it/node_modules/entities/dist/decode.js",
+        "src/webview/main.ts",
+      ]),
+    ).toEqual({
+      "node_modules/mdurl": "mdurl",
+      "node_modules/@scope/pkg": "@scope/pkg",
+      "node_modules/markdown-it": "markdown-it",
+      "node_modules/markdown-it/node_modules/entities": "entities",
+    });
+  });
+
+  it("lists two versions of one name, one entry for each folder, and one entry for a folder that many files name", () => {
+    const found = bundledPackages([
+      "node_modules/entities/lib/a.js",
+      "node_modules/entities/lib/b.js",
+      "node_modules/markdown-it/node_modules/entities/dist/a.js",
+      "node_modules/markdown-it/node_modules/entities/dist/b.js",
+    ]);
+    expect(found).toEqual([
+      { name: "entities", dir: "node_modules/entities" },
+      { name: "entities", dir: "node_modules/markdown-it/node_modules/entities" },
+    ]);
+  });
+
+  it("finds a package above the project folder, and skips files that are not in a package", () => {
+    expect(byDir(["../../node_modules/foo/index.js", "node_modules/loose.js", "dist/x.js"])).toEqual({
+      "../../node_modules/foo": "foo",
+    });
   });
 });
 

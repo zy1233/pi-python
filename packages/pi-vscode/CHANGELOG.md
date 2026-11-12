@@ -1,5 +1,15 @@
 # Changelog
 
+## Unreleased
+
+### New
+
+- The chat shows Markdown as Markdown. Before, only paragraphs, lists, code and links worked, and a heading, a table or bold text showed its marks (`##`, `|---|`, `**`). Now the chat shows headings, bold, italic, strikethrough, nested lists, quotes, rules and tables (with column alignment, and a scroll bar for a wide table). Bold text next to Chinese, Japanese or Korean characters works (`**重要：**文本`). Raw HTML in an answer stays text, an image is not loaded (it shows as a link), and a link with an address that the extension does not open (for example `javascript:`) shows as plain text with its address.
+
+### Changed
+
+- `THIRD-PARTY-NOTICES` lists the packages of the Markdown parser. It also lists a bundled package that sits inside another one (`entities`, inside `markdown-it`).
+
 ## 1.0.0
 
 First stable release. The pre-release 0.1.0 is replaced by this version. The version is above 0.1.0, so a user of the pre-release gets it as an update.
