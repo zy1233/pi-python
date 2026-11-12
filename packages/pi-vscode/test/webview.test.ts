@@ -172,3 +172,58 @@ describe.skipIf(!chrome || !built)("webview in headless Chrome", () => {
     expect(out).toMatchObject({ ok: true, shown: true, afterOff: true, afterOn: false });
   });
 });
+
+describe.skipIf(!chrome || !built)("webview: modes, first run and notices", () => {
+  const modes = `[{ id: "ask", name: "Ask" }, { id: "auto", name: "Auto" }, { id: "always-approve", name: "Always approve" }]`;
+
+  it("offers Always approve as the third option and sends it; the question is asked by the extension host", () => {
+    const out = run(`${state}
+      state({ mode: { current: "ask", options: ${modes} } });
+      const select = document.querySelector("select");
+      const options = [...select.options].map((o) => o.value);
+      select.value = "always-approve"; select.dispatchEvent(new Event("change"));
+      window.__result = { options, posted: window.__posted.filter((m) => m.type === "setMode") };`);
+    expect(out).toMatchObject({ ok: true, options: ["ask", "auto", "always-approve"], posted: [{ type: "setMode", value: "always-approve" }] });
+  });
+
+  it("shows a visible label and a warning style while Always approve is on, and removes them after", () => {
+    const out = run(`${state}
+      state({ mode: { current: "always-approve", options: ${modes} } });
+      const chip = document.querySelector(".warn-chip");
+      const on = { chip: chip && chip.textContent, cls: document.getElementById("root").classList.contains("always-approve") };
+      state({ mode: { current: "ask", options: ${modes} } });
+      window.__result = { on, off: { chip: document.querySelector(".warn-chip") !== null, cls: document.getElementById("root").classList.contains("always-approve") } };`);
+    expect(out).toMatchObject({ ok: true, on: { chip: "Always approve: no questions", cls: true }, off: { chip: false, cls: false } });
+  });
+
+  it("shows the first-run steps, and the buttons run the setup and open the guide", () => {
+    const out = run(`${state}
+      state({ status: "needs-setup", setup: { reason: "no-model" }, detail: "zycode has no model yet." });
+      const steps = document.querySelectorAll(".banner .steps li").length;
+      const labels = [...document.querySelectorAll(".banner button")].map((b) => b.textContent);
+      document.querySelectorAll(".banner button")[0].click();
+      document.querySelectorAll(".banner button")[1].click();
+      window.__result = { steps, labels, posted: window.__posted.map((m) => m.type), text: document.querySelector(".banner").textContent };`);
+    expect(out).toMatchObject({ ok: true, steps: 3, labels: ["Run setup", "Open the guide"] });
+    expect(out.posted).toEqual(["ready", "runSetup", "openGuide"]);
+    expect(String(out.text)).toMatch(/Never type it in this chat/);
+  });
+
+  it("renders the buttons of a notice and sends the action", () => {
+    const out = run(`${state}
+      state({});
+      host({ type: "notice", level: "warning", text: "The key was refused.", actions: [{ id: "runSetup", label: "Change the key" }, { id: "openAgentConfig", label: "Open agent.toml" }, { id: "openLog", label: "Show log" }] });
+      const buttons = [...document.querySelectorAll(".notice button")];
+      buttons.forEach((b) => b.click());
+      window.__result = { labels: buttons.map((b) => b.textContent), posted: window.__posted.map((m) => m.type).slice(1) };`);
+    expect(out).toMatchObject({ ok: true, labels: ["Change the key", "Open agent.toml", "Show log"], posted: ["runSetup", "openAgentConfig", "openLog"] });
+  });
+
+  it("a notice with no action has no button", () => {
+    const out = run(`${state}
+      state({});
+      host({ type: "notice", level: "info", text: "Permission mode: auto." });
+      window.__result = { buttons: document.querySelectorAll(".notice button").length };`);
+    expect(out).toMatchObject({ ok: true, buttons: 0 });
+  });
+});

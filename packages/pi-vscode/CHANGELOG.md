@@ -1,5 +1,22 @@
 # Changelog
 
+## 1.0.0
+
+First stable release. The pre-release 0.1.0 is replaced by this version. The version is above 0.1.0, so a user of the pre-release gets it as an update.
+
+### New
+
+- Getting-started guide (a VS Code walkthrough) for the first run: open a folder, choose a model and save a key, say hello, choose a mode, find past chats, and what to do when something fails. It opens once by itself when nothing is set up. Open it again at any time: **zycode: Open the getting-started guide**.
+- First-run help in the chat: the banner shows the steps and a **Run setup** button, and a key that the provider refuses, a wrong model id or a server that cannot be reached gets a short explanation with buttons (**Change the key**, **Open agent.toml**, **Show log**). **zycode: Set up model and API key** also changes the key later.
+- **Always approve** in the mode menu, next to **Ask** and **Auto**. A modal warning comes first: every tool call, `bash` included, then runs with no question. A label shows while it is on. A new chat, a restart and a past chat that is opened always start in Ask (or in Auto, if the setting says so). It is not offered in a folder that you did not trust, and not after you refused the project-trust question of the agent.
+- **Past chats** view under the chat: the chats of the open folder, newest first, with the first message and the time of the last one. Select a chat to open it with its history. The trash button deletes a chat, after a question. The list also has an empty state and an error state.
+
+### Changed
+
+- The setting `zycode.permissionMode` still offers `ask` and `auto` only. **Always approve** is chosen in the chat and is never restored.
+- The extension is published as a stable release (no pre-release flag in the package or in the publish workflow).
+- Bundles `zycode-agent` 0.9.0 for `linux-x64`, `linux-arm64`, `darwin-arm64`, `darwin-x64` and `win32-x64`, as in 0.1.0.
+
 ## 0.1.0 (pre-release)
 
 First version. Published as a pre-release (`--pre-release`).
@@ -8,6 +25,6 @@ First version. Published as a pre-release (`--pre-release`).
 - Permission questions for every tool call that is not read-only, and the project-trust question of the agent.
 - **Show diff** for `write` and `edit` calls, before and after the call. The extension never writes your files.
 - First-run setup in a VS Code terminal (`--setup`); no key goes through the chat.
-- Setting `zycode.permissionMode` (`ask` or `auto`). The extension sets the mode of each session, and it never sets `always-approve`.
+- Setting `zycode.permissionMode` (`ask` or `auto`). The extension sets the mode of each session. This version never set `always-approve` (1.0.0 sets it from the mode menu, after a warning).
 - No telemetry.
 - Bundles `zycode-agent` 0.9.0 for `linux-x64`, `linux-arm64`, `darwin-arm64`, `darwin-x64` and `win32-x64`. The binaries are not code-signed. Only the OpenAI-format provider is in them.

@@ -75,3 +75,11 @@ pre.code code { background: none; padding: 0; }
 .input { width: 100%; box-sizing: border-box; resize: vertical; min-height: 4em; max-height: 40vh; background: var(--vscode-input-background); color: var(--vscode-input-foreground); border: 1px solid var(--vscode-input-border, transparent); border-radius: 2px; padding: 6px; }
 .input:disabled { opacity: 0.6; }
 .actions.left { justify-content: flex-start; }
+
+.warn-chip { margin-left: auto; padding: 0 8px; border-radius: 8px; font-size: 0.85em; font-weight: 600; background: var(--vscode-statusBarItem-warningBackground, #7a5b00); color: var(--vscode-statusBarItem-warningForeground, #fff); }
+#root.always-approve .header { border-bottom: 2px solid var(--vscode-editorWarning-foreground, #d29922); }
+#root.always-approve .composer { border-top: 2px solid var(--vscode-editorWarning-foreground, #d29922); }
+.banner .lead { font-weight: 600; }
+.banner .steps { margin: 0 0 8px; padding-left: 20px; }
+.banner .steps li { margin-bottom: 4px; }
+.notice .actions { margin-top: 4px; }

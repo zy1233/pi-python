@@ -27,15 +27,23 @@ export class StatusBar implements vscode.Disposable {
   }
 
   update(state: StateMessage): void {
-    this.item.text = `$(${state.status === "busy" ? "sync~spin" : "sparkle"}) zycode: ${LABELS[state.status]}`;
+    const alwaysApprove = state.mode?.current === "always-approve";
+    this.item.text =
+      `$(${state.status === "busy" ? "sync~spin" : alwaysApprove ? "warning" : "sparkle"}) zycode: ${LABELS[state.status]}` +
+      (alwaysApprove ? " · always approve" : "");
     const lines = [`zycode: ${LABELS[state.status]}`];
     if (state.detail) lines.push(state.detail);
     if (state.agent) lines.push(`Agent ${state.agent.version} (${state.agent.source})`);
     if (state.model) lines.push(`Model: ${state.model}`);
     if (state.mode) lines.push(`Mode: ${state.mode.current}`);
+    if (alwaysApprove) lines.push("Every tool call runs with no question, bash too.");
     this.item.tooltip = lines.join("\n");
     this.item.backgroundColor =
-      state.status === "error" ? new vscode.ThemeColor("statusBarItem.errorBackground") : undefined;
+      state.status === "error"
+        ? new vscode.ThemeColor("statusBarItem.errorBackground")
+        : alwaysApprove
+          ? new vscode.ThemeColor("statusBarItem.warningBackground")
+          : undefined;
   }
 
   dispose(): void {

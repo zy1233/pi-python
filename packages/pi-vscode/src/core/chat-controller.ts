@@ -1,6 +1,6 @@
 import { statSync } from "node:fs";
 
-import { AcpConnection, AuthRequiredError } from "./acp-connection.js";
+import { AcpConnection, AuthRequiredError, isMethodNotFound } from "./acp-connection.js";
 import type {
   InitializeResponse,
   NewSessionResponse,
@@ -11,25 +11,39 @@ import type {
 } from "./acp-connection.js";
 import { AgentProcess, type StopTimings } from "./agent-process.js";
 import { DiffTracker, type DiffInfo } from "./diff-tracker.js";
+import { classifyAuthRequired, classifyTurnFailure, failureNotice, setupText } from "./first-run.js";
 import type { Host } from "./host.js";
 import {
   prepareBundledBinary,
   resolveAgentCommand,
   type AgentCommand,
 } from "./locate.js";
-import type {
-  HostMessage,
-  ModeState,
-  NoticeLevel,
-  PermissionModeName,
-  PermissionOptionView,
-  PermissionOutcome,
-  PermissionRequestView,
-  StateMessage,
-  Status,
-  ToolCallView,
-  TranscriptItem,
+import {
+  ALWAYS_APPROVE,
+  type HostMessage,
+  type ModeState,
+  type NoticeAction,
+  type NoticeLevel,
+  type PermissionModeName,
+  type PermissionOptionView,
+  type PermissionOutcome,
+  type PermissionRequestView,
+  type SetupInfo,
+  type StartModeName,
+  type StateMessage,
+  type Status,
+  type ToolCallView,
+  type TranscriptItem,
 } from "./protocol.js";
+import {
+  MAX_LIST_PAGES,
+  displayTitle,
+  rowsFromPages,
+  sameFolder,
+  type RawListedSession,
+  type SessionListState,
+  type SessionRow,
+} from "./session-list.js";
 import { ToolCallStore, summarizeInput } from "./tool-calls.js";
 import { checkAgentIdentity } from "./version.js";
 
@@ -42,6 +56,17 @@ const TRUST_ID_PREFIX = "trust-";
 const TRUST_REJECT_ID = "dont-trust-project";
 const TRUST_ACCEPT_ID = "trust-project";
 const SETUP_FALLBACK_ARGS = ["--setup"];
+const MODE_CONFIRM_MS = 5000;
+
+export const ALWAYS_APPROVE_WARNING = {
+  message: "Turn on Always approve?",
+  detail:
+    "While it is on, every tool call runs with no question. This includes bash: the agent can change or delete " +
+    "files and run any command in this folder, and it can read and send what your account can reach. " +
+    "It stays on for this chat only. A new chat, a restart of the agent and a restart of VS Code start in " +
+    "Ask or Auto again.",
+  action: "Turn on Always approve",
+};
 
 export interface ControllerOptions {
   stopTimings?: StopTimings;
@@ -96,6 +121,17 @@ export class ChatController {
   private counter = 0;
   private segmentId: string | undefined;
   private modeNoticeShown = false;
+  private stuckModeNoticeShown = false;
+  private setupInfo: SetupInfo | undefined;
+  private settingUp = false;
+  private projectTrustRefused = false;
+  private modeWaiters: { mode: string; resolve: (done: boolean) => void; timer: NodeJS.Timeout }[] = [];
+  private turnStart = 0;
+  private sessionList: SessionListState = { kind: "idle" };
+  private deleteSupported = true;
+  private refreshing: Promise<void> | undefined;
+  private refreshAgain = false;
+  private readonly sessionListeners = new Set<() => void>();
 
   private items: TranscriptItem[] = [];
   private readonly tools = new ToolCallStore();
@@ -118,6 +154,12 @@ export class ChatController {
     return { dispose: () => this.listeners.delete(listener) };
   }
 
+  /** The panel of past sessions subscribes here. */
+  onSessionsChanged(listener: () => void): { dispose(): void } {
+    this.sessionListeners.add(listener);
+    return { dispose: () => this.sessionListeners.delete(listener) };
+  }
+
   stateMessage(): StateMessage {
     const message: StateMessage = {
       type: "state",
@@ -133,9 +175,33 @@ export class ChatController {
       };
     }
     if (this.cwd !== undefined) message.cwd = this.cwd;
-    if (this.mode) message.mode = this.mode;
+    if (this.mode) message.mode = this.visibleMode(this.mode);
     if (this.model !== undefined) message.model = this.model;
+    if (this.status === "needs-setup" && this.setupInfo) message.setup = this.setupInfo;
     return message;
+  }
+
+  /** The menu: the options of the agent, and `always-approve` when it can be chosen. */
+  private visibleMode(mode: ModeState): ModeState {
+    const options = [...mode.options];
+    if (options.length > 0 && !options.some((o) => o.id === ALWAYS_APPROVE) && this.alwaysApproveOffered().ok) {
+      options.push({ id: ALWAYS_APPROVE, name: "Always approve" });
+    }
+    return { current: mode.current, options };
+  }
+
+  /**
+   * Always approve is offered only in a trusted workspace (VS Code Workspace Trust) and only if the
+   * user did not refuse the agent's own project-trust question in this agent process (project trust,
+   * invariant 9), and only if the agent has the `mode` option (v0.9.0 and later).
+   */
+  alwaysApproveOffered(): { ok: boolean; reason?: string } {
+    if (!this.host.isTrusted()) return { ok: false, reason: "this workspace is not trusted (Restricted Mode)." };
+    if (this.projectTrustRefused) {
+      return { ok: false, reason: "you did not trust this project when the agent asked. Restart the agent to be asked again." };
+    }
+    if (!this.mode || this.mode.options.length === 0) return { ok: false, reason: "this agent has no mode option." };
+    return { ok: true };
   }
 
   transcript(): TranscriptItem[] {
@@ -179,6 +245,8 @@ export class ChatController {
       return;
     }
     this.stopping = false;
+    this.projectTrustRefused = false;
+    this.deleteSupported = true;
     if (!this.host.isTrusted()) {
       this.setStatus("untrusted", "Workspace Trust is off for this folder. zycode does not start in Restricted Mode.");
       return;
@@ -297,10 +365,9 @@ export class ChatController {
       this.opening = false;
       if (generation !== this.generation) return;
       if (error instanceof AuthRequiredError) {
-        this.setStatus(
-          "needs-setup",
-          "zycode needs a model and an API key. Run the setup in a terminal.",
-        );
+        this.setupInfo = classifyAuthRequired(error.reason);
+        this.setStatus("needs-setup", setupText(this.setupInfo));
+        this.refreshSessionList();
         return;
       }
       this.setError(`Could not open a session: ${messageOf(error)}`);
@@ -316,6 +383,7 @@ export class ChatController {
     await this.applyPermissionSetting();
     if (generation !== this.generation) return;
     this.setStatus("ready");
+    this.refreshSessionList();
   }
 
   private readConfigOptions(options: SessionConfigOption[], modesCurrent?: string): void {
@@ -334,6 +402,32 @@ export class ChatController {
       // The agent reports a mode but no option to change it: show it, offer no choice.
       this.mode = { current: modesCurrent, options: [] };
     }
+    this.resolveModeWaiters();
+  }
+
+  private resolveModeWaiters(): void {
+    const current = this.mode?.current;
+    for (const waiter of [...this.modeWaiters]) {
+      if (waiter.mode !== current) continue;
+      clearTimeout(waiter.timer);
+      this.modeWaiters = this.modeWaiters.filter((w) => w !== waiter);
+      waiter.resolve(true);
+    }
+  }
+
+  /** Resolves `true` when the agent reports `mode` for the session, `false` after the time. */
+  private waitForMode(mode: string, ms: number): Promise<boolean> {
+    return new Promise((resolve) => {
+      const waiter = {
+        mode,
+        resolve,
+        timer: setTimeout(() => {
+          this.modeWaiters = this.modeWaiters.filter((w) => w !== waiter);
+          resolve(false);
+        }, ms),
+      };
+      this.modeWaiters.push(waiter);
+    });
   }
 
   private async applyPermissionSetting(): Promise<void> {
@@ -341,33 +435,94 @@ export class ChatController {
     await this.setSessionMode(wanted, false);
   }
 
-  /** Sets the permission mode of the open session. Used for the setting and for the view's switch. */
+  /**
+   * Sets the permission mode of the open session. Used for the setting (`ask`, `auto`) and for the
+   * menu of the view (also `always-approve`).
+   */
   async applyPermissionMode(mode: PermissionModeName): Promise<void> {
-    await this.setSessionMode(mode, true);
+    if (mode === ALWAYS_APPROVE) await this.enterAlwaysApprove();
+    else await this.setSessionMode(mode, true);
     this.emit(this.stateMessage());
   }
 
-  private async setSessionMode(wanted: PermissionModeName, announce: boolean): Promise<void> {
+  /** `ask` or `auto`. Leaving `always-approve` also puts the start mode of the agent back. */
+  private async setSessionMode(wanted: StartModeName, announce: boolean): Promise<void> {
     const conn = this.conn;
     const sessionId = this.sessionId;
     if (!conn || !sessionId) return;
     const mode = this.mode;
     const canChoose = mode !== undefined && mode.options.some((option) => option.id === wanted);
     if (!canChoose) {
-      if (wanted === "auto" && !this.modeNoticeShown) {
+      if (mode?.current === ALWAYS_APPROVE && !this.stuckModeNoticeShown) {
+        this.stuckModeNoticeShown = true;
+        this.pushNotice(
+          "warning",
+          "The agent is in always-approve mode, and this agent version has no mode option, so zycode cannot change it. " +
+            "Set permission in agent.toml and restart the agent.",
+        );
+      } else if (wanted === "auto" && !this.modeNoticeShown) {
         this.modeNoticeShown = true;
         this.pushNotice("warning", "This agent version has no Auto mode.");
       }
       return;
     }
     if (mode.current === wanted) return;
+    const wasAlwaysApprove = mode.current === ALWAYS_APPROVE;
     try {
-      await conn.setConfigOption(sessionId, "mode", wanted);
-      this.mode = { ...mode, current: wanted };
+      const options = await conn.setConfigOption(sessionId, "mode", wanted);
+      if (options.length > 0) this.readConfigOptions(options);
+      else this.mode = { ...mode, current: wanted };
+      if (wasAlwaysApprove) {
+        // The agent keeps the last mode it was given as the start mode of later sessions.
+        await conn.notifyPermissionMode(wanted).catch((error: unknown) => {
+          this.host.log.warn(`could not reset the start mode: ${messageOf(error)}`);
+        });
+      }
       if (announce) this.pushNotice("info", `Permission mode: ${wanted}.`);
     } catch (error) {
       this.pushNotice("warning", `Could not set the permission mode: ${messageOf(error)}`);
     }
+  }
+
+  private async enterAlwaysApprove(): Promise<void> {
+    const conn = this.conn;
+    const sessionId = this.sessionId;
+    const mode = this.mode;
+    if (!conn || !sessionId || !mode || mode.current === ALWAYS_APPROVE) return;
+    const offered = this.alwaysApproveOffered();
+    if (!offered.ok) {
+      this.pushNotice("warning", `Always approve is not available: ${offered.reason}`);
+      return;
+    }
+    if (this.status !== "ready") {
+      this.pushNotice("info", "Wait until the answer ends, then turn on Always approve.");
+      return;
+    }
+    const generation = this.generation;
+    if (!(await this.host.confirm(ALWAYS_APPROVE_WARNING))) return;
+    if (generation !== this.generation || this.sessionId !== sessionId) return;
+    const stillOffered = this.alwaysApproveOffered();
+    if (!stillOffered.ok) {
+      this.pushNotice("warning", `Always approve is not available: ${stillOffered.reason}`);
+      return;
+    }
+    const confirmed = this.waitForMode(ALWAYS_APPROVE, MODE_CONFIRM_MS);
+    try {
+      await conn.notifyPermissionMode(ALWAYS_APPROVE);
+    } catch (error) {
+      this.pushNotice("warning", `Could not set the permission mode: ${messageOf(error)}`);
+      return;
+    }
+    if (await confirmed) {
+      this.pushNotice("warning", "Always approve is on: every tool call runs with no question, bash too.");
+    } else {
+      this.pushNotice("warning", "The agent did not confirm Always approve. zycode shows the mode that the agent reports.");
+    }
+  }
+
+  /** Before a new session: a session that starts must not inherit `always-approve`. */
+  private async leaveAlwaysApprove(): Promise<void> {
+    if (this.mode?.current === ALWAYS_APPROVE) await this.setSessionMode(this.host.settings().permissionMode, false);
   }
 
   /** Stops the turn, the process and the connection. */
@@ -446,6 +601,7 @@ export class ChatController {
     this.segmentId = undefined;
     const id = this.nextId("user");
     this.items.push({ type: "user", id, text });
+    this.turnStart = this.items.length;
     this.emit({ type: "userMessage", id, text });
     this.setStatus("busy");
     const generation = this.generation;
@@ -470,8 +626,22 @@ export class ChatController {
     if (stopReason !== "end_turn" && stopReason !== "cancelled" && stopReason !== "error") {
       this.pushNotice("info", `The turn ended: ${stopReason}.`);
     }
+    this.noteTurnFailure();
     this.emit({ type: "turnEnd", stopReason });
     if (this.status === "busy" || this.status === "cancelling") this.setStatus("ready");
+    this.refreshSessionList();
+  }
+
+  /** A failed model call is an agent message `Error: ...`. A known kind gets a hint and a button. */
+  private noteTurnFailure(): void {
+    const text = this.items
+      .slice(this.turnStart)
+      .flatMap((item) => (item.type === "agent" ? [item.text] : []))
+      .join("\n");
+    const kind = classifyTurnFailure(text);
+    if (kind === undefined) return;
+    const hint = failureNotice(kind);
+    this.pushNotice("warning", hint.text, hint.actions);
   }
 
   /** Stops the turn: `session/cancel`, and every open question is answered as cancelled. */
@@ -497,16 +667,20 @@ export class ChatController {
   /** A new chat: closes the session, opens another one. Also the retry after a login error. */
   async newChat(): Promise<void> {
     if (!this.conn || this.status === "busy" || this.status === "cancelling" || this.status === "starting") return;
-    const conn = this.conn;
+    await this.leaveAlwaysApprove();
     const previous = this.sessionId;
     this.sessionId = undefined;
     this.resetTranscript();
-    if (previous && this.initResult?.agentCapabilities?.sessionCapabilities?.close !== undefined) {
-      await conn.closeSession(previous).catch((error) => {
-        this.host.log.warn(`session/close failed: ${messageOf(error)}`);
-      });
-    }
+    await this.closeSessionQuietly(previous);
     await this.openSession();
+  }
+
+  private async closeSessionQuietly(sessionId: string | undefined): Promise<void> {
+    const conn = this.conn;
+    if (!conn || !sessionId || this.initResult?.agentCapabilities?.sessionCapabilities?.close === undefined) return;
+    await conn.closeSession(sessionId).catch((error) => {
+      this.host.log.warn(`session/close failed: ${messageOf(error)}`);
+    });
   }
 
   private resetTranscript(): void {
@@ -521,26 +695,56 @@ export class ChatController {
 
   /**
    * The terminal login (docs/specs/2026-11-04-vscode-extension-design.md, section 7). Runs the
-   * setup in a terminal, then restarts the agent (a replaced key needs a new process).
+   * setup in a terminal, then restarts the agent (a replaced key needs a new process). It runs
+   * from any state that has a program to run, so the guide and the command palette can open it
+   * again later.
    */
   async runSetup(): Promise<void> {
-    if (this.status !== "needs-setup" && this.status !== "ready") return;
-    const command = this.command;
-    const cwd = this.cwd;
-    if (!command || cwd === undefined) return;
+    if (this.settingUp) return;
+    if (this.status === "starting" || this.status === "busy" || this.status === "cancelling" || this.status === "unavailable") return;
+    const command = await this.commandForSetup();
+    if (!command) return;
     const method = this.terminalMethod();
-    const { exitCode } = await this.host.runSetupTerminal({
-      command: command.command,
-      args: [...command.args, ...method.args],
-      env: method.env,
-      cwd,
-    });
+    this.settingUp = true;
+    let exitCode: number | undefined;
+    try {
+      ({ exitCode } = await this.host.runSetupTerminal({
+        command: command.command,
+        args: [...command.args, ...method.args],
+        env: method.env,
+        ...(this.cwd !== undefined ? { cwd: this.cwd } : {}),
+      }));
+    } finally {
+      this.settingUp = false;
+    }
     if (exitCode === 0) {
       await this.restart(true);
     } else {
-      this.pushNotice("warning", "Setup did not finish.");
+      this.pushNotice("warning", "Setup did not finish. Run it again from the chat or from the command palette (zycode: Set up model and API key).");
       this.emit(this.stateMessage());
     }
+  }
+
+  private async commandForSetup(): Promise<AgentCommand | undefined> {
+    if (this.command) return this.command;
+    const settings = this.host.settings();
+    const resolved = resolveAgentCommand({
+      agentPath: settings.agentPath,
+      agentArgs: settings.agentArgs,
+      extensionPath: this.host.extensionPath,
+      platform: this.host.platform,
+      exists: (file) => fileExistsSync(file),
+    });
+    if (!resolved.ok) {
+      this.pushNotice("error", resolved.reason);
+      return undefined;
+    }
+    if (resolved.command.source === "bundled") {
+      const problem = await prepareBundledBinary(resolved.command.command, this.host.platform);
+      if (problem) this.host.log.warn(problem);
+    }
+    this.command = resolved.command;
+    return resolved.command;
   }
 
   private terminalMethod(): TerminalAuthMethod {
@@ -558,6 +762,223 @@ export class ChatController {
     return { id: "pi-setup", args: SETUP_FALLBACK_ARGS, env: {} };
   }
 
+  // ----- past sessions
+
+  /** What the panel of past sessions shows. */
+  get sessions(): SessionListState {
+    return this.sessionList;
+  }
+
+  /** The id of the open session, or `undefined` (none yet, or one that is opening). */
+  get currentSessionId(): string | undefined {
+    return this.sessionId;
+  }
+
+  /** `false` after an agent has answered that it has no `pi/session/delete`. */
+  get canDeleteSessions(): boolean {
+    return this.deleteSupported;
+  }
+
+  /** Reads the list again. Calls that come while a read runs make one more read after it. */
+  refreshSessionList(): void {
+    void this.refreshSessions();
+  }
+
+  refreshSessions(): Promise<void> {
+    if (this.refreshing) {
+      this.refreshAgain = true;
+      return this.refreshing;
+    }
+    const run = async (): Promise<void> => {
+      do {
+        this.refreshAgain = false;
+        await this.readSessionList();
+      } while (this.refreshAgain);
+    };
+    this.refreshing = run().finally(() => {
+      this.refreshing = undefined;
+    });
+    return this.refreshing;
+  }
+
+  private setSessions(state: SessionListState): void {
+    this.sessionList = state;
+    for (const listener of [...this.sessionListeners]) {
+      try {
+        listener();
+      } catch (error) {
+        this.host.log.error(`a list listener failed: ${messageOf(error)}`);
+      }
+    }
+  }
+
+  private offlineList(status: Status): SessionListState {
+    switch (status) {
+      case "no-folder":
+        return { kind: "unavailable", reason: "Open a folder to see its past chats." };
+      case "untrusted":
+        return { kind: "unavailable", reason: "Past chats are not available in Restricted Mode." };
+      case "unavailable":
+      case "error":
+        return { kind: "unavailable", reason: "The agent is not running. See the chat view." };
+      default:
+        return { kind: "idle" };
+    }
+  }
+
+  private async readSessionList(): Promise<void> {
+    const conn = this.conn;
+    const cwd = this.cwd;
+    const generation = this.generation;
+    if (!conn || cwd === undefined || !this.initResult) {
+      this.setSessions(this.offlineList(this.status));
+      return;
+    }
+    if (this.initResult.agentCapabilities?.sessionCapabilities?.list === undefined) {
+      this.setSessions({ kind: "unavailable", reason: "This agent cannot list sessions." });
+      return;
+    }
+    const before = this.sessionList;
+    this.setSessions({ kind: "loading", rows: before.kind === "ready" || before.kind === "loading" ? before.rows : [] });
+    try {
+      const pages: RawListedSession[][] = [];
+      const seen = new Set<string>();
+      let cursor: string | undefined;
+      let truncated = false;
+      for (let page = 0; page < MAX_LIST_PAGES; page++) {
+        const response = await conn.listSessions(cwd, cursor);
+        pages.push(response.sessions as unknown as RawListedSession[]);
+        const next = response.nextCursor ?? undefined;
+        if (next === undefined || next === null || next === "") break;
+        if (seen.has(next) || page === MAX_LIST_PAGES - 1) {
+          truncated = true;
+          break;
+        }
+        seen.add(next);
+        cursor = next;
+      }
+      if (generation !== this.generation) return;
+      const rows = rowsFromPages(pages, cwd, this.host.platform);
+      this.setSessions(rows.length === 0 ? { kind: "empty" } : { kind: "ready", rows, truncated });
+    } catch (error) {
+      if (generation !== this.generation) return;
+      this.host.log.warn(`session/list failed: ${messageOf(error)}`);
+      this.setSessions({ kind: "error", message: messageOf(error) });
+    }
+  }
+
+  private listedRow(id: string): SessionRow | undefined {
+    const state = this.sessionList;
+    if (state.kind !== "ready" && state.kind !== "loading") return undefined;
+    return state.rows.find((row) => row.id === id);
+  }
+
+  /**
+   * Opens a past session of this folder: `session/load`, and the agent replays the history. Only a
+   * session of the list can be opened, and the session must say that it works in this folder.
+   */
+  async openPastSession(id: string): Promise<void> {
+    const conn = this.conn;
+    const cwd = this.cwd;
+    if (!conn || cwd === undefined) return;
+    if (this.status !== "ready") {
+      this.pushNotice("info", "Wait until the answer ends (or finish the setup), then open a past chat.");
+      return;
+    }
+    if (id === this.sessionId) return;
+    if (!this.listedRow(id)) {
+      this.pushNotice("warning", "This chat is not in the list of this folder any more.");
+      this.refreshSessionList();
+      return;
+    }
+    await this.leaveAlwaysApprove();
+    const generation = this.generation;
+    const previous = this.sessionId;
+    this.sessionId = undefined;
+    this.resetTranscript();
+    this.opening = true;
+    this.earlyUpdates = [];
+    this.setStatus("starting", "Opening the chat");
+    await this.closeSessionQuietly(previous);
+    let response: Awaited<ReturnType<AcpConnection["loadSession"]>>;
+    try {
+      response = await conn.loadSession(cwd, id);
+    } catch (error) {
+      this.opening = false;
+      this.earlyUpdates = [];
+      if (generation !== this.generation) return;
+      this.pushNotice("error", `Could not open the chat: ${messageOf(error)}`);
+      await this.openSession();
+      return;
+    }
+    if (generation !== this.generation) return;
+    const reported = isRecord(response._meta) ? response._meta["pi/cwd"] : undefined;
+    if (typeof reported === "string" && !sameFolder(reported, cwd, this.host.platform)) {
+      this.opening = false;
+      this.earlyUpdates = [];
+      await this.closeSessionQuietly(id);
+      this.pushNotice("error", "That chat belongs to another folder. It was not opened.");
+      this.refreshSessionList();
+      await this.openSession();
+      return;
+    }
+    this.sessionId = id;
+    this.readConfigOptions(response.configOptions ?? [], response.modes?.currentModeId);
+    const held = this.earlyUpdates;
+    this.earlyUpdates = [];
+    this.opening = false;
+    for (const notification of held) this.onUpdate(notification);
+    await this.applyPermissionSetting();
+    if (generation !== this.generation) return;
+    this.setStatus("ready");
+    this.refreshSessionList();
+  }
+
+  /** Deletes a past session of this folder, after the user confirmed. `pi/session/delete` (register item X1). */
+  async deleteSession(id: string): Promise<void> {
+    const conn = this.conn;
+    if (!conn) return;
+    if (!this.deleteSupported) {
+      this.pushNotice("warning", "This agent version cannot delete a chat.");
+      return;
+    }
+    if (this.status !== "ready") {
+      this.pushNotice("info", "Wait until the answer ends, then delete the chat.");
+      return;
+    }
+    const row = this.listedRow(id);
+    if (!row) {
+      this.refreshSessionList();
+      return;
+    }
+    const current = id === this.sessionId;
+    const detail =
+      `"${displayTitle(row)}" is deleted from this computer. This cannot be undone.` +
+      (current ? " This chat is open now: it is cleared, and a new chat starts." : "");
+    if (!(await this.host.confirm({ message: "Delete this chat?", detail, action: "Delete" }))) return;
+    if (this.status !== "ready" || this.conn !== conn) return;
+    if (current) await this.leaveAlwaysApprove();
+    try {
+      await conn.deleteSession(id);
+    } catch (error) {
+      if (isMethodNotFound(error)) {
+        this.deleteSupported = false;
+        this.pushNotice("warning", "This agent version cannot delete a chat.");
+      } else {
+        this.pushNotice("error", `Could not delete the chat: ${messageOf(error)}`);
+      }
+      this.refreshSessionList();
+      return;
+    }
+    if (current) {
+      this.sessionId = undefined;
+      this.resetTranscript();
+      await this.openSession();
+    } else {
+      this.refreshSessionList();
+    }
+  }
+
   // ----- agent to client
 
   private onUpdate(notification: SessionNotification): void {
@@ -567,18 +988,24 @@ export class ChatController {
     }
     if (notification.sessionId !== this.sessionId) return;
     const update = notification.update as unknown as Record<string, unknown> & { sessionUpdate: string };
+    const replay = isRecord(update._meta) && update._meta.isReplay === true;
     switch (update.sessionUpdate) {
+      case "user_message_chunk":
+        // Only the replay of `session/load` has these: a live prompt is shown when it is sent.
+        if (replay) this.onReplayedUser(update);
+        return;
       case "agent_message_chunk":
       case "agent_thought_chunk":
         this.onChunk(update, update.sessionUpdate === "agent_thought_chunk");
         return;
       case "tool_call":
       case "tool_call_update":
-        this.onToolUpdate(update);
+        this.onToolUpdate(update, replay);
         return;
       case "current_mode_update":
         if (this.mode && typeof update.currentModeId === "string") {
           this.mode = { ...this.mode, current: update.currentModeId };
+          this.resolveModeWaiters();
           this.emit(this.stateMessage());
         }
         return;
@@ -624,13 +1051,23 @@ export class ChatController {
     }
   }
 
-  private onToolUpdate(update: Record<string, unknown>): void {
-    this.diffs.observe(update);
+  private onReplayedUser(update: Record<string, unknown>): void {
+    const content = update.content;
+    if (!isRecord(content) || content.type !== "text" || typeof content.text !== "string" || content.text === "") return;
+    this.segmentId = undefined;
+    const id = this.nextId("user");
+    this.items.push({ type: "user", id, text: content.text });
+    this.emit({ type: "userMessage", id, text: content.text });
+  }
+
+  private onToolUpdate(update: Record<string, unknown>, replay = false): void {
+    // The files may have changed since: a replayed call gets no diff.
+    if (!replay) this.diffs.observe(update);
     const view = this.tools.apply(update);
     if (!view) return;
     this.segmentId = undefined;
     this.putToolItem(view);
-    if (view.status === "completed" || view.status === "failed") {
+    if (!replay && (view.status === "completed" || view.status === "failed")) {
       const generation = this.generation;
       void this.diffs
         .finish(view.id, view.status, update.rawOutput)
@@ -725,12 +1162,23 @@ export class ChatController {
     const item = this.items.find((i) => i.type === "permission" && i.request.requestId === requestId);
     const done = optionId === undefined ? { outcome } : { outcome, optionId };
     if (item?.type === "permission") item.done = done;
+    if (entry.view.kind === "trust") this.onTrustAnswer(outcome === "selected" && optionId === TRUST_ACCEPT_ID);
     entry.resolve(
       outcome === "selected" && optionId !== undefined
         ? { outcome: { outcome: "selected", optionId } }
         : cancelled(),
     );
     this.emit({ type: "permissionDone", requestId, ...done });
+  }
+
+  /** The user's answer to the agent's own project-trust question: a refusal takes Always approve away. */
+  private onTrustAnswer(trusted: boolean): void {
+    this.projectTrustRefused = !trusted;
+    if (trusted) return;
+    if (this.mode?.current === ALWAYS_APPROVE) {
+      this.pushNotice("warning", "Always approve is off: you did not trust this project.");
+      void this.leaveAlwaysApprove().then(() => this.emit(this.stateMessage()));
+    }
   }
 
   private cancelAllPermissions(): void {
@@ -742,6 +1190,9 @@ export class ChatController {
   private setStatus(status: Status, detail?: string): void {
     this.status = status;
     this.detail = detail;
+    if (status === "stopped" || status === "no-folder" || status === "untrusted" || status === "unavailable" || status === "error") {
+      this.setSessions(this.offlineList(status));
+    }
     this.emit(this.stateMessage());
   }
 
@@ -749,10 +1200,15 @@ export class ChatController {
     this.setStatus("error", text);
   }
 
-  private pushNotice(level: NoticeLevel, text: string): void {
+  private pushNotice(level: NoticeLevel, text: string, actions?: NoticeAction[]): void {
     this.segmentId = undefined;
-    this.items.push({ type: "notice", level, text });
-    this.emit({ type: "notice", level, text });
+    if (actions) {
+      this.items.push({ type: "notice", level, text, actions });
+      this.emit({ type: "notice", level, text, actions });
+    } else {
+      this.items.push({ type: "notice", level, text });
+      this.emit({ type: "notice", level, text });
+    }
   }
 
   private nextId(prefix: string): string {

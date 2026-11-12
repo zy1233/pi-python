@@ -6,6 +6,16 @@
 //   FAKE_NO_MODE=1          no `mode` config option (the v0.8.0 binary)
 //   FAKE_EXIT_AT_START=<n>  exit with this code at once, after a line on stderr
 //   FAKE_LOG=<file>         append one line for each request or notification the agent gets
+//   FAKE_AUTH_MESSAGE=<t>   the message of the -32000 error (default: the text of the real agent)
+//   FAKE_STORE=<file>       sessions are kept in this file, so a new process lists them (without it: in memory)
+//   FAKE_NO_LIST=1          no session/list (the agent does not advertise it)
+//   FAKE_NO_DELETE=1        _pi/session/delete answers "method not found"
+//   FAKE_PAGE_SIZE=<n>      session/list gives n sessions for each page (default 50)
+//   FAKE_ONLY_ASK_AUTO=1    set_config_option refuses a value that is not ask or auto (as the real agent)
+//   FAKE_SKIP_YOLO=1        _pi/yolo_mode_changed is ignored (no config_option_update)
+//   FAKE_LIST_ERROR=1       session/list fails
+//   FAKE_IGNORE_CWD=1       session/list gives the sessions of every folder (an agent that ignores the filter)
+//   FAKE_LOAD_CWD=<dir>     session/load says in _meta["pi/cwd"] that the session belongs to this folder
 import { existsSync, appendFileSync, readFileSync, writeFileSync } from "node:fs";
 import path from "node:path";
 import { Readable, Writable } from "node:stream";
@@ -16,12 +26,30 @@ if (env.FAKE_EXIT_AT_START) {
   process.stderr.write("fake agent: cannot start\nTraceback (most recent call last):\n  boom\n");
   process.exit(Number(env.FAKE_EXIT_AT_START));
 }
+const raw = { parse: (params) => params };
 const record = (line) => env.FAKE_LOG && appendFileSync(env.FAKE_LOG, line + "\n");
 
 let mode = "ask";
 const cancelled = new Set();
-let sessionCounter = 0;
 const cwds = new Map();
+
+// The sessions that the agent keeps: id -> {id, cwd, title, updatedAt, history: [{role, text}]}
+const store = env.FAKE_STORE && existsSync(env.FAKE_STORE) ? new Map(JSON.parse(readFileSync(env.FAKE_STORE, "utf8"))) : new Map();
+let sessionCounter = Math.max(0, ...[...store.keys()].map((id) => Number(/-(\d+)$/.exec(id)?.[1] ?? 0)));
+let clock = Math.max(Date.now() - 3600_000, ...[...store.values()].map((entry) => entry.updatedAt));
+const save = () => env.FAKE_STORE && writeFileSync(env.FAKE_STORE, JSON.stringify([...store.entries()]));
+function remember(sessionId, role, value) {
+  let entry = store.get(sessionId);
+  if (!entry) {
+    entry = { id: sessionId, cwd: cwds.get(sessionId), title: role === "user" ? value : "", updatedAt: 0, history: [] };
+    store.set(sessionId, entry);
+  }
+  entry.updatedAt = ++clock + 1000;
+  const last = entry.history.at(-1);
+  if (role === "agent" && last?.role === "agent") last.text += value;
+  else entry.history.push({ role, text: value });
+  save();
+}
 
 function configOptions() {
   const options = [
@@ -37,6 +65,7 @@ function configOptions() {
 }
 
 const text = (sessionId, kind, value) => ({ sessionId, update: { sessionUpdate: kind, content: { type: "text", text: value } } });
+const replay = (sessionId, kind, value) => ({ ...text(sessionId, kind, value), update: { ...text(sessionId, kind, value).update, _meta: { isReplay: true } } });
 const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 
 async function ask(ctx, sessionId, toolCall, options) {
@@ -50,7 +79,20 @@ const allowReject = [
 ];
 
 async function runPrompt(ctx, sessionId, prompt) {
-  const notify = (n) => ctx.client.notify(acp.methods.client.session.update, n);
+  const notify = (n) => {
+    const update = n.update;
+    if (update.sessionUpdate === "agent_message_chunk") remember(sessionId, "agent", update.content.text);
+    return ctx.client.notify(acp.methods.client.session.update, n);
+  };
+  if (prompt.startsWith("error:")) {
+    const texts = {
+      key: "Error: Error code: 401 - {'error': {'message': 'Incorrect API key provided: sk-fake-123', 'type': 'invalid_request_error'}}",
+      model: "Error: Error code: 404 - {'error': {'message': 'The model `nope` does not exist', 'code': 'model_not_found'}}",
+      conn: "Error: Connection error.",
+    };
+    await notify(text(sessionId, "agent_message_chunk", texts[prompt.slice(6)] ?? "Error: boom"));
+    return "end_turn";
+  }
   if (prompt === "hello") {
     await notify(text(sessionId, "agent_thought_chunk", "Thinking. "));
     await notify(text(sessionId, "agent_message_chunk", "Hel"));
@@ -155,7 +197,7 @@ const app = acp
     return {
       protocolVersion: 1,
       agentInfo: { name: env.FAKE_AGENT_NAME ?? "pi-agent-cli", title: "fake", version: env.FAKE_AGENT_VERSION ?? "0.8.0" },
-      agentCapabilities: { loadSession: true, sessionCapabilities: { close: {} } },
+      agentCapabilities: { loadSession: true, sessionCapabilities: { close: {}, ...(env.FAKE_NO_LIST ? {} : { list: {} }) } },
       authMethods: terminal && env.FAKE_AUTH_MARKER
         ? [{ id: "pi-setup", name: "Set up", description: "setup", type: "terminal", args: ["--setup"], env: { FAKE_SETUP: "1" } }]
         : [],
@@ -164,7 +206,11 @@ const app = acp
   .onRequest(acp.methods.agent.session.new, (ctx) => {
     record("session/new " + ctx.params.cwd);
     if (env.FAKE_AUTH_MARKER && !existsSync(env.FAKE_AUTH_MARKER)) {
-      throw new acp.RequestError(-32000, "Authentication required", { authMethods: ["pi-setup"] });
+      throw new acp.RequestError(
+        -32000,
+        env.FAKE_AUTH_MESSAGE ?? "No model is set. Choose the setup login of this agent to set it up.",
+        { authMethods: ["pi-setup"] },
+      );
     }
     const sessionId = `fake-${++sessionCounter}`;
     cwds.set(sessionId, ctx.params.cwd);
@@ -176,8 +222,51 @@ const app = acp
   })
   .onRequest(acp.methods.agent.session.setConfigOption, (ctx) => {
     record(`session/set_config_option ${ctx.params.configId}=${ctx.params.value}`);
-    if (ctx.params.configId === "mode") mode = String(ctx.params.value);
+    if (ctx.params.configId === "mode") {
+      const value = String(ctx.params.value);
+      if (env.FAKE_ONLY_ASK_AUTO && value !== "ask" && value !== "auto") throw new acp.RequestError(-32602, `invalid mode ${value}`);
+      mode = value;
+    }
     return { configOptions: configOptions() };
+  })
+  .onRequest(acp.methods.agent.session.list, (ctx) => {
+    record(`session/list ${ctx.params.cwd ?? ""} ${ctx.params.cursor ?? ""}`);
+    if (env.FAKE_LIST_ERROR) throw new acp.RequestError(-32603, "cannot read the session folder");
+    const size = Number(env.FAKE_PAGE_SIZE ?? 50);
+    const all = [...store.values()]
+      .filter((entry) => env.FAKE_IGNORE_CWD || ctx.params.cwd === undefined || ctx.params.cwd === null || entry.cwd === ctx.params.cwd)
+      .sort((a, b) => b.updatedAt - a.updatedAt);
+    const from = Number(ctx.params.cursor ?? 0);
+    const page = all.slice(from, from + size);
+    return {
+      sessions: page.map((entry) => ({ sessionId: entry.id, cwd: entry.cwd, title: entry.title, updatedAt: new Date(entry.updatedAt).toISOString() })),
+      nextCursor: from + size < all.length ? String(from + size) : null,
+    };
+  })
+  .onRequest(acp.methods.agent.session.load, async (ctx) => {
+    record(`session/load ${ctx.params.sessionId} ${ctx.params.cwd}`);
+    const entry = store.get(ctx.params.sessionId);
+    if (!entry) throw new acp.RequestError(-32602, "unknown session");
+    cwds.set(entry.id, ctx.params.cwd);
+    for (const item of entry.history) {
+      await ctx.client.notify(acp.methods.client.session.update, replay(entry.id, item.role === "user" ? "user_message_chunk" : "agent_message_chunk", item.text));
+    }
+    return { configOptions: configOptions(), _meta: { "pi/cwd": env.FAKE_LOAD_CWD ?? entry.cwd } };
+  })
+  .onRequest("_pi/session/delete", raw, (ctx) => {
+    record(`pi/session/delete ${ctx.params.sessionId}`);
+    if (env.FAKE_NO_DELETE) throw new acp.RequestError(-32601, "Method not found");
+    const deleted = store.delete(ctx.params.sessionId);
+    save();
+    return { sessionId: ctx.params.sessionId, deleted };
+  })
+  .onNotification("_pi/yolo_mode_changed", raw, async (ctx) => {
+    record(`pi/yolo_mode_changed ${ctx.params.permission_mode}`);
+    if (env.FAKE_SKIP_YOLO) return;
+    mode = String(ctx.params.permission_mode);
+    for (const sessionId of cwds.keys()) {
+      await ctx.client.notify(acp.methods.client.session.update, { sessionId, update: { sessionUpdate: "config_option_update", configOptions: configOptions() } });
+    }
   })
   .onRequest(acp.methods.agent.session.close, (ctx) => {
     record("session/close " + ctx.params.sessionId);
@@ -187,6 +276,7 @@ const app = acp
     const sessionId = ctx.params.sessionId;
     const prompt = ctx.params.prompt.map((block) => (block.type === "text" ? block.text : "")).join("");
     record("session/prompt " + prompt);
+    remember(sessionId, "user", prompt);
     return { stopReason: await runPrompt(ctx, sessionId, prompt) };
   })
   .onNotification(acp.methods.agent.session.cancel, (ctx) => {

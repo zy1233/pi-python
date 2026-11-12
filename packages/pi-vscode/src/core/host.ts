@@ -3,7 +3,7 @@
  * tests implement it with plain objects (docs/specs/2026-11-04-vscode-extension-design.md, section 2).
  */
 
-import type { PermissionModeName } from "./protocol.js";
+import type { StartModeName } from "./protocol.js";
 
 export interface Logger {
   info(message: string): void;
@@ -14,7 +14,8 @@ export interface Logger {
 export interface Settings {
   agentPath: string;
   agentArgs: string[];
-  permissionMode: PermissionModeName;
+  /** The mode of a start. It is never `always-approve`: that is chosen in the chat and is not kept. */
+  permissionMode: StartModeName;
   showThinking: boolean;
 }
 
@@ -22,7 +23,15 @@ export interface SetupTerminalRequest {
   command: string;
   args: string[];
   env: Record<string, string>;
-  cwd: string;
+  /** Absent when no folder is open: the host picks the home folder of the user. */
+  cwd?: string;
+}
+
+export interface ConfirmRequest {
+  message: string;
+  detail: string;
+  /** The label of the button that confirms. The cancel button is always there. */
+  action: string;
 }
 
 export interface Host {
@@ -47,6 +56,8 @@ export interface Host {
   readFile(path: string): Promise<string | null | undefined>;
   /** Runs the setup program in a terminal and resolves when the terminal closes. */
   runSetupTerminal(request: SetupTerminalRequest): Promise<{ exitCode: number | undefined }>;
+  /** A modal question. `true` only if the user pressed the confirm button. */
+  confirm(request: ConfirmRequest): Promise<boolean>;
   /** Shows a notification that has no chat to go to (for example a version warning). */
   notify(level: "info" | "warning" | "error", text: string): void;
 }

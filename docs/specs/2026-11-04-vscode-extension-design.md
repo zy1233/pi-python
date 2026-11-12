@@ -1,8 +1,8 @@
 # zycode VS Code extension: design
 
-> Scope: a VS Code extension (`zycode.zycode`) that runs the zycode agent and shows a chat for it. This record gives the design of Phase 1: the pre-release.
+> Scope: a VS Code extension (`zycode.zycode`) that runs the zycode agent and shows a chat for it. This record gives the design of Phase 1 (the pre-release 0.1.0) and of the changes of 1.0.0 (sections 7a, 7b, 9 and 11).
 > Decided: 2026-11-04. The user adopted the plan of the research report (ZY-59, sections 1 to 6 and 9) and chose: route (a), an ACP-client extension with its own webview chat; publisher `zycode`; extension name `zycode`; display name "zycode"; five targets; no telemetry; no code signing; Trusted Publishing for the publish pipeline.
-> Status: Phase 1 is built (`packages/pi-vscode/`, `.github/workflows/vscode-extension.yml`). Nothing is published yet; the first release is by hand (`packages/pi-vscode/RELEASING.md`). Where this record and the code differ, the code wins.
+> Status: Phase 1 is built (`packages/pi-vscode/`, `.github/workflows/vscode-extension.yml`). 0.1.0 (pre-release) is published on both registries (uploaded by hand). 1.0.0 is the first stable release; it adds the first-run guide (section 7a), `always-approve` in the mode menu (section 9) and the Past chats view (section 7b). `packages/pi-vscode/RELEASING.md` has the steps. Where this record and the code differ, the code wins.
 > Code: `packages/pi-vscode/`. Agent side (unchanged): `packages/pi-agent-cli/pi_agent_cli/{agent,events,auth_methods,permissions,trust_prompt,permission_modes}.py`.
 > Facts about the agent in this record come from the source tree at `9c763c8` and from a run of the real agent over ACP (section 1). Facts about VS Code come from the research report; they were true on 2026-11-04.
 
@@ -15,8 +15,9 @@
 - **Three parts, one rule.** The *host* (extension host, Node) owns the agent process and the ACP connection. The *webview* only draws and sends messages. The *core* (ACP client, state, diff) has no `vscode` import, so it runs in unit tests without VS Code.
 - **Who decides what.** The agent decides what needs a question. The extension shows the question and sends the answer. It never answers for the user.
 - **Two kinds of trust.** VS Code Workspace Trust decides if the extension starts at all. The agent's own project trust decides if the project may load its extensions. The text of the two prompts says so.
-- **Publishing.** Open VSX first, then the Marketplace. The first upload to each is a hand upload of a VSIX that the packaging script made. The publish workflow (`.github/workflows/vscode-extension.yml`, section 11) runs from `main` by `workflow_dispatch`, with Trusted Publishing and the environment `vscode-publish`; it publishes the releases after the first.
-- **Not in Phase 1.** Session list and resume, model choice, images, `@file`, MCP servers, fallback package, and everything of report section 3.3 from Phase 2 on (section 12).
+- **Publishing.** Open VSX first, then the Marketplace. The first upload to each (0.1.0, a pre-release) was a hand upload of a VSIX that the packaging script made. The publish workflow (`.github/workflows/vscode-extension.yml`, section 11) runs from `main` by `workflow_dispatch`, with Trusted Publishing and the environment `vscode-publish`; it publishes the stable releases, 1.0.0 first.
+- **Added in 1.0.0.** A first-run guide, `always-approve` in the mode menu (with a warning, never restored), and a Past chats view (list, open, delete). All three use what the agent 0.9.0 already has: no wire item and no agent change.
+- **Not yet.** Model choice, images, `@file`, MCP servers, fallback package, and everything of report section 3.3 from Phase 2 on (section 12).
 
 ## 1. Facts the design rests on
 
@@ -194,7 +195,7 @@ Rules:
 
 ### 5.3 Permission mode
 
-See section 9. The mode only changes which calls the agent asks about. The extension has no rule of its own.
+See section 9. The mode only changes which calls the agent asks about. The extension has no rule of its own: it chooses the mode, and the agent decides.
 
 ## 6. Messages between the webview and the host
 
@@ -228,13 +229,15 @@ All messages are JSON objects with a string `type`. The types live in one file (
 | `newChat` | | Close the session (if `session/close` is offered) and open a new one. |
 | `permissionAnswer` | `requestId`, `optionId` | The user chose. The host accepts only an `optionId` that the request listed. |
 | `showDiff` | `toolCallId` | Open the diff. |
-| `setMode` | `value` | `ask` or `auto`. The host sets `zycode.permissionMode` and the session option. |
+| `setMode` | `value` | `ask`, `auto` or `always-approve`. The host sets the mode of the open session only (section 9); it does not write the setting. |
 | `runSetup` | | Run the first-run setup in a terminal (section 7). |
+| `openGuide` | | Open the getting-started walkthrough (section 7a). |
+| `openAgentConfig` | | Open `agent.toml` of the agent (section 7a). |
 | `restartAgent` | | Section 3.4 and a start. |
 | `openLog` | | Show the output channel. |
 | `openLink` | `url` | The host opens it if it is `http`, `https` or `mailto`. |
 
-There is no message that reads a file, runs a command, or sets a setting other than `zycode.permissionMode`.
+There is no message that reads a file, runs a command, or sets a setting. The webview has no message for the Past chats view: it is a tree view of the host (section 7b). A notice (`notice`, `state.setup`) can carry `actions` (`runSetup`, `openGuide`, `openAgentConfig`, `openLog`): a fixed set of ids that the webview maps to the messages above.
 
 ## 7. First run: `--setup` through `auth.terminal`
 
@@ -251,8 +254,57 @@ The user starts the extension with no model and no key. The flow:
 Other facts:
 
 - The key is typed in the terminal. It never goes through the webview, the host's own variables or the log. The extension does not use `SecretStorage` in Phase 1: the agent and `zypi` read `~/.pi-python`, and a second place for the key would make the two disagree (report section 5).
-- The command is also available when a session exists, to change the model or key later. It then ends with a restart of the agent and a new chat.
+- The command is also available when a session exists, to change the model or key later. It then ends with a restart of the agent and a new chat. While a setup terminal is open, a second click does nothing.
 - `shellPath` with a binary and `shellArgs` makes VS Code run the binary directly in the pty. On Windows the agent binary is a console program, and this works the same. (Not verified on Windows or macOS: section 13.)
+
+## 7a. The first-run guide (1.0.0)
+
+**What a fresh install does today** (measured with the real 0.9.0 binary and an empty `PI_HOME`, 2026-11-12):
+
+- No `agent.toml`: `session/new` fails with `-32000`, message "No model is set. ..." and `data.authMethods = ["pi-setup"]` (for a client that sent `auth.terminal`).
+- A `[model]` table whose key variable has no value: `-32000`, "The variable NAME has no value. ...".
+- A key that the provider refuses, a model id that the provider does not know, a base URL that does not answer: the session opens, and the first turn ends with an agent message `Error: <text of the provider>` (for example `Error: Error code: 401 - ...`). The agent says nothing else.
+- `--setup` (the terminal login) asks for the provider, the model id, a base URL, the name of the key variable and the key (hidden). It writes the `[model]` table to `agent.toml` and the key to `local.env` (mode 0600). With a model that is already set, it asks only for the key, or whether to replace it.
+
+**The guide uses these and adds nothing to the wire.** It is made of three parts:
+
+1. **A VS Code walkthrough** `zycode.gettingStarted` ("Get started with zycode"; six steps: open a folder, choose a model and save a key, say hello, choose a mode, find past chats, if something does not work). Each step has a button that runs a command, and a page in `media/walkthrough/`. It opens once by itself, when the state first becomes `needs-setup` (a boolean in `globalState`: `zycode.guideShown`). It does not open by itself again. It can be opened at any time: the command `zycode.openGuide` and *Welcome: Open Walkthrough*.
+2. **The banner of `needs-setup`.** `state.setup` carries `{reason: "no-model" | "no-key" | "unknown", variable?}`, read from the text of the `-32000` message (`src/core/first-run.ts`). The banner shows three steps and the buttons **Run setup** and **Open the guide**. A text that the extension does not know gives the general text.
+3. **Hints for the failures that come with the first turn.** When a turn ends, the text of the last `Error: ` in the agent message is matched (a key that is refused: 401, 403, "incorrect api key"; a model that does not exist: 404, "model not found"; a server that cannot be reached: "connection error", time-out, DNS) and a notice with buttons follows: **Change the key** (the setup again), **Open agent.toml**, **Show log**, **Open the guide**. Only the text from the last `Error: ` on counts, so an answer that talks about keys gives no hint. The match is a heuristic on the text of the agent; a text that it does not match gives no hint, and the chat still shows the agent's own message.
+
+**The key.** The key is typed in the setup terminal only, and the agent saves it in `local.env`. The extension has no input for it and does not read `local.env`. It does not log, store or show a key: no setting, no `SecretStorage`, no webview field. The pages of the guide say so, and say never to type a key in the chat. `agent.toml` holds no key, so **Open agent.toml** is safe (`PI_HOME`, with `~`, else `~/.pi-python`). If `agent.toml` does not exist, the command offers the setup.
+
+**Not in the guide.** No new ACP method, no `_meta` key, no change in `packages/pi-agent-cli`. If the agent ever sends a structured error for a refused key, the heuristic can go.
+
+## 7b. Past chats (1.0.0)
+
+**What the extension had:** no history. A restart or **New chat** lost the chat for the user (the agent kept the session file).
+
+**What the agent 0.9.0 offers over ACP** (read in `packages/pi-agent-cli/AGENTS.md`, the register `docs/specs/2026-11-05-acp-extension-registry.md`, and run with the real binary):
+
+| Item | Fact |
+|---|---|
+| `session/list` | Advertised in `agentCapabilities.sessionCapabilities.list`. Takes `cwd` (exact match; the agent filters) and a cursor. 50 rows a page, `nextCursor`. Newest first. A row has `sessionId`, `cwd`, `title` (the first prompt) and `updatedAt`. A session appears after its first message. |
+| `session/load` | Advertised (`loadSession`). The agent replays the history as `session/update` notifications with `_meta.isReplay: true` before the response. The response has `_meta["pi/cwd"]`, the folder that the session was saved in. |
+| `session/close` | Used for the chat that is left. |
+| `pi/session/delete` (`_pi/session/delete` on the wire; register item X1) | Not advertised. Idempotent. An agent without it answers `-32601`. |
+
+Nothing else is needed, so there is **no wire item to add and no agent change**.
+
+**The precedent (the pager, `tui/crates/codegen/pi-pager`):** a row is the title and the time ("5m ago"); the order is the agent's order; a delete is armed first and then confirmed; a missing title falls back to a short id. The extension follows this.
+
+**Where it is shown: a tree view `zycode.sessions` ("Past chats") under the chat, in the same activity bar container.** Reasons: VS Code gives scrolling, keyboard use, empty and error messages (`TreeView.message`), a title bar with buttons and an inline button for each row, with no code of our own in the webview; the chat keeps its width and its transcript; the list needs no message type in the webview protocol, and so it cannot be reached by agent text; a list inside the chat would need all of that in the webview and would push the transcript down. The cost: the user sees two views in one container. Use the view `Past chats` title bar for **New chat** and **Refresh**.
+
+**Rows and states** (`src/core/session-list.ts`, `src/ui/sessions-view.ts`):
+
+- Row: the title (one line, at most 120 characters, else `Chat <first 8 characters of the id>`), the time of the last message ("just now", "5m ago", "3h ago", "2d ago", "4mo ago"), a marker (`open`) on the open chat. The tooltip has the full time, the folder and the id.
+- The list is read at start and after each turn, after **New chat**, after an open and after a delete, and a minute-timer repaints the times. Reads that overlap make one more read after the first.
+- States: `loading`, `empty` ("No past chats in this folder yet. A chat appears here after its first message."), `error` (the text of the error), `unavailable` (no folder, Restricted Mode, the agent is not running, the agent has no `session/list`), and `ready`. A list that has more than 20 pages (1000 chats) shows the newest 1000 and says so.
+- **Open** (click): only a row of the list can be opened, and only while the state is `ready` (not during an answer or while the setup runs). The extension closes the open session, calls `session/load` with the folder of the window, and shows the replayed user messages and answers (replayed `user_message_chunk` only with `_meta.isReplay`; replayed tool calls get no diff buttons, because the files may have changed). The mode is set by the rule of section 9, as for a new session.
+- **Delete** (the trash button, or the context menu): a modal question names the chat and says that it cannot be undone. Then `_pi/session/delete`. If the open chat is deleted, a new chat starts. An agent that answers `-32601` gets one notice, "This agent version cannot delete a chat", and the list shows no trash button.
+- **New chat**: as before; the list shows the new chat after its first message.
+
+**A chat of another folder never shows in the wrong workspace.** Three checks. (1) `session/list` is called with the folder of the window. (2) Each row is checked again with `sameFolder` (a trailing separator is ignored; on Windows the letter case and the kind of slash are too), so an agent that ignores the filter cannot put a foreign row in the list. (3) After `session/load`, `_meta["pi/cwd"]` must be the same folder, else the session is closed, nothing is shown, and a notice says "That chat belongs to another folder". The list is not read in Restricted Mode, and the agent is not started there (project trust, invariant 9 of `AGENTS.md`). The extension reads no session file itself.
 
 ## 8. The diff view
 
@@ -287,18 +339,30 @@ The diff is for reading. It has no accept or reject buttons, and the extension d
 |---------|---------------|-------|---------|
 | `zycode.agentPath` | string, `""` | `machine` | Program to run instead of the bundled binary. |
 | `zycode.agentArgs` | string[], `[]` | `machine` | Arguments for it. |
-| `zycode.permissionMode` | `"ask"` or `"auto"`, `"ask"` | `application` | The mode of every session of the extension. |
+| `zycode.permissionMode` | `"ask"` or `"auto"`, `"ask"` | `application` | The mode of a start: of every new session, a restart and a past chat that is opened. It cannot be `always-approve`. |
 | `zycode.showThinking` | boolean, `true` | `window` | Show the thinking blocks (collapsed). |
 
 **Scopes are a security choice.** A setting that names a program, or loosens permissions, must not come from the folder that the agent works in. `machine` and `application` settings are read from the user's settings only, never from `.vscode/settings.json` or a `.code-workspace` file. Workspace Trust already stops the extension in an untrusted folder, but a trusted folder is trusted to run its tasks, and not to choose the agent.
 
-**Mode.** `ask` and `auto` are the two values the agent lets a client choose (F10). After `session/new`, if the response has a config option with id `mode` (category `mode`) and its current value is not the setting, the controller sends `session/set_config_option`. The setting wins over `permission` in `agent.toml`, **including `always-approve`**: the extension never runs a session in `always-approve`, and it says so in the README. A change of the setting applies to the open session at once. The status shows the mode.
+**Mode.** `ask` and `auto` are the two values the agent lets a client choose (F10). After `session/new`, if the response has a config option with id `mode` (category `mode`) and its current value is not the setting, the controller sends `session/set_config_option`. The setting wins over `permission` in `agent.toml`, **including `always-approve`**: a session starts in `ask` or `auto`, never in `always-approve`. A value `always-approve` in a hand-edited `settings.json` is read as `ask`. A change of the setting applies to the open session at once. The status shows the mode.
+
+**Always approve in the mode menu (1.0.0).** The menu of the chat shows `ask`, `auto` and, when it is allowed, `always-approve`. What the pager and the agent do: the standard `mode` option of the agent takes `ask` and `auto` only (decision D6 in `packages/pi-agent-cli/AGENTS.md`), and a live session reaches `always-approve` only through the agent's own notification `pi/yolo_mode_changed` (`_pi/yolo_mode_changed` on the wire, register item X8; the pager's `Ctrl+Y` sends it, without a question). The extension does the same and adds a question:
+
+1. **Offered** only if the workspace is trusted, the agent has a `mode` option (v0.9.0 and later), and the user did not refuse the agent's project-trust question in this agent process. Otherwise the menu has two options, and a call for it says why it is not available.
+2. **Warning first.** A modal (`showWarningMessage`, `modal: true`): "Turn on Always approve?" — every tool call, `bash` included, then runs with no question; it stays on for the open chat only; a new chat, a past chat and a restart start in Ask. No button other than the one that turns it on and Cancel. The mode does not change on Cancel or when the modal is closed.
+3. **The switch.** The extension sends `_pi/yolo_mode_changed {permission_mode: "always-approve"}` and waits (5 s) for the agent's `config_option_update` that reports it. The view shows what the agent reports: if the agent does not confirm, the mode stays what it was and a notice says so. It never calls `set_config_option` with `always-approve`.
+4. **A visible label** while it is on: a warning chip "Always approve: no questions" in the header, a warning border on the header and the composer, and the status bar item (warning colour, the words "always approve", a line in the tooltip).
+5. **Never restored.** Before a new chat, a past chat that is opened, or the deletion of the open chat, the extension puts the mode of the setting back (`set_config_option`, then `_pi/yolo_mode_changed` with that mode, because the agent keeps its last mode as the start mode of later sessions). A restart of the agent (or of VS Code) starts a new agent process, and `applyPermissionSetting` runs after each `session/new`. So a clean start is always `ask` (or `auto` by the setting), and no state of `always-approve` is saved anywhere.
+6. **Taken away** when the user refuses (or cancels) the agent's project-trust question: the mode goes back to the setting, the option leaves the menu until the agent is restarted, and a notice says so. The menu offers no `always-approve` while `isTrusted` is false (VS Code also stops an extension that does not support Restricted Mode).
+7. **What it does not change.** The agent's own questions that no mode removes still show (the project-trust question, section 5.2), and `always-approve` does not make the extension answer them (D4). Headless and `zypi -p` runs are not touched.
+
+`always-approve` is not a sandbox either: the README says what it does and does not do.
 
 When the response has no `mode` option (an agent older than v0.9.0 that `zycode.agentPath` points to, F10), the extension cannot set it. The agent is then in `ask` (the default of `agent.toml`) or in whatever `agent.toml` says. The view hides the mode switch, shows "mode: set by agent" and, if the setting is `auto`, one notice: "This agent version has no Auto mode."
 
 **The README says** (what the agent's own notes say, and no more): Auto guards what a call writes or runs; it does not guard what a call reads or sends, and it is not a sandbox.
 
-**Status.** One status bar item (`zycode: ready | busy | setup | error`, mode in the tooltip) on the left. A click focuses the chat. The chat header shows the same status, the agent version and source, the model name from the `model` option (read only in Phase 1), and the mode.
+**Status.** One status bar item (`zycode: ready | busy | setup | error`, mode in the tooltip, and the words "always approve" with a warning colour while that mode is on) on the left. A click focuses the chat. The chat header shows the same status, the agent version and source, the model name from the `model` option (read only in Phase 1), and the mode.
 
 **Workspace Trust and virtual workspaces.** `capabilities.untrustedWorkspaces = {supported: false, description: "zycode runs an agent that reads and writes files and runs commands in your folder."}` and `capabilities.virtualWorkspaces = {supported: false, description: "..."}`. VS Code then does not activate the extension in Restricted Mode. As a second guard the core checks `workspace.isTrusted` before the start, and the view shows `untrusted` if it is false (for example after the user turns the extension on by hand through a path that VS Code allows). `onDidGrantWorkspaceTrust` starts the flow again. This is VS Code's question. It is a different question from the agent's project trust (section 5.2), and the README says so in one short paragraph.
 
@@ -312,14 +376,18 @@ When the response has no `mode` option (an agent older than v0.9.0 that `zycode.
 | `zycode.newChat` | A new session. |
 | `zycode.stop` | Stop the turn. |
 | `zycode.restartAgent` | Stop and start the agent. |
-| `zycode.runSetup` | Section 7. |
+| `zycode.runSetup` | Section 7 ("Set up model and API key"; also to change the key later). |
+| `zycode.openGuide` | Open the walkthrough (section 7a). |
+| `zycode.openAgentConfig` | Open `agent.toml` (section 7a). |
+| `zycode.refreshSessions` | Read the list of past chats again (section 7b). |
+| `zycode.openSession`, `zycode.deleteSession` | Used by the Past chats view (not in the Command Palette). |
 | `zycode.showLog` | Show the output channel. |
 
-Activation events: `onView:zycode.chat`, `onCommand:*` of the commands above. Not `*`: the extension does not start when VS Code starts. The view is in its own activity bar container with the zycode icon (a monochrome SVG for the container; the PNG is the marketplace icon).
+Activation events: `onView:zycode.chat`, `onView:zycode.sessions`, `onCommand:*` of the commands above. Not `*`: the extension does not start when VS Code starts. The view is in its own activity bar container with the zycode icon (a monochrome SVG for the container; the PNG is the marketplace icon).
 
 ## 11. Packaging and version pinning
 
-**Version rules.** Extension version `0.1.0`: an odd minor, because the first releases are pre-releases (`vsce package --pre-release`; Marketplace takes `major.minor.patch` only, and a release must have a version that no pre-release has). `engines.vscode` is `^1.90.0` (it must be at least 1.63 for pre-releases; 1.90 has the webview and terminal API that the design uses). The extension version and the agent version are separate: `package.json` has `zycodeAgentVersion` (`"0.9.0"` in the first release).
+**Version rules.** Extension version `1.0.0`: a stable release, with an even minor. The first release, `0.1.0`, was a pre-release (an odd minor, `vsce package --pre-release`). The Marketplace takes `major.minor.patch` only. The rule of the Marketplace and of VS Code: releases use an even minor and pre-releases an odd minor, and the two lines are separate; a user of the pre-release gets the highest version of both, so `1.0.0` replaces `0.1.0` for them. From 1.0.0 on the package has no pre-release flag (`scripts/package.mjs` calls `vsce package` without `--pre-release`, the workflow calls `vsce publish` without it, `check-vsix` fails a VSIX that has it). The next pre-release line is `1.1.x`, the next stable release `1.2.0`; a pre-release needs the flag and a workflow input again, in its own pull request. `engines.vscode` is `^1.90.0` (1.90 has the webview and terminal API that the design uses). The extension version and the agent version are separate: `package.json` has `zycodeAgentVersion` (`"0.9.0"` in the first release).
 
 **The pin.** `agent-assets.json` holds, for the pinned Release tag, one entry for each target: asset name, byte size and sha256. The values are copied from the Release once, by a person, and reviewed in a pull request. The script does not trust the Release page for them: it checks the downloaded file against the file in the repository. A different sha256 on the Release is a failure, not an update.
 
@@ -333,7 +401,7 @@ Activation events: `onView:zycode.chat`, `onCommand:*` of the commands above. No
 
 No `alpine-*` (the binary needs glibc), no `linux-armhf` (no binary), no `win32-arm64` (not tested).
 
-**Local script** (`scripts/package.mjs <target>|all`): check `zycodeAgentVersion == agent-assets.json version`; download the asset (HTTPS from GitHub Releases) to a cache folder; compare size and sha256 with the pin; extract the one file; set mode `0755` (POSIX targets); run the build (esbuild bundles host and webview); generate `THIRD-PARTY-NOTICES`; run `vsce package --target <t> --pre-release --out out/zycode-<t>-<version>.vsix`; run `check-vsix`; write `out/SHA256SUMS`, and print the path, size and sha256 of each file, so that a person can upload a file by hand (see "Publishing order and the first upload"). The check opens the VSIX and verifies: the binary is there, with the exec bit (the bit survives only when packaging on Linux, so the script refuses to package on Windows); `LICENSE`, `THIRD-PARTY-NOTICES` and the PNG icon are there; there is no `node_modules`, no source map, no `.env`; the manifest has the right target and the pre-release flag.
+**Local script** (`scripts/package.mjs <target>|all`): check `zycodeAgentVersion == agent-assets.json version`; download the asset (HTTPS from GitHub Releases) to a cache folder; compare size and sha256 with the pin; extract the one file; set mode `0755` (POSIX targets); run the build (esbuild bundles host and webview); generate `THIRD-PARTY-NOTICES`; run `vsce package --target <t> --out out/zycode-<t>-<version>.vsix`; run `check-vsix`; write `out/SHA256SUMS`, and print the path, size and sha256 of each file, so that a person can upload a file by hand (see "Publishing order and the first upload"). The check opens the VSIX and verifies: the binary is there, with the exec bit (the bit survives only when packaging on Linux, so the script refuses to package on Windows); `LICENSE`, `THIRD-PARTY-NOTICES` and the PNG icon are there; there is no `node_modules`, no source map, no `.env`; the manifest has the right target and no pre-release flag; every page of the walkthrough is in the package.
 
 **`THIRD-PARTY-NOTICES`.** One file with two parts. Part 1: the Python distributions in the agent binary. The script makes a clean virtual environment, installs the same packages as the agent build (`pi-agent-cli-lc` at `zycodeAgentVersion` and its extras that `packaging/agent/zycode-agent.spec` includes), and reads name, version, license and license files from each distribution's metadata (`importlib.metadata`). It adds a fixed entry for CPython (PSF-2.0) and for PyInstaller's bootloader (GPL-2.0 with the bootloader exception), and a line for the native libraries that CPython links in. Part 2: the npm packages that esbuild bundled into `dist/extension.js` (from the esbuild metafile), with their license files. A distribution with no license text is listed with a note, and the script fails the build if a license is "UNKNOWN" and is not on a reviewed allow list. The file is not committed.
 
@@ -346,23 +414,23 @@ No `alpine-*` (the binary needs glibc), no `linux-armhf` (no binary), no `win32-
 3. **The Marketplace.** `vsce publish` looks the extension up and creates it when it is not found (`publish.ts`). No document says that this works with `--oidc`, so the first Marketplace publish does not depend on it. The Marketplace web page "New extension" takes a VSIX; whether it takes a platform VSIX is not documented (not verified). So the first Marketplace upload is **one** VSIX (`linux-x64`) by hand, and the workflow publishes the other four through the update path (the path that documented OIDC examples use).
 4. **The environment `vscode-publish` allows deployments from `main` only** (checked through the API: one branch rule `main`, no tag rule, reviewer `zy1233`, self-review allowed (the user is the only reviewer), administrators cannot bypass, no secret). The publish job runs from `main`. A run from another branch or from a tag is refused by GitHub.
 5. **Commands and permissions.** `vsce publish --oidc` (`vsce` `^4.1.0` and the lock file; `--oidc` conflicts with `--pat` and `--azure-credential`) and `ovsx publish --trusted-publishing` (`ovsx` 1.4.0, exact); the job has `permissions: id-token: write` and `environment: vscode-publish`. Both registry entries name the workflow by file name only: `vscode-extension.yml`. They use the same repository (`zy1233/pi-python`, owner id 40223340, repository id 1246454160, as the Marketplace policy shows) and the same environment.
-6. **Details that the workflow follows.** `ovsx publish <file>` ignores `--pre-release` for a prepackaged file (it warns): the flag is in the VSIX manifest. `vsce publish --packagePath <file> --pre-release` refuses a VSIX that was not packaged as pre-release, which the workflow uses as a check. `vsce publish --packagePath` cannot be combined with `--target`, so the workflow publishes the VSIX files that the package job made. Each `vsce` call asks for a new OIDC token (a token can be exchanged once). `--skip-duplicate` on both makes a repeat of a half-done publish safe. The Open VSX `publisher` must have the same case as the namespace (`zycode`). The Marketplace policy is "Active" with no 48-hour rule, because the repository is public. No document names a limit for a Marketplace publisher on a personal Microsoft account.
+6. **Details that the workflow follows.** `ovsx publish <file>` ignores `--pre-release` for a prepackaged file (it warns): the flag is in the VSIX manifest. `vsce publish --packagePath <file>` takes the flag from the VSIX manifest; the workflow no longer passes `--pre-release`, and `check-vsix` fails a VSIX that has the flag. `vsce publish --packagePath` cannot be combined with `--target`, so the workflow publishes the VSIX files that the package job made. Each `vsce` call asks for a new OIDC token (a token can be exchanged once). `--skip-duplicate` on both makes a repeat of a half-done publish safe. The Open VSX `publisher` must have the same case as the namespace (`zycode`). The Marketplace policy is "Active" with no 48-hour rule, because the repository is public. No document names a limit for a Marketplace publisher on a personal Microsoft account.
 
 What this means for the package:
 
-- The packaging script makes VSIX files that a person can upload by hand: `zycode-<target>-<version>.vsix` in `packages/pi-vscode/out/`, each built with `--pre-release`, plus `SHA256SUMS`. A file is the same whether the workflow or a person uploads it. The workflow also keeps the five VSIX files as run artifacts for 14 days, so a person can take them from a run with `publish` off.
+- The packaging script makes VSIX files that a person can upload by hand: `zycode-<target>-<version>.vsix` in `packages/pi-vscode/out/`, each built as a stable release (since 1.0.0), plus `SHA256SUMS`. A file is the same whether the workflow or a person uploads it. The workflow also keeps the five VSIX files as run artifacts for 14 days, so a person can take them from a run with `publish` off.
 - `packages/pi-vscode/RELEASING.md` is the exact checklist of the first release: (1) the five VSIX files by hand to Open VSX; (2) register the Open VSX trusted publisher, and test it with a workflow run that only skips duplicates; (3) `linux-x64` by hand to the Marketplace, then the workflow for the other four targets; (4) later releases from the workflow.
 - Not verified: the live Open VSX page with five files at once; that the Marketplace page keeps the pre-release flag of a VSIX and takes a platform VSIX; the first `vsce publish --oidc` of any kind from this repository. The checklist says what to look at after each step.
 
 **Which trigger runs on `main`.** `workflow_dispatch` runs on the branch or tag that the user chooses. The "Run workflow" button offers any branch, and the environment rule refuses all but `main`. A `workflow_run` run always uses the default branch: GitHub sets `GITHUB_REF` to the default branch and `GITHUB_SHA` to its last commit (GitHub Docs, "Events that trigger workflows", `workflow_run`), so it passes the environment rule, but it builds the last commit of `main`, not the commit of the run that triggered it. A tag or `release` trigger would run on a tag ref, which the environment refuses. The extension version is not the agent version, and a new agent Release must not publish an extension by itself. So the workflow uses `workflow_dispatch` only for publishing. The job `guard` fails at once, before any build and before the reviewer is asked, when `publish` is ticked on a ref other than `main`.
 
-**The workflow** is `.github/workflows/vscode-extension.yml`. On a pull request that changes the extension it runs `npm run check` and builds and smoke-tests the `linux-x64` VSIX. On `workflow_dispatch` it does the same for the chosen targets (default: all five), and with `publish` ticked the job `publish` runs in the environment `vscode-publish`: Open VSX first, then the Marketplace (`registries` can select one of them, for a repeat). Top-level permissions are `contents: read`; only `publish` has `id-token: write`. It has no secret and no `workflow_run`, `push`, `release` or tag trigger (`test/packaging.test.ts` checks these). It publishes pre-releases only, because `scripts/package.mjs` packs with `--pre-release`.
+**The workflow** is `.github/workflows/vscode-extension.yml`. On a pull request that changes the extension it runs `npm run check` and builds and smoke-tests the `linux-x64` VSIX. On `workflow_dispatch` it does the same for the chosen targets (default: all five), and with `publish` ticked the job `publish` runs in the environment `vscode-publish`: Open VSX first, then the Marketplace (`registries` can select one of them, for a repeat). Top-level permissions are `contents: read`; only `publish` has `id-token: write`. It has no secret and no `workflow_run`, `push`, `release` or tag trigger (`test/packaging.test.ts` checks these). It publishes stable releases (1.0.0 and later), because `scripts/package.mjs` packs with no pre-release flag. 0.1.0 was published by hand; 1.0.0 is very likely the first real Trusted Publishing publish, and `RELEASING.md` has the fallback if OIDC fails (run again, then a hand upload from the run artifacts, a token only as the last resort, revoked at once).
 
-## 12. Out of Phase 1
+## 12. Not yet (after 1.0.0)
 
 From the report, section 3.3 (Phase 2 and later), and from the limits above:
 
-- Session list and resume (`session/list`, `resume`, `load`), and a chat history view.
+- Past chats beyond the list of section 7b: search, rename, grouping by date, a list of the chats of other folders, `session/resume` (the extension uses `session/load`).
 - Model choice (`session/set_config_option` with `model`). Phase 1 shows the model name only.
 - Slash-command completion from `available_commands_update` (a typed `/goal ...` is sent as text and the agent handles it).
 - Images, `@file` and other context, `embeddedContext` blocks.
@@ -383,15 +451,15 @@ From the report, section 3.3 (Phase 2 and later), and from the limits above:
 | Layer | What | How | Where it runs |
 |-------|------|-----|---------------|
 | Unit | `resolveAgentCommand`, `chmod`, version check, protocol validation, tool-call model, markdown renderer, diff maths (apply edits, reverse-apply a patch), trust-prompt detection, permission mapping | vitest | any OS |
-| Fake agent | the controller and the connection against a scripted ACP agent (a Node script made with the same SDK): streaming text and thinking, a tool call with a permission card, a trust prompt, cancel with an open request, `auth_required` then setup then a second `session/new`, process exit during a turn, stderr to the log, wrong version, wrong protocol | vitest, child process | any OS with Node |
-| Real agent | the same controller against `python -m pi_agent_cli` with the mock model (`PI_USE_MOCK=1`, temporary `PI_HOME`), and against `tests/_tool_agent.py` for a scripted `write` and `edit` in `ask` mode, `auto`, and a `bash` call | vitest, opt in (`ZYCODE_TEST_AGENT`, which the `npm run test:agent` script sets from `.venv`) | Linux, macOS (Windows: not run) |
+| Fake agent | the controller and the connection against a scripted ACP agent (a Node script made with the same SDK): streaming text and thinking, a tool call with a permission card, a trust prompt, cancel with an open request, `auth_required` then setup then a second `session/new`, process exit during a turn, stderr to the log, wrong version, wrong protocol; since 1.0.0 also: `session/list` (pages, other folders), `session/load` with replay, `_pi/session/delete` (and `-32601`), `_pi/yolo_mode_changed`, refused keys, models and servers | vitest, child process | any OS with Node |
+| Real agent | the same controller against `python -m pi_agent_cli` with the mock model (`PI_USE_MOCK=1`, temporary `PI_HOME`), and against `tests/_tool_agent.py` for a scripted `write` and `edit` in `ask` mode, `auto`, and a `bash` call; and (`test/real-first-run.test.ts`) against the fake model server of `packaging/agent/smoke.py` with a clean `PI_HOME`: needs-setup, the real `--setup` typed in a pseudo-terminal, a first answer, a refused key and its replacement, a wrong base URL, and the session list (new, load with replay, delete, a restart of the extension, another folder) | vitest, opt in (`ZYCODE_TEST_AGENT`, which the `npm run test:agent` script sets from `.venv`) | Linux, macOS (Windows: not run) |
 | Webview | the renderer: text, thinking, tool list, bash output, permission card, no `innerHTML` from agent text, a hostile string stays text | vitest with a DOM (jsdom) | any OS |
 | Extension host | activation, the view loads, `Show diff` opens a diff editor, restricted mode does not start the agent | `@vscode/test-electron` with a real VS Code, under `xvfb` on Linux | manual in Phase 1; not in CI |
-| Package | `check-vsix` on each VSIX: binary, exec bit, notices, license, icon, no `node_modules`; sha256 mismatch is refused; `package` refuses on Windows | a script, run by hand now | Linux |
+| Package | `check-vsix` on each VSIX: binary, exec bit, notices, license, icon, walkthrough pages, no pre-release flag, no `node_modules`; sha256 mismatch is refused; `package` refuses on Windows. `scripts/smoke-vsix.mjs` starts the frozen binary three times (section PACKAGING.md): no model, the mode option, and a turn with a fake model server for the list, load, delete and the always-approve signal | a script; in CI for `linux-x64` | Linux |
 
 **Commands** (run from `packages/pi-vscode`, and pasted into each pull request): `npm ci`, `npm run typecheck`, `npm run lint`, `npm test`, and for the real agent `npm run test:agent`. The workflow in section 11 runs the same checks on a pull request that changes the extension.
 
-**Not verified on any machine of ours:** Windows and macOS (the extension host, the terminal for `--setup`, the exec bit after a VS Code install, the first start of an unsigned binary under Gatekeeper and SmartScreen, a Windows antivirus on a PyInstaller file), Remote-SSH, WSL and dev containers, the Marketplace scan of the VSIX, Open VSX. The README and the release notes say "pre-release" for this reason.
+**Not verified on any machine of ours:** Windows and macOS (the extension host, the terminal for `--setup`, the exec bit after a VS Code install, the first start of an unsigned binary under Gatekeeper and SmartScreen, a Windows antivirus on a PyInstaller file), Remote-SSH, WSL and dev containers, the Marketplace scan of the VSIX, Open VSX. The README lists the limits that remain.
 
 ## 14. Decisions
 
@@ -403,7 +471,7 @@ From the report, section 3.3 (Phase 2 and later), and from the limits above:
 | D4 | The extension never answers a permission or trust request for the user. | The agent's own rule (F9, `trust_prompt.py`); a wrong default here runs a project's code. |
 | D5 | The extension builds the diff itself. | The agent sends no diff block (F7). The change to the agent is noted and not done here. |
 | D6 | `zycode.agentPath`, `agentArgs` and `permissionMode` are `machine` and `application` settings. | A project must not choose the program or loosen the mode. |
-| D7 | The permission setting wins over `agent.toml`, and `always-approve` is not offered. | One clear rule. `ask` and `auto` are both at least as strict as `always-approve`. |
+| D7 | The permission setting wins over `agent.toml`, and a session never starts in `always-approve` (since 1.0.0 the user can choose it in the chat menu, section 9; D17 to D20). | One clear rule for a start. `ask` and `auto` are both at least as strict as `always-approve`. |
 | D8 | `zycodeAgentVersion` is pinned with sha256 in the repository (`agent-assets.json`). | A changed Release asset must not enter a VSIX unseen. |
 | D9 | No telemetry. | User decision. |
 | D10 | The publish workflow is `.github/workflows/vscode-extension.yml`, and it publishes only by `workflow_dispatch` from `main`. | An agent Release is not an extension release; the environment `vscode-publish` allows `main` only. |
@@ -411,3 +479,16 @@ From the report, section 3.3 (Phase 2 and later), and from the limits above:
 | D14 | The first upload to Open VSX is a hand upload of the five VSIX files. The first Marketplace upload is a hand upload of `linux-x64`, and the workflow publishes the other four. The workflow publishes every later release. | Open VSX Trusted Publishing needs an existing, active extension; the first Marketplace publish with OIDC for a new extension is undocumented; a platform VSIX on the Marketplace web page is undocumented. |
 | D11 | `extensionKind: ["workspace"]`. | The agent must run where the files are. |
 | D12 | The first start with no key uses `--setup` in a terminal, not `SecretStorage`. | One place for the key; the same flow as `zypi` and Zed (report section 5). |
+| D15 | The first-run guide is a walkthrough, a banner with steps, and hints after a failed first turn. It opens once by itself. It adds no wire item and changes nothing in the agent (section 7a). | The agent already says what is missing (`auth_required`, `--setup`); a person who has never seen the agent needs the steps in the place where the chat stops. |
+| D16 | The hints read the text of the last `Error: ` message of the agent (regular expressions), and say nothing when they do not match. | The agent has no structured error for a refused key (measured on 0.9.0). A wrong hint is worse than none. |
+| D17 | `always-approve` is in the mode menu as the third option, and the extension reaches it with the agent's own `pi/yolo_mode_changed` (X8), never with `set_config_option`. | The `mode` option takes `ask` and `auto` only (D6 of the agent). The pager uses the same signal. |
+| D18 | A modal warning comes before the switch; there is a visible label while it is on; it is not offered in an untrusted workspace and not after a refused project-trust question. | One click must not turn off every question. Invariant 9 (project trust). |
+| D19 | A clean start is always `ask` (or `auto` by the setting): a new chat, a past chat and a restart never keep `always-approve`, and the extension puts the agent's start mode back. | The agent keeps its last mode for later sessions (X8); the extension must not leave it behind. |
+| D20 | The setting `zycode.permissionMode` stays `ask` or `auto`. | A setting would restore the mode at each start, against D19. |
+| D21 | Past chats is a tree view under the chat, not a list inside the chat (section 7b). | Native scrolling, keyboard use, messages and buttons; nothing new in the webview; the transcript keeps its room. |
+| D22 | The order and the row come from the agent and follow the pager: newest first, the first prompt, the time. | One order in `zypi` and in VS Code; the extension reads no session file. |
+| D23 | A delete asks first in a modal and uses `pi/session/delete` (X1); an agent without it shows no delete. | A delete cannot be undone. |
+| D24 | A chat of another folder never shows or opens: the folder filter of `session/list`, a second check of each row, and the `pi/cwd` of `session/load`. | The history of one folder must not appear in another (project trust, invariant 9). |
+| D25 | The version is `1.0.0`, stable (even minor). The next pre-release line is `1.1.x`, the next stable release `1.2.0`. | The Marketplace rule for the two lines; `0.1.0` is a pre-release, and `1.0.0` is above it. |
+| D26 | If the OIDC publish of 1.0.0 fails: read the log, run again, then upload the VSIX of the run artifacts by hand; a token only as the last resort. | 1.0.0 is likely the first real OIDC publish; both registries took 0.1.0 by hand. |
+| D27 | `smoke-vsix.mjs` also checks the list, load, delete and the always-approve signal on the frozen binary of each release; the vitest tests of the real agent stay opt-in. | The frozen binary is what ships; CI has no Python environment for the extension. |

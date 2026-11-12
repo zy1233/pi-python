@@ -1,35 +1,30 @@
 # Releasing the zycode extension
 
-This file is the checklist for the **first release** (`0.1.0`, a pre-release), then for later releases. How the files are made is in `PACKAGING.md`. The design is in `docs/specs/2026-11-04-vscode-extension-design.md`.
+This file is the checklist for a release. How the files are made is in `PACKAGING.md`. The design is in `docs/specs/2026-11-04-vscode-extension-design.md`.
 
-Why the first release is by hand: Open VSX registers a trusted publisher for one extension, and only after that extension exists and is active. So the first upload to Open VSX cannot use the workflow. The first Marketplace publish with the workflow (`vsce publish --oidc`) for an extension that does not exist yet is not documented, so this checklist does not depend on it.
+## Where things stand (read-only check on 2026-11-12, before the 1.0.0 pull request)
 
-## What is already set up (checked on 2026-11-12)
+- Open VSX and the Marketplace each hold `zycode.zycode` **0.1.0**, a pre-release, for five targets: `linux-x64`, `linux-arm64`, `darwin-arm64`, `darwin-x64` and `win32-x64`. Nothing else is published.
+- 0.1.0 was uploaded by hand. **No release has gone out from the workflow yet.** So `1.0.0` is very likely the first real Trusted Publishing (OIDC) publish. Treat the OIDC path as untried until the run is green.
+
+## What is already set up
 
 - GitHub environment `vscode-publish`: required reviewer `zy1233` (self-review is allowed), deployments from `main` only, no secret.
 - Marketplace publisher `zycode`, with a Trusted Publishing policy `zycode release`: repository `zy1233/pi-python`, workflow `vscode-extension.yml`, environment `vscode-publish`.
-- Open VSX namespace `zycode` (you are the owner). It has no extension and no trusted publisher yet.
-- The workflow file `.github/workflows/vscode-extension.yml`. Its name must stay as it is: both registries name it.
+- Open VSX namespace `zycode` (you are the owner). It needs a trusted publisher for the extension `zycode` (see "Before the run").
+- The workflow file `.github/workflows/vscode-extension.yml`. Its name must stay as it is: both registries name it. It publishes from `main` only, in the environment `vscode-publish`, with OIDC, and with no token.
 
-## Before step 1
+## Stable and pre-release (how the registries treat them)
 
-1. Merge the pull request that adds this file. Work from `main` after that.
-2. Get the five VSIX files. Use **one** of these:
-   - **From GitHub (no tools needed).** Actions > "VS Code extension" > Run workflow > branch `main`, `publish` **not ticked**, targets as they are. When it is green, download the five artifacts `vsix-<target>` from the run page and unzip each one. Nothing is published by this run.
-   - **On your machine (Linux or WSL, on the Linux file system, not `/mnt/c`):** `cd packages/pi-vscode && npm ci && npm run package:all`. The files are in `out/`, and `out/SHA256SUMS` has their checksums.
-3. Check the names: `zycode-linux-x64-0.1.0.vsix`, `zycode-linux-arm64-0.1.0.vsix`, `zycode-darwin-arm64-0.1.0.vsix`, `zycode-darwin-x64-0.1.0.vsix`, `zycode-win32-x64-0.1.0.vsix`. They are 39 to 73 MiB each.
+- A release and a pre-release are two lines of the same extension. The version decides which one a user gets. The Marketplace rule: use **even minor numbers for releases** (`1.0.0`, `1.2.0`) and **odd minor numbers for pre-releases** (`1.1.0`, `1.1.1`). A user on the pre-release channel gets the highest version of both lines. A user on the release channel gets the highest release.
+- `1.0.0` is above `0.1.0`, so the pre-release `0.1.0` updates to `1.0.0`. `1.0.0` has no pre-release flag: the VSIX is made without `--pre-release`, the workflow calls `vsce publish` without it, and `scripts/check-vsix.mjs` fails a VSIX that has the flag.
+- The next pre-release line is `1.1.x`, and the next stable release is `1.2.0`. A pre-release needs a new input in the workflow and the flag in `scripts/package.mjs` first. Do that in its own pull request.
+- A version cannot be published twice or changed. If a published version is wrong, publish a higher one.
 
-## Step 1: first upload to Open VSX (by hand)
+## Before the run
 
-1. Open <https://open-vsx.org> and log in. Open the Publish page.
-2. Drop all five files on it together. The page queues them one by one. If the page refuses a file, upload the five one by one.
-3. Wait about 10 seconds for each file. The extension `zycode.zycode` should show **active**. Its page should list five platforms and the pre-release label. No "not a verified publisher" label should show (you own the namespace). If a platform or the label is missing, stop and tell the team.
-4. **Only if the web page does not take the files:** Settings > Access Tokens > Generate new token. Run `npx ovsx publish <file> -p <token>` for each file (type the token in your terminal; do not write it in a file or send it to anyone). Then **Revoke** the token at once. The token list must be empty at the end. The workflow never needs a token.
-
-## Step 2: register the Open VSX trusted publisher
-
-1. Open <https://open-vsx.org/user-settings/trusted-publishers> (Settings > Trusted Publishers).
-2. Pick the namespace `zycode` and the extension `zycode`. Provider: GitHub Actions. Fill in exactly:
+1. Merge the pull request of the release to `main`. Work from `main` after that.
+2. Check the Open VSX trusted publisher: <https://open-vsx.org/user-settings/trusted-publishers>. Namespace `zycode`, extension `zycode`, provider GitHub Actions, with exactly these values. If it is not there, add it. A registration cannot be edited: delete it and make a new one.
 
    | Field | Value |
    |---|---|
@@ -38,26 +33,37 @@ Why the first release is by hand: Open VSX registers a trusted publisher for one
    | Workflow filename | `vscode-extension.yml` |
    | Environment name | `vscode-publish` |
 
-3. Save. A registration cannot be edited. To change it, delete it and make a new one.
-4. **Check that it works before you rely on it.** Run the workflow on `main`: `publish` ticked, `registries` = `open-vsx`, targets as they are. Approve the run in the environment `vscode-publish`. Each file must end with "already published. Skipping publish.": the OIDC login worked, and nothing new was uploaded. If a file says "No trusted publisher matches the presented token", the registration does not match: compare the four values above.
+3. Check the Marketplace policy: <https://marketplace.visualstudio.com/manage>, publisher `zycode`, Trusted Publishing. It must show the same repository, workflow and environment.
+4. Make a dry run that publishes nothing. Actions > "VS Code extension" > Run workflow > branch `main`, `publish` **not ticked**. The run builds the five VSIX, checks them, and starts the agent of the Linux file with a smoke test. Download the artifacts `vsix-<target>` if you want to install one before the release.
 
-## Step 3: first publish to the Marketplace
+## Publish a release (1.0.0 and later)
 
-1. Open <https://marketplace.visualstudio.com/manage>, publisher `zycode` > New extension > Visual Studio Code. Upload `zycode-linux-x64-0.1.0.vsix` (one file). Wait for the check of the Marketplace to finish. This can take some minutes.
-2. Check that the page of `zycode.zycode` shows the pre-release label and the platform `linux-x64`.
-3. Run the workflow on `main`: `publish` ticked, `registries` = `marketplace`, `targets` = `linux-arm64 darwin-arm64 darwin-x64 win32-x64`. Approve it in the environment. The job uses `vsce publish --oidc`, with no token. The Marketplace policy shows "Last used" after that.
-4. If the web page does not take a platform file, or step 3 of this list fails: tell the team what the page or the log said. Do not make a token. A run with all five targets (`registries` = `marketplace`) tests if the Marketplace creates a new extension through OIDC. That path is untried, and a failed run publishes nothing.
-5. Check on a machine: `code --install-extension zycode.zycode --pre-release` installs, and the status bar item starts the agent.
+1. Change `version` in `package.json` (an even minor for a release) and add `## <version>` to `CHANGELOG.md`. A test fails if the entry is missing. Merge to `main`.
+2. Run the workflow on `main`: `publish` ticked, `registries` = `both`, all targets. Approve it in the environment `vscode-publish`. Open VSX goes first, then the Marketplace.
+3. Check the result:
+   - Open VSX: `zycode.zycode` shows the new version for five platforms, and no pre-release label.
+   - Marketplace: the page shows the new version for five platforms, and no pre-release label. A new version can take some minutes to pass the checks of the Marketplace.
+   - On a machine: `code --install-extension zycode.zycode` installs the new version, and the status bar item starts the agent.
+4. If one registry fails and the other did not, run the workflow again for the one that failed (`registries`). `--skip-duplicate` makes a repeat safe.
 
-## Later releases (the workflow only)
+## If the OIDC publish fails (fallback)
 
-1. Change `version` in `package.json` (the pre-release line uses an odd minor: `0.1.1`, `0.1.2`, then `0.3.0`) and add `## <version>` to `CHANGELOG.md`. A test fails if the entry is missing. Merge to `main`.
-2. Run the workflow on `main`: `publish` ticked, `registries` = `both`, all targets. Approve it in the environment. Open VSX goes first, then the Marketplace.
-3. If one registry fails and the other did not, run it again for the one that failed (`registries`). `--skip-duplicate` makes a repeat safe.
-4. The workflow publishes pre-releases only (the VSIX is built with `--pre-release`, and `vsce` is called with `--pre-release`). A regular release needs a change in `scripts/package.mjs` and in the workflow first.
+The first publish from the workflow is the first test of OIDC on both registries. Read the log of the failed step first.
+
+- **Open VSX says "No trusted publisher matches the presented token".** The registration does not match. Compare the four values in the table above with the repository, the workflow file name and the environment, then run the failed registry again.
+- **The Marketplace refuses the OIDC token.** Compare the policy of the publisher with the same four values. Check that the run was started from `main` and approved in `vscode-publish`.
+- **The log shows something else, or a second run fails the same way.** Publish by hand from the same files. A hand upload is the way that `0.1.0` took, and it needs no token:
+  1. Run the workflow on `main` with `publish` **not ticked**. Download and unzip the five artifacts `vsix-<target>` (or run `npm ci && npm run package:all` on Linux or WSL, on the Linux file system). The files are named `zycode-<target>-<version>.vsix`.
+  2. Open VSX: log in at <https://open-vsx.org>, open the Publish page, and drop the five files on it. If the page refuses a file, upload the five one by one.
+  3. Marketplace: <https://marketplace.visualstudio.com/manage>, publisher `zycode`, the extension `zycode`, **Update** (the `...` menu). Upload one VSIX for each platform.
+  4. Check the pages as in step 3 of "Publish a release". Tell the team what the log said, so that the registration can be fixed before the next release.
+- **A token is the last resort.** Only if the web pages do not take a file: make a token, type it in your terminal only (not in a file, not in the chat), publish, and **revoke it at once**. The workflow never needs a token. The token list of each registry must be empty at the end.
+
+A failed run publishes nothing for the registry that failed. A registry that published stays published: do not change the version to repeat the run.
 
 ## Never
 
 - Do not make a long-lived token for either registry, and do not add a secret to the environment `vscode-publish`.
 - Do not start a publish from a branch other than `main`: the environment refuses it.
 - Do not rename `vscode-extension.yml` or the environment `vscode-publish` without changing the registry entries.
+- Do not publish a release with a pre-release flag, and do not publish a pre-release with an even minor.

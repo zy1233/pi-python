@@ -33,6 +33,12 @@ export function checkVsix(file, expectedTarget) {
   for (const name of ["extension/LICENSE.txt", "extension/THIRD-PARTY-NOTICES", "extension/readme.md", "extension/changelog.md", "extension/package.json", "extension/dist/extension.js", "extension/dist/webview.js", "extension/media/chat.css", "extension/media/icon.png", "extension/media/zycode.svg"]) {
     need(name);
   }
+  for (const walkthrough of manifest.contributes?.walkthroughs ?? []) {
+    for (const step of walkthrough.steps ?? []) {
+      const media = step.media?.markdown ?? step.media?.image;
+      if (typeof media === "string") need(`extension/${media}`);
+    }
+  }
   const png = byName.get("extension/media/icon.png");
   if (png) {
     const data = png.read();
@@ -53,7 +59,7 @@ export function checkVsix(file, expectedTarget) {
   const vsixManifest = byName.get("extension.vsixmanifest")?.read().toString("utf8") ?? "";
   if (!vsixManifest) problems.push("missing: extension.vsixmanifest");
   if (!new RegExp(`TargetPlatform="${expectedTarget}"`).test(vsixManifest)) problems.push(`the manifest has no TargetPlatform="${expectedTarget}"`);
-  if (!/Microsoft\.VisualStudio\.Code\.PreRelease"\s+Value="true"/.test(vsixManifest)) problems.push("the manifest has no pre-release flag");
+  if (/Microsoft\.VisualStudio\.Code\.PreRelease"\s+Value="true"/.test(vsixManifest)) problems.push("the manifest has the pre-release flag: a release must not have it");
   if (!new RegExp(`Identity[^>]*Id="${manifest.name}"[^>]*Version="${manifest.version.replace(/\./g, "\\.")}"[^>]*Publisher="${manifest.publisher}"`).test(vsixManifest)) {
     problems.push(`the manifest identity is not ${manifest.publisher}.${manifest.name} ${manifest.version}`);
   }

@@ -1,6 +1,7 @@
 import { parseMarkdown } from "../core/markdown.js";
 import type {
   HostMessage,
+  NoticeAction,
   PermissionRequestView,
   StateMessage,
   ToolCallView,
@@ -64,6 +65,17 @@ function renderHeader(): void {
   header.replaceChildren();
   const title = el("div", { class: "title" });
   title.append(el("span", { class: `dot ${state.status}` }), el("strong", { text: "zycode" }), el("span", { class: "status", text: STATUS_TEXT[state.status] }));
+  const alwaysApprove = state.mode?.current === "always-approve";
+  root.classList.toggle("always-approve", alwaysApprove);
+  if (alwaysApprove) {
+    title.append(
+      el("span", {
+        class: "warn-chip",
+        text: "Always approve: no questions",
+        title: "Every tool call runs with no question, bash too. Choose Ask or Auto in the mode menu to turn it off.",
+      }),
+    );
+  }
   const facts: string[] = [];
   if (state.agent) facts.push(`agent ${state.agent.version}${state.agent.source === "setting" ? " (your program)" : ""}`);
   if (state.model) facts.push(state.model);
@@ -84,7 +96,9 @@ function renderHeader(): void {
     }
     select.value = mode.current;
     select.addEventListener("change", () => {
-      if (select.value === "ask" || select.value === "auto") send({ type: "setMode", value: select.value });
+      if (select.value === "ask" || select.value === "auto" || select.value === "always-approve") {
+        send({ type: "setMode", value: select.value });
+      }
     });
     controls.append(el("label", { class: "mode" }, "Mode ", select));
   } else if (mode) {
@@ -107,8 +121,22 @@ function renderBanner(): void {
   banner.className = `banner ${status === "error" ? "error" : "info"}`;
   if (status === "needs-setup") {
     banner.append(
-      el("p", { text: state.detail ?? "zycode needs a model and an API key. Run the setup in a terminal." }),
-      button("Run setup", () => send({ type: "runSetup" }), "primary"),
+      el("p", { class: "lead", text: state.detail ?? "zycode needs a model and an API key. Run the setup in a terminal." }),
+      el(
+        "ol",
+        { class: "steps" },
+        el("li", { text: "Run the setup. A terminal opens and asks for a provider, a model id and an API key." }),
+        el("li", {
+          text: "Type the key in that terminal only. It is hidden there and saved in the agent's own folder (local.env, readable by your user only). Never type it in this chat or in the VS Code settings.",
+        }),
+        el("li", { text: "When the terminal closes, zycode restarts the agent. Then say hello." }),
+      ),
+      el(
+        "div",
+        { class: "actions left" },
+        button("Run setup", () => send({ type: "runSetup" }), "primary"),
+        button("Open the guide", () => send({ type: "openGuide" })),
+      ),
     );
   } else if (status === "error") {
     banner.append(
@@ -235,8 +263,25 @@ function renderPermission(request: PermissionRequestView, done?: { outcome: stri
   card.replaceChildren(...parts);
 }
 
-function addNotice(level: string, text: string): void {
-  transcript.append(el("div", { class: `notice ${level}`, text }));
+const NOTICE_MESSAGE: Record<NoticeAction["id"], WebviewMessage> = {
+  runSetup: { type: "runSetup" },
+  openGuide: { type: "openGuide" },
+  openAgentConfig: { type: "openAgentConfig" },
+  openLog: { type: "openLog" },
+};
+
+function addNotice(level: string, text: string, actions?: NoticeAction[]): void {
+  const node = el("div", { class: `notice ${level}` }, el("span", { text }));
+  if (actions && actions.length > 0) {
+    node.append(
+      el(
+        "div",
+        { class: "actions left" },
+        ...actions.map((action) => button(action.label, () => send(NOTICE_MESSAGE[action.id]))),
+      ),
+    );
+  }
+  transcript.append(node);
 }
 
 function renderItem(item: TranscriptItem): void {
@@ -254,7 +299,7 @@ function renderItem(item: TranscriptItem): void {
       renderPermission(item.request, item.done);
       return;
     case "notice":
-      addNotice(item.level, item.text);
+      addNotice(item.level, item.text, item.actions);
       return;
   }
 }
@@ -303,7 +348,7 @@ function onHostMessage(message: HostMessage): void {
       break;
     }
     case "notice":
-      addNotice(message.level, message.text);
+      addNotice(message.level, message.text, message.actions);
       break;
     case "turnEnd":
     case "diffState":
