@@ -93,6 +93,9 @@ export class ChatViewProvider implements vscode.WebviewViewProvider, vscode.Disp
       case "setMode":
         await controller.applyPermissionMode(message.value);
         return;
+      case "setThinking":
+        await controller.applyThinkingLevel(message.value);
+        return;
       case "runSetup":
         await controller.runSetup();
         return;

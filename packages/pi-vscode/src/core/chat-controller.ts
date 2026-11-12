@@ -1,4 +1,4 @@
-import { statSync } from "node:fs";
+import { readFileSync, statSync } from "node:fs";
 
 import { AcpConnection, AuthRequiredError, isMethodNotFound } from "./acp-connection.js";
 import type {
@@ -32,6 +32,8 @@ import {
   type StartModeName,
   type StateMessage,
   type Status,
+  type ThinkingLevel,
+  type ThinkingState,
   type ToolCallView,
   type TranscriptItem,
 } from "./protocol.js";
@@ -44,6 +46,14 @@ import {
   type SessionListState,
   type SessionRow,
 } from "./session-list.js";
+import {
+  THINKING_LEVELS,
+  isThinkingLevel,
+  noThinkingReason,
+  readThinking,
+  writeThinkingLevel,
+  type ThinkingRead,
+} from "./thinking.js";
 import { ToolCallStore, summarizeInput } from "./tool-calls.js";
 import { checkAgentIdentity } from "./version.js";
 
@@ -131,6 +141,9 @@ export class ChatController {
   private deleteSupported = true;
   private refreshing: Promise<void> | undefined;
   private refreshAgain = false;
+  private thinkingFile: ThinkingRead | undefined;
+  private reopenId: string | undefined;
+  private changingThinking = false;
   private readonly sessionListeners = new Set<() => void>();
 
   private items: TranscriptItem[] = [];
@@ -177,8 +190,102 @@ export class ChatController {
     if (this.cwd !== undefined) message.cwd = this.cwd;
     if (this.mode) message.mode = this.visibleMode(this.mode);
     if (this.model !== undefined) message.model = this.model;
+    const thinking = this.thinkingState();
+    if (thinking) message.thinking = thinking;
     if (this.status === "needs-setup" && this.setupInfo) message.setup = this.setupInfo;
     return message;
+  }
+
+  /**
+   * The thinking picker (design section 7c). The level is the one in `agent.toml` when the agent
+   * started: the agent reads it at its start and has no way to change it while it runs.
+   */
+  private thinkingState(): ThinkingState | undefined {
+    const file = this.thinkingFile;
+    if (!file) return undefined;
+    if (this.status !== "ready" && this.status !== "busy" && this.status !== "cancelling") return undefined;
+    const levels = [...THINKING_LEVELS];
+    if (!file.ok) return { levels, disabled: file.reason };
+    const state: ThinkingState = { current: file.value.level, levels };
+    if (file.value.invalidLevel !== undefined) {
+      state.note = `thinking_level in agent.toml is "${file.value.invalidLevel}", which the agent does not know. It uses off.`;
+    }
+    const noThinking = noThinkingReason(file.value);
+    if (noThinking !== undefined) state.disabled = noThinking;
+    else if (this.status !== "ready") state.disabled = "Wait until the answer ends.";
+    else if (!this.sessionId) state.disabled = "No chat is open.";
+    return state;
+  }
+
+  private readThinkingFile(): ThinkingRead {
+    const file = this.host.agentConfigPath();
+    try {
+      return readThinking(readFileSync(file, "utf8"));
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code === "ENOENT") {
+        return { ok: false, reason: "agent.toml does not exist yet, so there is no thinking level to set. Run the setup first." };
+      }
+      return { ok: false, reason: `agent.toml cannot be read: ${messageOf(error)}` };
+    }
+  }
+
+  /**
+   * Sets the thinking level. The agent has no live setting (v0.9.0), so this edits `thinking_level`
+   * in `agent.toml`, restarts the agent, and opens this chat again with `session/load`. It asks first,
+   * because it writes a file of the user.
+   */
+  async applyThinkingLevel(level: ThinkingLevel): Promise<void> {
+    if (this.changingThinking) return;
+    const state = this.thinkingState();
+    if (!state || !isThinkingLevel(level)) return;
+    if (state.disabled !== undefined) {
+      this.pushNotice("info", `The thinking level cannot be changed now: ${state.disabled}`, [{ id: "openAgentConfig", label: "Open agent.toml" }]);
+      this.emit(this.stateMessage());
+      return;
+    }
+    if (level === state.current) return;
+    const sessionId = this.sessionId;
+    const generation = this.generation;
+    const path = this.host.agentConfigPath();
+    this.changingThinking = true;
+    try {
+      const confirmed = await this.host.confirm({
+        message: `Set the thinking level to ${level}?`,
+        detail:
+          "This agent version cannot change the level while it runs. zycode writes the line " +
+          `thinking_level = "${level}" in ${path}, restarts the agent, and opens this chat again. ` +
+          "The level then applies to every chat, also in a terminal, until you change it. " +
+          "Nothing else in the file changes.",
+        action: "Set and restart",
+      });
+      if (!confirmed || generation !== this.generation || this.sessionId !== sessionId || this.status !== "ready") {
+        this.emit(this.stateMessage());
+        return;
+      }
+      const wasAlwaysApprove = this.mode?.current === ALWAYS_APPROVE;
+      const result = writeThinkingLevel(path, level);
+      if (!result.ok) {
+        this.pushNotice("error", `The thinking level was not changed. ${result.reason}`, [{ id: "openAgentConfig", label: "Open agent.toml" }]);
+        this.emit(this.stateMessage());
+        return;
+      }
+      const hasChat = this.items.some((item) => item.type === "user" || item.type === "agent");
+      this.reopenId = hasChat ? sessionId : undefined;
+      await this.stop();
+      await this.start();
+      this.reopenId = undefined;
+      const now = this.thinkingFile?.ok ? this.thinkingFile.value.level : undefined;
+      this.pushNotice(
+        now === level ? "info" : "warning",
+        now === level
+          ? `Thinking level: ${level}. The agent restarted${hasChat ? " and this chat was opened again" : ""}.` +
+              (wasAlwaysApprove ? " Always approve is off again." : "")
+          : "The agent restarted, but the thinking level it reports is not the one that was set. Check agent.toml.",
+      );
+      this.emit(this.stateMessage());
+    } finally {
+      this.changingThinking = false;
+    }
   }
 
   /** The menu: the options of the agent, and `always-approve` when it can be chosen. */
@@ -270,6 +377,7 @@ export class ChatController {
       return;
     }
     this.command = resolved.command;
+    this.thinkingFile = this.readThinkingFile();
     this.setStatus("starting");
     const generation = ++this.generation;
     try {
@@ -311,7 +419,7 @@ export class ChatController {
       } else if (verdict.log) {
         this.host.log.info(verdict.log);
       }
-      await this.openSession();
+      await this.openStartSession();
     } catch (error) {
       if (generation !== this.generation) return;
       if (this.status !== "error") this.setError(await this.describeStartFailure(error));
@@ -349,6 +457,17 @@ export class ChatController {
     if (code === "EACCES") return `The agent program cannot be run (permission denied): ${where}`;
     if (code === "ENOEXEC") return `The agent program has the wrong format for this platform: ${where}`;
     return messageOf(error);
+  }
+
+  /** The session after a start: the chat that a restart for the thinking level keeps, else a new one. */
+  private async openStartSession(): Promise<void> {
+    const id = this.reopenId;
+    this.reopenId = undefined;
+    if (id === undefined) {
+      await this.openSession();
+      return;
+    }
+    await this.loadSessionInto(id);
   }
 
   private async openSession(): Promise<void> {
@@ -892,6 +1011,14 @@ export class ChatController {
       return;
     }
     await this.leaveAlwaysApprove();
+    await this.loadSessionInto(id);
+  }
+
+  /** `session/load` of `id` into the chat (the current session is closed first). A failure opens a new chat. */
+  private async loadSessionInto(id: string): Promise<void> {
+    const conn = this.conn;
+    const cwd = this.cwd;
+    if (!conn || cwd === undefined) return;
     const generation = this.generation;
     const previous = this.sessionId;
     this.sessionId = undefined;

@@ -6,12 +6,13 @@ This file is the checklist for a release. How the files are made is in `PACKAGIN
 
 - Open VSX and the Marketplace each hold `zycode.zycode` **0.1.0**, a pre-release, for five targets: `linux-x64`, `linux-arm64`, `darwin-arm64`, `darwin-x64` and `win32-x64`. Nothing else is published.
 - 0.1.0 was uploaded by hand. **No release has gone out from the workflow yet.** So `1.0.0` is very likely the first real Trusted Publishing (OIDC) publish. Treat the OIDC path as untried until the run is green.
+- The Open VSX trusted publisher for `zycode` **is registered**: the owner said so on 2026-11-12. No one else has checked the registration, and no run of the workflow has used it, so the first publish is the first proof that the values match. A rehearsal run is not known.
 
 ## What is already set up
 
 - GitHub environment `vscode-publish`: required reviewer `zy1233` (self-review is allowed), deployments from `main` only, no secret.
 - Marketplace publisher `zycode`, with a Trusted Publishing policy `zycode release`: repository `zy1233/pi-python`, workflow `vscode-extension.yml`, environment `vscode-publish`.
-- Open VSX namespace `zycode` (you are the owner). It needs a trusted publisher for the extension `zycode` (see "Before the run").
+- Open VSX namespace `zycode` (you are the owner). Its trusted publisher for the extension `zycode` is registered (the owner said so on 2026-11-12; compare the values in "Before the run").
 - The workflow file `.github/workflows/vscode-extension.yml`. Its name must stay as it is: both registries name it. It publishes from `main` only, in the environment `vscode-publish`, with OIDC, and with no token.
 
 ## Stable and pre-release (how the registries treat them)
@@ -24,7 +25,7 @@ This file is the checklist for a release. How the files are made is in `PACKAGIN
 ## Before the run
 
 1. Merge the pull request of the release to `main`. Work from `main` after that.
-2. Check the Open VSX trusted publisher: <https://open-vsx.org/user-settings/trusted-publishers>. Namespace `zycode`, extension `zycode`, provider GitHub Actions, with exactly these values. If it is not there, add it. A registration cannot be edited: delete it and make a new one.
+2. Check the Open VSX trusted publisher: <https://open-vsx.org/user-settings/trusted-publishers>. It is registered (the owner said so on 2026-11-12). Compare it once with these values: namespace `zycode`, extension `zycode`, provider GitHub Actions. If a value is wrong, or it is not there, add it. A registration cannot be edited: delete it and make a new one.
 
    | Field | Value |
    |---|---|

@@ -3,6 +3,7 @@ import path from "node:path";
 
 import * as vscode from "vscode";
 
+import { agentConfigPath } from "../core/first-run.js";
 import type { ConfirmRequest, Host, Logger, Settings, SetupTerminalRequest } from "../core/host.js";
 import type { StartModeName } from "../core/protocol.js";
 
@@ -64,6 +65,10 @@ export class VsCodeHost implements Host {
 
   isTrusted(): boolean {
     return vscode.workspace.isTrusted;
+  }
+
+  agentConfigPath(): string {
+    return agentConfigPath();
   }
 
   sessionFolder(): string | undefined {

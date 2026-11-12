@@ -45,6 +45,8 @@ export interface Host {
   settings(): Settings;
   /** VS Code Workspace Trust. */
   isTrusted(): boolean;
+  /** `agent.toml` of the agent (`PI_HOME`, else `~/.pi-python`). The thinking level is read from it and written to it. */
+  agentConfigPath(): string;
   /** The folder a session works in, or `undefined` when no folder is open. */
   sessionFolder(): string | undefined;
   /** Paths of open documents under `folder` that have unsaved changes. */

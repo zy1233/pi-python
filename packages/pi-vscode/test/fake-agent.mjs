@@ -15,6 +15,7 @@
 //   FAKE_SKIP_YOLO=1        _pi/yolo_mode_changed is ignored (no config_option_update)
 //   FAKE_LIST_ERROR=1       session/list fails
 //   FAKE_IGNORE_CWD=1       session/list gives the sessions of every folder (an agent that ignores the filter)
+//   FAKE_TOML=<file>        like the real agent, read thinking_level from this file once, at the start (not later)
 //   FAKE_LOAD_CWD=<dir>     session/load says in _meta["pi/cwd"] that the session belongs to this folder
 import { existsSync, appendFileSync, readFileSync, writeFileSync } from "node:fs";
 import path from "node:path";
@@ -28,6 +29,13 @@ if (env.FAKE_EXIT_AT_START) {
 }
 const raw = { parse: (params) => params };
 const record = (line) => env.FAKE_LOG && appendFileSync(env.FAKE_LOG, line + "\n");
+
+let startLevel = "off";
+if (env.FAKE_TOML && existsSync(env.FAKE_TOML)) {
+  const found = /^thinking_level\s*=\s*["']([a-z]+)["']/m.exec(readFileSync(env.FAKE_TOML, "utf8"));
+  if (found) startLevel = found[1];
+}
+if (env.FAKE_TOML) record("start thinking_level=" + startLevel);
 
 let mode = "ask";
 const cancelled = new Set();
@@ -91,6 +99,10 @@ async function runPrompt(ctx, sessionId, prompt) {
       conn: "Error: Connection error.",
     };
     await notify(text(sessionId, "agent_message_chunk", texts[prompt.slice(6)] ?? "Error: boom"));
+    return "end_turn";
+  }
+  if (prompt === "level") {
+    await notify(text(sessionId, "agent_message_chunk", "level:" + startLevel));
     return "end_turn";
   }
   if (prompt === "hello") {

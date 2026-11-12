@@ -12,6 +12,7 @@ zycode is a coding agent. This extension puts it in a chat view in VS Code. The 
 - A getting-started guide for the first start (a VS Code walkthrough), and help in the chat when the agent has no model, no key, or a key that is refused. The setup runs in a VS Code terminal, and you type the key there.
 - A **Past chats** view under the chat: the chats of the open folder. Open one to continue it, or delete it.
 - A mode menu in the chat: **Ask**, **Auto** and **Always approve**.
+- A **Thinking** menu next to it: the thinking level of the model (`off` to `xhigh`). A change edits one line of `agent.toml` and restarts the agent (see Thinking level).
 - Commands (Command Palette, category *zycode*): Open chat, New chat, Stop, Restart agent, Set up model and API key, Open the getting-started guide, Open agent.toml, Show log, Refresh past chats.
 
 ## The first start
@@ -59,6 +60,16 @@ The **Past chats** view is under the chat. It lists the chats that the agent sav
 - **VS Code Workspace Trust** decides if zycode starts at all. In Restricted Mode the extension does nothing, because the agent runs programs on your machine.
 - **The agent's project trust** is a separate question. When a project ships its own extensions, saved workflows, prompt files or skills, the agent asks if it may load them. The chat shows this as *Project trust*. It is not the Workspace Trust question that you already answered.
 
+## Thinking level
+
+The **Thinking** menu in the chat header shows the thinking level that the running agent uses, and it lists the six levels that the agent knows: `xhigh`, `high`, `medium`, `low`, `minimal` and `off` (the order of the `zypi` menu).
+
+- **The agent cannot change the level while it runs** (agent 0.9.0). It reads `thinking_level` from `agent.toml` when it starts, and it has no setting, option or command for it over ACP. So the menu changes the file, not the agent: when you pick a level, a modal question names the file and the line, and after **Set and restart** the extension writes `thinking_level = "<level>"` in `agent.toml`, restarts the agent, and opens the same chat again with its history. Nothing else in the file changes: the extension edits one line (or adds it above the first table), keeps your comments and line ends, checks the result by reading both texts as TOML, and writes through a temporary file. If the line is written in a form that it does not edit, it changes nothing and tells you to edit it by hand.
+- **The level is one setting for all chats.** It is in `agent.toml`, so a new chat, a past chat that you open, a restart of the agent and a restart of VS Code all start at the level that the file has, and `zypi` in a terminal uses the same level. A chat does not keep a level of its own: the agent does not save it in the chat. There is no `zycode` setting for it, because it could differ from the file.
+- **A model that does not think.** If `agent.toml` says `reasoning = false` for the model, the agent asks no provider to think, whatever the level is. The menu is then off, and its tooltip says why. The agent does not tell a client which model can think: the file is the only place that says it. If `reasoning` is not set, the menu is on, and a level other than `off` makes the agent treat the model as one that thinks. A model or provider that does not know thinking can answer with an error. Then set the level to `off`.
+- The menu is off while an answer runs, when `agent.toml` does not exist yet (run the setup first) and when it is not valid TOML.
+- The menu does not change how thinking blocks are shown. That is `zycode.showThinking`.
+
 ## Settings
 
 | Setting | Default | Meaning |
@@ -79,6 +90,7 @@ The extension has no telemetry and sends nothing to its authors. The agent sends
 - The bundled agent is **not code-signed**. On macOS and Windows the system can warn when it starts.
 - The bundled agent has only the OpenAI-format provider (and services that speak that format). For the Anthropic or DeepSeek provider, install the Python agent and set `zycode.agentPath`.
 - On Linux the bundled agent needs glibc 2.35 or newer. There is no package for Alpine (musl), 32-bit ARM, or Windows on ARM.
+- The thinking level is a line of `agent.toml`, and a change restarts the agent (the chat is opened again; a running answer must end first; Always approve is off again after the restart). A live setting needs a change in the agent.
 - One chat at a time (open a past chat to switch). No model choice, no images, no `@file` mentions yet.
 
 ## Third-party software

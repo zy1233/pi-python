@@ -33,6 +33,25 @@ export interface ModeState {
   options: { id: string; name: string }[];
 }
 
+/** The levels of `thinking_level` in agent.toml. */
+export type ThinkingLevel = "off" | "minimal" | "low" | "medium" | "high" | "xhigh";
+
+export interface ThinkingLevelOption {
+  id: ThinkingLevel;
+  name: string;
+  description: string;
+}
+
+export interface ThinkingState {
+  /** The level the running agent uses. Absent when the file cannot be read. */
+  current?: ThinkingLevel;
+  levels: ThinkingLevelOption[];
+  /** Set when the picker is off, with the reason. */
+  disabled?: string;
+  /** Something the user should know about the file (for example an invalid value). */
+  note?: string;
+}
+
 /** Why the agent has no model yet, from its `auth_required` answer to `session/new`. */
 export type SetupReason = "no-model" | "no-key" | "unknown";
 
@@ -50,6 +69,8 @@ export interface StateMessage {
   cwd?: string;
   mode?: ModeState;
   model?: string;
+  /** The thinking level picker. Absent while the agent is not up. */
+  thinking?: ThinkingState;
   /** Set while `status` is `needs-setup`: what is missing. */
   setup?: SetupInfo;
   canRestart: boolean;
@@ -130,6 +151,7 @@ export type WebviewMessage =
   | { type: "permissionAnswer"; requestId: string; optionId: string }
   | { type: "showDiff"; toolCallId: string }
   | { type: "setMode"; value: PermissionModeName }
+  | { type: "setThinking"; value: ThinkingLevel }
   | { type: "runSetup" }
   | { type: "openGuide" }
   | { type: "openAgentConfig" }
@@ -177,6 +199,18 @@ export function parseWebviewMessage(value: unknown): WebviewMessage | undefined 
     case "setMode":
       if (value.value !== "ask" && value.value !== "auto" && value.value !== "always-approve") return undefined;
       return { type: "setMode", value: value.value };
+    case "setThinking":
+      if (
+        value.value !== "off" &&
+        value.value !== "minimal" &&
+        value.value !== "low" &&
+        value.value !== "medium" &&
+        value.value !== "high" &&
+        value.value !== "xhigh"
+      ) {
+        return undefined;
+      }
+      return { type: "setThinking", value: value.value };
     case "openLink":
       if (!shortString(value.url, MAX_URL_CHARS)) return undefined;
       return { type: "openLink", url: value.url };

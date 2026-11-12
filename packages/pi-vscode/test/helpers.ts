@@ -28,6 +28,8 @@ export interface TestHostOptions {
   folder?: string | null;
   dirty?: string[];
   pin?: string;
+  /** The path `agent.toml` has for the thinking level (default: a file in a temp folder that does not exist). */
+  agentConfig?: string;
   extensionPath?: string;
   readFile?: (file: string) => Promise<string | null | undefined>;
   setup?: (request: SetupTerminalRequest) => Promise<{ exitCode: number | undefined }>;
@@ -66,6 +68,9 @@ export class TestHost implements Host {
   }
   isTrusted(): boolean {
     return this.trusted;
+  }
+  agentConfigPath(): string {
+    return this.options.agentConfig ?? path.join(this.extensionPath, "no-agent.toml");
   }
   sessionFolder(): string | undefined {
     return this.folder;

@@ -29,7 +29,9 @@ select { background: var(--vscode-dropdown-background); color: var(--vscode-drop
 .status { color: var(--vscode-descriptionForeground); }
 .meta { color: var(--vscode-descriptionForeground); font-size: 0.9em; }
 .controls { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; }
-.controls .mode { margin-right: auto; color: var(--vscode-descriptionForeground); }
+.controls .mode { margin-right: 8px; color: var(--vscode-descriptionForeground); }
+.controls .thinking { margin-right: auto; }
+select:disabled { opacity: 0.6; }
 .dot { width: 8px; height: 8px; border-radius: 50%; background: var(--vscode-descriptionForeground); display: inline-block; }
 .dot.ready { background: var(--vscode-testing-iconPassed, #3fb950); }
 .dot.busy, .dot.cancelling, .dot.starting { background: var(--vscode-editorWarning-foreground, #d29922); }

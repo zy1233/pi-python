@@ -186,6 +186,43 @@ describe.skipIf(!chrome || !built)("webview: modes, first run and notices", () =
     expect(out).toMatchObject({ ok: true, options: ["ask", "auto", "always-approve"], posted: [{ type: "setMode", value: "always-approve" }] });
   });
 
+  const levels = `[{ id: "xhigh", name: "xhigh", description: "Extended reasoning" }, { id: "high", name: "high", description: "Heavy reasoning" }, { id: "low", name: "low", description: "Faster, lighter reasoning" }, { id: "off", name: "off", description: "No reasoning" }]`;
+
+  it("shows the thinking level, sends a change, and keeps the chosen level visible", () => {
+    const out = run(`${state}
+      state({ mode: { current: "ask", options: ${modes} }, thinking: { current: "low", levels: ${levels} } });
+      const select = document.querySelector(".thinking select");
+      const before = { options: [...select.options].map((o) => o.value), value: select.value, disabled: select.disabled };
+      select.value = "high"; select.dispatchEvent(new Event("change"));
+      state({ mode: { current: "ask", options: ${modes} }, thinking: { current: "high", levels: ${levels} } });
+      window.__result = { before, after: document.querySelector(".thinking select").value, posted: window.__posted.filter((m) => m.type === "setThinking") };`);
+    expect(out).toMatchObject({
+      ok: true,
+      before: { options: ["xhigh", "high", "low", "off"], value: "low", disabled: false },
+      after: "high",
+      posted: [{ type: "setThinking", value: "high" }],
+    });
+  });
+
+  it("disables the picker and gives the reason for a model that does not think", () => {
+    const reason = "agent.toml sets reasoning = false for the model.";
+    const out = run(`${state}
+      state({ thinking: { current: "off", levels: ${levels}, disabled: ${JSON.stringify(reason)} } });
+      const select = document.querySelector(".thinking select");
+      window.__result = { disabled: select.disabled, title: select.title, label: document.querySelector(".thinking").title };`);
+    expect(out).toMatchObject({ ok: true, disabled: true, title: reason, label: reason });
+  });
+
+  it("shows no thinking picker while the agent is not up, and an unknown level when the file cannot be read", () => {
+    const out = run(`${state}
+      state({ status: "starting" });
+      const none = document.querySelector(".thinking") === null;
+      state({ thinking: { levels: ${levels}, disabled: "agent.toml does not exist yet." } });
+      const select = document.querySelector(".thinking select");
+      window.__result = { none, value: select.value, text: select.selectedOptions[0].textContent, disabled: select.disabled };`);
+    expect(out).toMatchObject({ ok: true, none: true, value: "", text: "unknown", disabled: true });
+  });
+
   it("shows a visible label and a warning style while Always approve is on, and removes them after", () => {
     const out = run(`${state}
       state({ mode: { current: "always-approve", options: ${modes} } });

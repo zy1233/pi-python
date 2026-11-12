@@ -286,7 +286,7 @@
     "typecheck": "tsc --noEmit -p tsconfig.json && tsc --noEmit -p src/webview/tsconfig.json",
     "lint": "eslint .",
     "test": "vitest run",
-    "test:agent": "ZYCODE_REAL_AGENT=1 vitest run test/real-agent.test.ts test/real-first-run.test.ts",
+    "test:agent": "ZYCODE_REAL_AGENT=1 vitest run test/real-agent.test.ts test/real-first-run.test.ts test/real-thinking.test.ts",
     "check": "npm run typecheck && npm run lint && npm test",
     "package": "node scripts/package.mjs",
     "package:all": "node scripts/package.mjs all",
@@ -302,6 +302,7 @@
     "esbuild": "^0.25.12",
     "eslint": "^9.39.5",
     "ovsx": "1.4.0",
+    "smol-toml": "1.9.1",
     "typescript": "^5.9.3",
     "typescript-eslint": "^8.72.1",
     "vitest": "^3.2.7"

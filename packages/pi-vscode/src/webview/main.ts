@@ -106,6 +106,33 @@ function renderHeader(): void {
   } else if (state.status === "ready" || state.status === "busy") {
     controls.append(el("span", { class: "mode", text: "Mode: set by the agent" }));
   }
+  const thinking = state.thinking;
+  if (thinking) {
+    const select = el("select", { title: thinking.disabled ?? "Thinking level" });
+    select.setAttribute("aria-label", "Thinking level");
+    for (const option of thinking.levels) {
+      const o = el("option", { text: option.name, title: option.description });
+      o.value = option.id;
+      select.append(o);
+    }
+    if (thinking.current === undefined) {
+      const o = el("option", { text: "unknown" });
+      o.value = "";
+      select.append(o);
+      select.value = "";
+    } else {
+      select.value = thinking.current;
+    }
+    select.disabled = thinking.disabled !== undefined;
+    select.addEventListener("change", () => {
+      const value = select.value;
+      if (value === "off" || value === "minimal" || value === "low" || value === "medium" || value === "high" || value === "xhigh") {
+        send({ type: "setThinking", value });
+      }
+    });
+    const label = el("label", { class: "mode thinking", title: thinking.note ?? thinking.disabled ?? "" }, "Thinking ", select);
+    controls.append(label);
+  }
   controls.append(
     button("New chat", () => send({ type: "newChat" })),
     button("Restart", () => send({ type: "restartAgent" })),
