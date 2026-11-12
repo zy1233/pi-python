@@ -20,6 +20,10 @@ export const links = {
   acp: 'https://agentclientprotocol.com',
   pi: 'https://github.com/earendil-works/pi',
   grokBuild: 'https://github.com/xai-org/grok-build',
+  /** The VS Code extension: its id, and its pages on the two registries. */
+  vscodeExtensionId: 'zycode.zycode',
+  vscodeMarketplace: 'https://marketplace.visualstudio.com/items?itemName=zycode.zycode',
+  openVsx: 'https://open-vsx.org/extension/zycode/zycode',
 } as const;
 
 export interface PackageInfo {

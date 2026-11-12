@@ -1,4 +1,4 @@
-import { snippets } from '~/data/site';
+import { links, snippets } from '~/data/site';
 import type { Messages } from './types';
 
 export const en: Messages = {
@@ -201,7 +201,7 @@ export const en: Messages = {
   install: {
     eyebrow: 'Install',
     title: 'Install it, then pick a model.',
-    lead: 'Install the Python agent first. Then add the terminal UI, or connect your editor.',
+    lead: 'Install the Python agent first. Then add the terminal UI, or connect your editor. The VS Code extension is the exception: it has the agent inside.',
     tabListLabel: 'Ways to install',
     tabs: {
       tui: {
@@ -222,6 +222,20 @@ zypi`,
           'The Linux binary needs glibc 2.39 or newer (Ubuntu 24.04 or later).',
           'On macOS with Apple silicon, use the file `zypi-macos-arm64`. CI builds it. A person has not run it yet. It is not signed.',
           'On Windows, build `zypi` from source and run it in WSL2. The Python agent runs on Windows.',
+        ],
+      },
+      vscode: {
+        label: 'VS Code',
+        heading: 'VS Code extension',
+        codeLabel: 'bash',
+        code: `# Or open the Extensions view and search for zycode
+code --install-extension ${links.vscodeExtensionId}`,
+        notes: [
+          `The extension \`${links.vscodeExtensionId}\` puts the zycode agent in a chat view in VS Code. It has the agent program inside, so you do not install the Python agent first. Install it from the [Visual Studio Marketplace](${links.vscodeMarketplace}). For VSCodium and other editors that use Open VSX, install it from [Open VSX](${links.openVsx}).`,
+          'Version 1.0.0 is published on both registries for five platforms: `linux-x64`, `linux-arm64`, `darwin-arm64`, `darwin-x64` and `win32-x64`.',
+          'The chat view asks a question for each tool call that is not read-only. It has a **Show diff** button for `write` and `edit`, a getting-started guide, a Past chats view, a mode menu (Ask, Auto and Always approve) and a Thinking menu.',
+          'Auto is not a sandbox. It guards what a call writes or runs. It does not guard what a call reads or sends. Use a container or a virtual machine if you need a boundary.',
+          'The bundled agent is not code-signed, and it has only the OpenAI-format provider. The repository lists Windows and macOS as not verified. An install of 1.0.0 in a real VS Code is not measured yet.',
         ],
       },
       zed: {

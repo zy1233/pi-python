@@ -17,7 +17,7 @@ export type EventId =
 export type RuleId = 'parallel' | 'terminate' | 'noRaise' | 'usage';
 export type LayerId = 'zypi' | 'editors' | 'cli' | 'harness' | 'core' | 'models' | 'extensions';
 export type FeatureId = 'tools' | 'sessions' | 'headless' | 'context' | 'extensions' | 'sandbox' | 'limits' | 'thinking';
-export type TabId = 'tui' | 'zed' | 'headless' | 'python';
+export type TabId = 'tui' | 'vscode' | 'zed' | 'headless' | 'python';
 export type FooterLinkId =
   | 'github'
   | 'releases'

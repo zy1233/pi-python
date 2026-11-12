@@ -1,4 +1,4 @@
-import { snippets } from '~/data/site';
+import { links, snippets } from '~/data/site';
 import type { Messages } from './types';
 
 export const zh: Messages = {
@@ -201,7 +201,7 @@ export const zh: Messages = {
   install: {
     eyebrow: '安装',
     title: '装好，然后选一个模型。',
-    lead: '先安装 Python 智能体，再添加终端界面，或连接你的编辑器。',
+    lead: '先安装 Python 智能体，再添加终端界面，或连接你的编辑器。VS Code 扩展是例外：智能体已包含在内。',
     tabListLabel: '安装方式',
     tabs: {
       tui: {
@@ -222,6 +222,20 @@ zypi`,
           'Linux 二进制需要 glibc 2.39 或更高版本（Ubuntu 24.04 或更新）。',
           '在 Apple 芯片的 macOS 上，使用文件 `zypi-macos-arm64`。它由 CI 构建，还没有人实际运行过，也没有签名。',
           '在 Windows 上，请从源码构建 `zypi` 并在 WSL2 中运行。Python 智能体可以直接在 Windows 上运行。',
+        ],
+      },
+      vscode: {
+        label: 'VS Code',
+        heading: 'VS Code 扩展',
+        codeLabel: 'bash',
+        code: `# 或者打开“扩展”视图，搜索 zycode
+code --install-extension ${links.vscodeExtensionId}`,
+        notes: [
+          `扩展 \`${links.vscodeExtensionId}\` 把 zycode 智能体放进 VS Code 的聊天视图。它自带智能体程序，所以不必先安装 Python 智能体。请从 [Visual Studio Marketplace](${links.vscodeMarketplace}) 安装。VSCodium 和其他使用 Open VSX 的编辑器，请从 [Open VSX](${links.openVsx}) 安装。`,
+          '1.0.0 版已在两个注册表上发布，覆盖五个平台：`linux-x64`、`linux-arm64`、`darwin-arm64`、`darwin-x64` 和 `win32-x64`。',
+          '对每个非只读的工具调用，聊天视图都会提问。它有用于 `write` 和 `edit` 的 **Show diff** 按钮、新手引导、Past chats 视图、模式菜单（Ask、Auto 和 Always approve）以及 Thinking 菜单。',
+          'Auto 不是沙箱。它管住调用写入或运行的内容，不管调用读取或发送的内容。需要边界时，请使用容器或虚拟机。',
+          '内置的智能体没有代码签名，并且只有 OpenAI 格式的提供方。仓库把 Windows 和 macOS 列为尚未验证。1.0.0 在真实 VS Code 中的安装还没有测量过。',
         ],
       },
       zed: {
