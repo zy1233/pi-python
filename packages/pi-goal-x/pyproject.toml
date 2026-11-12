@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "pi-goal-x-py"
-version = "0.6.0"
+version = "0.6.1"
 description = "Goal-driven planning extension for pi-python (port of pi-goal-x)"
 readme = "README.md"
 requires-python = ">=3.11"
@@ -14,7 +14,7 @@ authors = [
 ]
 keywords = ["agent", "goal", "planning", "pi", "extension"]
 dependencies = [
-    "pi-agent-core-lc>=0.9.0",
+    "pi-agent-core-lc>=0.9.1",
 ]
 
 [project.entry-points."pi_agent.extensions"]

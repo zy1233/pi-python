@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "pi-agent-cli-lc"
-version = "0.9.0"
+version = "0.9.1"
 description = "Standard ACP agent over AgentHarness (no x.ai extensions)"
 readme = "README.md"
 requires-python = ">=3.11"
@@ -27,8 +27,8 @@ classifiers = [
 dependencies = [
     # The OpenAI-format provider is always there: most gateways and many vendors serve it, and
     # a bare `uvx pi-agent-cli-lc` (which cannot add `--with`) then has a model to talk to.
-    "pi-agent-core-lc[openai]==0.9.0",
-    "pi-agent-harness-lc==0.9.0",
+    "pi-agent-core-lc[openai]==0.9.1",
+    "pi-agent-harness-lc==0.9.1",
     # 1.0.0 (2026-11-09) removed `acp.helpers` and `acp.text_block`, which the agent uses. The port
     # to 1.0 is not done.
     "agent-client-protocol>=0.12.0,<1.0.0",
@@ -36,8 +36,8 @@ dependencies = [
 ]
 
 [project.optional-dependencies]
-anthropic = ["pi-agent-core-lc[anthropic]==0.9.0"]
-deepseek = ["pi-agent-core-lc[deepseek]==0.9.0"]
+anthropic = ["pi-agent-core-lc[anthropic]==0.9.1"]
+deepseek = ["pi-agent-core-lc[deepseek]==0.9.1"]
 
 [project.urls]
 Homepage = "https://github.com/zy1233/pi-python"
