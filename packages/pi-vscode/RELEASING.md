@@ -2,11 +2,24 @@
 
 This file is the checklist for a release. How the files are made is in `PACKAGING.md`. The design is in `docs/specs/2026-11-04-vscode-extension-design.md`.
 
-## Where things stand (read-only check on 2026-11-12, before the 1.0.0 pull request)
+## Release record
+
+### 1.0.0 (2026-11-12)
+
+- Published by the workflow `.github/workflows/vscode-extension.yml`: run `43181052994` on `main`, commit `8b0e50c`. The run finished green at 08:20Z.
+- The user approved the run in the environment `vscode-publish` at 08:18Z.
+- Open VSX took the five VSIX files by Trusted Publishing (OIDC), from 08:18:55Z to 08:19:17Z. Then the Marketplace took them with `vsce publish --oidc`, from 08:19:24Z to 08:19:57Z. Both registries accepted the first try with no token. So the OIDC path and both trusted publisher registrations are proven.
+- Time until the version was visible: Open VSX 08:23Z to 08:25Z (target by target, the scan queue). Marketplace 08:26Z to 08:28Z (validation, about 7 to 9 minutes after the upload).
+- Checked with the public APIs: five targets at 1.0.0 on both registries. `preRelease` is false on Open VSX. The Marketplace has no PreRelease property for 1.0.0 (0.1.0 had it). The sha256 of the five Open VSX files equals the `sha256sum` in the Publish log (the CI artifacts).
+- Not verified: an install of 1.0.0 in a real VS Code, the update from 0.1.0 to 1.0.0, and the Windows and macOS flows.
+
+## Where things stand before the 1.0.0 run (read-only check on 2026-11-12, kept as history)
 
 - Open VSX and the Marketplace each hold `zycode.zycode` **0.1.0**, a pre-release, for five targets: `linux-x64`, `linux-arm64`, `darwin-arm64`, `darwin-x64` and `win32-x64`. Nothing else is published.
 - 0.1.0 was uploaded by hand. **No release has gone out from the workflow yet.** So `1.0.0` is very likely the first real Trusted Publishing (OIDC) publish. Treat the OIDC path as untried until the run is green.
+  - Result (2026-11-12): the 1.0.0 run was green. Both registries took the publish by OIDC on the first try. The OIDC path is proven. See "Release record".
 - The Open VSX trusted publisher for `zycode` **is registered**: the owner said so on 2026-11-12. No one else has checked the registration, and no run of the workflow has used it, so the first publish is the first proof that the values match. A rehearsal run is not known.
+  - Result (2026-11-12): the 1.0.0 run used the registration: Open VSX logged `Trusted publishing token issued`, then published the five files. The registration is proven.
 
 ## What is already set up
 
@@ -49,7 +62,7 @@ This file is the checklist for a release. How the files are made is in `PACKAGIN
 
 ## If the OIDC publish fails (fallback)
 
-The first publish from the workflow is the first test of OIDC on both registries. Read the log of the failed step first.
+The first publish from the workflow (1.0.0, 2026-11-12) was the first test of OIDC on both registries, and it worked on the first try. This section stays for a later run that fails. Read the log of the failed step first.
 
 - **Open VSX says "No trusted publisher matches the presented token".** The registration does not match. Compare the four values in the table above with the repository, the workflow file name and the environment, then run the failed registry again.
 - **The Marketplace refuses the OIDC token.** Compare the policy of the publisher with the same four values. Check that the run was started from `main` and approved in `vscode-publish`.

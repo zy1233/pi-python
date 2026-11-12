@@ -1,6 +1,6 @@
 export type Level = 'stable' | 'beta' | 'alpha';
 
-export type PackageId = 'core' | 'harness' | 'cli' | 'zypi' | 'webAccess' | 'goalX' | 'workflows' | 'mcp';
+export type PackageId = 'core' | 'harness' | 'cli' | 'zypi' | 'vscode' | 'webAccess' | 'goalX' | 'workflows' | 'mcp';
 export type PrincipleId = 'contract' | 'protocol' | 'noClient' | 'permission' | 'trust' | 'models';
 export type EventId =
   | 'agentStart'
@@ -17,7 +17,8 @@ export type EventId =
 export type RuleId = 'parallel' | 'terminate' | 'noRaise' | 'usage';
 export type LayerId = 'zypi' | 'editors' | 'cli' | 'harness' | 'core' | 'models' | 'extensions';
 export type FeatureId = 'tools' | 'sessions' | 'headless' | 'context' | 'extensions' | 'sandbox' | 'limits' | 'thinking';
-export type TabId = 'tui' | 'zed' | 'headless' | 'python';
+export type WhereId = 'pypi' | 'releases' | 'marketplace' | 'openVsx';
+export type TabId = 'tui' | 'vscode' | 'zed' | 'headless' | 'python';
 export type FooterLinkId =
   | 'github'
   | 'releases'
@@ -149,7 +150,7 @@ export interface Messages {
     lead: string;
     columns: { component: string; level: string; role: string; source: string };
     levels: Record<Level, string>;
-    where: { pypi: string; releases: string };
+    where: Record<WhereId, string>;
     descriptions: Record<PackageId, string>;
     next: string;
   };
