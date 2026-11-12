@@ -7,9 +7,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.9.1] - 2026-11-12
+
+This is a patch release. It has one fix: `provider = "openai"` now shows the thinking that a gateway streams as `reasoning_content`. **Fixed** has the details. The VS Code extension needs a new agent binary to get the fix, so it needs a new Release and a new VSIX. **Changed** has the new version numbers. **Known issues** says that the 0.9.0 list still holds.
+
+### Changed
+
+- **New version numbers (all Python packages, TUI)**: `pi-agent-core-lc`, `pi-agent-harness-lc` and `pi-agent-cli-lc` go from 0.9.0 to 0.9.1. The three pin each other with `==`, so install them at one version. Only `pi-agent-core-lc` has a code change. `pi-agent-harness-lc` and `pi-agent-cli-lc` change only their version and their pins, because PyPI skips a version that exists, and 0.9.0 of the two pins core `==0.9.0`. The four extension packages need the new core (`pi-agent-core-lc>=0.9.1`, and `pi-dynamic-workflows-py` also `pi-agent-harness-lc>=0.9.1`) and get new versions, because the publish step skips a version that PyPI has already: `pi-web-access-py`, `pi-goal-x-py` and `pi-dynamic-workflows-py` go from 0.6.0 to 0.6.1, and `pi-mcp-py` from 0.4.0 to 0.4.1. They have no code change. `zypi --version` and the `agentInfo` of the agent show 0.9.1 (the TUI crates `pi-pager-bin` and `pi-version`, and `tui/Cargo.lock`, carry the same number). The TUI has no code change.
+
 ### Fixed
 
 - **`provider = "openai"` shows the thinking that a gateway streams (`pi-agent-core`)**: a gateway that serves a reasoning model (LiteLLM, vLLM, SiliconFlow, OpenRouter) puts the thinking in `delta.reasoning_content` (OpenRouter and newer vLLM: `delta.reasoning`). `langchain_openai.ChatOpenAI` does not read these fields, so the adapter never got any thinking and a client showed none: no `thinking_delta` event, no `thinking` block in the session file. `ChatDeepSeek` keeps them, but the `zycode-agent` binary (the VS Code extension, the registry archives) has no `langchain_deepseek`, and `provider = "openai"` with a `base_url` is the one way to reach a gateway there. Found in the VS Code extension: sessions of one model with `provider = "deepseek"` had thinking blocks, and sessions with `provider = "openai"` had none. The `openai` provider now builds a small subclass of `ChatOpenAI` (`adapters/openai_reasoning.py`) that puts the thinking of a streamed chunk into `additional_kwargs["reasoning_content"]`, as `ChatDeepSeek` does, with the same two field names in the same order. A chunk with no such field is not touched, so api.openai.com does not change. **The request does not change**: the thinking is not sent back (`provider = "deepseek"` still does that on DeepSeek's own API), and a `thinking` block of an earlier turn is left out of the request as before. A session that now holds `thinking` blocks replays with `provider = "openai"` without error (test: the request of a history with thinking and a tool call). Tests: `pi_agent_core/tests/test_openai_reasoning.py`; with the change taken out, four of them fail, and the first turn of the stream test has a `toolCall` block and no `thinking` block, as in the session files. **Verified** with a streamed answer through the real `ChatOpenAI` class and a fake HTTP client. **Not verified**: against a live gateway, and in a built `zycode-agent` or a VSIX (the extension needs a new agent binary: a new Release and a new VSIX). A thinking that is not streamed (a call that is not `astream`) is not covered; the adapter always streams.
+
+### Known issues
+
+The known issues of 0.9.0 still hold. This release changes none of them.
 
 ## [0.9.0] - 2026-11-11
 
