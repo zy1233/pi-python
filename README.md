@@ -311,9 +311,11 @@ Requires `OPENAI_API_KEY` (or the env var for your provider).
 
 ### OpenAI-compatible gateways
 
-Point `Model.base_url` at any OpenAI-compatible endpoint. Use `provider="deepseek"`
-when the endpoint streams thinking as `reasoning_content` (SiliconFlow, DeepSeek,
-most vLLM gateways) so it surfaces as `thinking_delta` events instead of being dropped:
+Point `Model.base_url` at any OpenAI-compatible endpoint. When the endpoint streams
+thinking as `reasoning_content` (or `reasoning`: SiliconFlow, DeepSeek, OpenRouter, most
+vLLM gateways), it surfaces as `thinking_delta` events with `provider="openai"` and with
+`provider="deepseek"` alike. Neither sends the thinking back to a gateway. `provider="deepseek"`
+needs `langchain-deepseek`; `provider="openai"` needs only `langchain-openai`:
 
 ```python
 model = Model(

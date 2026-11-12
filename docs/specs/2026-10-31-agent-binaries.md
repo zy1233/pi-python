@@ -218,7 +218,7 @@ meta package) and a new release; it is not planned.
 | No signing | macOS: a binary that a browser downloaded carries the quarantine flag, and Gatekeeper refuses an unsigned one; a client that downloads it itself does not set the flag (not verified on a real Mac). Windows: SmartScreen and antivirus can warn about an unsigned one-file program. |
 | Linux builds on `ubuntu-22.04` | Needs glibc 2.35 or newer (Ubuntu 22.04, Debian 12, RHEL 9). Debian 11 and RHEL 8 do not run it. A build in an older container needs a Python with a shared `libpython`; not done. |
 | One-file start | Each start unpacks the program to a temporary folder: about 1.7 s to the `initialize` answer on Linux, against 0.7 s for `python -m`. |
-| Provider | Only the OpenAI-format provider. Anthropic and DeepSeek in a frozen build: use `provider = "openai"` with `base_url`, or the Python package. |
+| Provider | Only the OpenAI-format provider. Anthropic and DeepSeek in a frozen build: use `provider = "openai"` with `base_url`, or the Python package. The `openai` provider shows the thinking that a gateway streams as `reasoning_content` or `reasoning` (`pi_agent_core/adapters/openai_reasoning.py`), but it does not send the thinking back on the next request. `provider = "deepseek"` does that for DeepSeek's own API only (not for a gateway), and it is not in the build. |
 | No `windows-aarch64` | A Windows on Arm client finds no key for its platform. |
 | Intel Mac | `macos-15-intel` is on GitHub's list of runners that end; check the notices. |
 
