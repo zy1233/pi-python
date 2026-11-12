@@ -230,7 +230,7 @@ export class ChatController {
   }
 
   /**
-   * Sets the thinking level. The agent has no live setting (v0.9.0), so this edits `thinking_level`
+   * Sets the thinking level. The agent has no live setting (v0.9.1), so this edits `thinking_level`
    * in `agent.toml`, restarts the agent, and opens this chat again with `session/load`. It asks first,
    * because it writes a file of the user.
    */

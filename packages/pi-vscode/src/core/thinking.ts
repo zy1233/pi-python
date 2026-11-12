@@ -2,7 +2,7 @@
  * The thinking level (docs/specs/2026-11-04-vscode-extension-design.md, section 7c). It adds no wire
  * item and no agent change.
  *
- * What agent v0.9.0 offers (read from its source and measured on the 0.9.0 binary):
+ * What agent v0.9.1 offers (read from its source and measured on the 0.9.0 and 0.9.1 binaries):
  * - The level lives in `agent.toml` only: the top-level key `thinking_level`, one of `off`,
  *   `minimal`, `low`, `medium`, `high`, `xhigh`. A missing or invalid value is `off`.
  * - The agent reads it when the process starts. `session/new` has no thinking option or `_meta`,
