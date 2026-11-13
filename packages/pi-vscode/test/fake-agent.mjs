@@ -105,6 +105,12 @@ async function runPrompt(ctx, sessionId, prompt) {
     await notify(text(sessionId, "agent_message_chunk", "level:" + startLevel));
     return "end_turn";
   }
+  if (prompt.startsWith("usage:")) {
+    // `usage:<json>` sends a usage_update (the ACP message for the context window) with these fields, then answers.
+    await notify({ sessionId, update: { sessionUpdate: "usage_update", ...JSON.parse(prompt.slice("usage:".length)) } });
+    await notify(text(sessionId, "agent_message_chunk", "ok"));
+    return "end_turn";
+  }
   if (prompt === "hello") {
     await notify(text(sessionId, "agent_thought_chunk", "Thinking. "));
     await notify(text(sessionId, "agent_message_chunk", "Hel"));

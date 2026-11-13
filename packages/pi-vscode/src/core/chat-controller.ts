@@ -36,6 +36,8 @@ import {
   type ThinkingState,
   type ToolCallView,
   type TranscriptItem,
+  type TurnState,
+  type UsageState,
 } from "./protocol.js";
 import {
   MAX_LIST_PAGES,
@@ -46,6 +48,7 @@ import {
   type SessionListState,
   type SessionRow,
 } from "./session-list.js";
+import { readUsageUpdate, sameUsage } from "./status-row.js";
 import {
   THINKING_LEVELS,
   isThinkingLevel,
@@ -84,6 +87,8 @@ export interface ControllerOptions {
   startTimeoutMs?: number;
   /** Time to wait for the turn to end after `session/cancel`. */
   cancelTimeoutMs?: number;
+  /** The clock for the time of a turn (milliseconds; default `Date.now`). A test sets it. */
+  now?: () => number;
 }
 
 interface PendingPermission {
@@ -122,6 +127,11 @@ export class ChatController {
   private cwd: string | undefined;
   private mode: ModeState | undefined;
   private model: string | undefined;
+  /** The context window, as the agent last said it (`usage_update`). Not counted here. */
+  private usage: UsageState | undefined;
+  /** When the prompt of the running turn was sent, and how long the last turn took (our clock). */
+  private turnStartedAt: number | undefined;
+  private lastTurnMs: number | undefined;
   private opening = false;
   private earlyUpdates: SessionNotification[] = [];
   private generation = 0;
@@ -190,10 +200,37 @@ export class ChatController {
     if (this.cwd !== undefined) message.cwd = this.cwd;
     if (this.mode) message.mode = this.visibleMode(this.mode);
     if (this.model !== undefined) message.model = this.model;
+    if (this.usage) message.usage = { ...this.usage };
+    const turn = this.turnState();
+    if (turn) message.turn = turn;
     const thinking = this.thinkingState();
     if (thinking) message.thinking = thinking;
     if (this.status === "needs-setup" && this.setupInfo) message.setup = this.setupInfo;
     return message;
+  }
+
+  private now(): number {
+    return (this.options.now ?? Date.now)();
+  }
+
+  /** The clock of the turn: the time so far while it runs, the time it took after it ended. */
+  private turnState(): TurnState | undefined {
+    if (this.turnStartedAt !== undefined) {
+      return this.status === "busy" || this.status === "cancelling" ? { elapsedMs: Math.max(0, this.now() - this.turnStartedAt) } : undefined;
+    }
+    return this.lastTurnMs === undefined ? undefined : { lastMs: this.lastTurnMs };
+  }
+
+  /**
+   * Forgets what belongs to the session that ended: the context window and the clocks. It gives `true`
+   * when there was something, so that the caller can tell the view.
+   */
+  private clearSessionStats(): boolean {
+    const had = this.usage !== undefined || this.turnStartedAt !== undefined || this.lastTurnMs !== undefined;
+    this.usage = undefined;
+    this.turnStartedAt = undefined;
+    this.lastTurnMs = undefined;
+    return had;
   }
 
   /**
@@ -658,6 +695,7 @@ export class ChatController {
     await this.stopProcess();
     this.sessionId = undefined;
     this.opening = false;
+    this.clearSessionStats();
     this.setStatus("stopped");
   }
 
@@ -693,6 +731,7 @@ export class ChatController {
     this.conn = undefined;
     this.sessionId = undefined;
     this.opening = false;
+    this.clearSessionStats();
     this.pushNotice("error", text);
     this.setError(text);
   }
@@ -721,6 +760,8 @@ export class ChatController {
     const id = this.nextId("user");
     this.items.push({ type: "user", id, text });
     this.turnStart = this.items.length;
+    this.turnStartedAt = this.now();
+    this.lastTurnMs = undefined;
     this.emit({ type: "userMessage", id, text });
     this.setStatus("busy");
     const generation = this.generation;
@@ -742,6 +783,10 @@ export class ChatController {
     this.segmentId = undefined;
     this.clearCancelTimer();
     this.cancelAllPermissions();
+    if (this.turnStartedAt !== undefined) {
+      this.lastTurnMs = Math.max(0, this.now() - this.turnStartedAt);
+      this.turnStartedAt = undefined;
+    }
     if (stopReason !== "end_turn" && stopReason !== "cancelled" && stopReason !== "error") {
       this.pushNotice("info", `The turn ended: ${stopReason}.`);
     }
@@ -808,6 +853,7 @@ export class ChatController {
     this.diffs.clear();
     this.segmentId = undefined;
     this.emit({ type: "reset", transcript: [] });
+    if (this.clearSessionStats()) this.emit(this.stateMessage());
   }
 
   // ----- first run
@@ -1142,6 +1188,17 @@ export class ChatController {
           this.emit(this.stateMessage());
         }
         return;
+      case "usage_update": {
+        // The standard message (ACP v1) for the context window. The SDK has checked its shape already (it
+        // drops an update with no `used`), so `readUsageUpdate` only leaves out what the row cannot show.
+        // An agent that does not send this message gets no row.
+        const usage = readUsageUpdate(update);
+        if (usage !== undefined && !sameUsage(this.usage, usage)) {
+          this.usage = usage;
+          this.emit(this.stateMessage());
+        }
+        return;
+      }
       case "notice": {
         const title = typeof update.title === "string" ? update.title : "";
         const description = typeof update.description === "string" ? update.description : "";

@@ -408,4 +408,93 @@ describe.skipIf(!chrome || !built)("webview: modes, first run and notices", () =
       window.__result = { buttons: document.querySelectorAll(".notice button").length };`);
     expect(out).toMatchObject({ ok: true, buttons: 0 });
   });
+
+  describe("status row", () => {
+    it("names the folder in the meta row, with the full path as the tooltip, and has no context row when the agent sent no usage", () => {
+      const out = run(`${state}
+        state({ agent: { version: "0.9.1", source: "bundled" }, model: "deepseek-flash", cwd: ${lit("D:\\work\\pi-python")} });
+        const meta = document.querySelector(".meta");
+        window.__result = { meta: meta.textContent, tip: meta.title, usage: document.querySelector("[data-testid=usage]") !== null, clock: document.querySelector(".clock") !== null };`);
+      expect(out).toMatchObject({ ok: true, meta: "agent 0.9.1 · deepseek-flash · folder pi-python", tip: "D:\\work\\pi-python", usage: false, clock: false });
+    });
+
+    it("draws the context row from the numbers of the agent, with the cost", () => {
+      const out = run(`${state}
+        state({ usage: { used: 54200, size: 128000, cost: { amount: 0.12, currency: "USD" } } });
+        const row = document.querySelector("[data-testid=usage]");
+        const meter = row.querySelector("meter");
+        window.__result = {
+          cls: row.className, tip: row.title,
+          label: row.querySelector(".usage-label").textContent, text: row.querySelector(".usage-text").textContent, cost: row.querySelector(".usage-cost").textContent,
+          meter: { min: meter.min, max: meter.max, value: meter.value, label: meter.getAttribute("aria-label") },
+          inHeader: row.parentElement.classList.contains("header"),
+        };`);
+      expect(out).toMatchObject({
+        ok: true,
+        cls: "usage ok",
+        tip: "54,200 of 128,000 tokens are in the context (42%). The agent counts them.",
+        label: "Context",
+        text: "42% · 54.2k of 128k tokens",
+        cost: "$0.12",
+        meter: { min: 0, max: 128000, value: 54200, label: "Context used" },
+        inHeader: true,
+      });
+    });
+
+    it("marks a window that is nearly full, shows only the count when the size is not known, and drops the row when the usage goes", () => {
+      const out = run(`${state}
+        const levelOf = (usage) => { state({ usage }); return document.querySelector("[data-testid=usage]").className; };
+        const ok = levelOf({ used: 79000, size: 100000 });
+        const warn = levelOf({ used: 80000, size: 100000 });
+        const high = levelOf({ used: 89000, size: 100000 });
+        const danger = levelOf({ used: 90000, size: 100000 });
+        const over = levelOf({ used: 112500, size: 100000 });
+        const plain = levelOf({ used: 54200 });
+        const row = document.querySelector("[data-testid=usage]");
+        const plainView = { text: row.querySelector(".usage-text").textContent, meter: row.querySelector("meter") !== null, cost: row.querySelector(".usage-cost") !== null };
+        state({ usage: { used: 112500, size: 100000 } });
+        const overRow = document.querySelector("[data-testid=usage]");
+        const overView = { text: overRow.querySelector(".usage-text").textContent, value: overRow.querySelector("meter").value };
+        state({});
+        window.__result = { levels: [ok, warn, high, danger, over, plain], plainView, overView, gone: document.querySelector("[data-testid=usage]") === null };`);
+      expect(out).toMatchObject({
+        ok: true,
+        levels: ["usage ok", "usage warn", "usage warn", "usage danger", "usage danger", "usage plain"],
+        plainView: { text: "54.2k tokens", meter: false, cost: false },
+        overView: { text: "113% · 113k of 100k tokens", value: 100000 }, // the bar stops at full
+        gone: true,
+      });
+    });
+
+    it("writes what the agent sends as text, never as HTML", () => {
+      const out = run(`${state}
+        state({ usage: { used: 1, size: 2, cost: { amount: 1, currency: "<img src=x onerror=alert(1)>" } }, cwd: ${lit("/home/u/<b>x</b>")} });
+        window.__result = { imgs: document.querySelectorAll("img").length, bold: document.querySelectorAll(".header b").length, cost: document.querySelector(".usage-cost").textContent };`);
+      expect(out).toMatchObject({ ok: true, imgs: 0, bold: 0, cost: "1 <img src=x onerror=alert(1)>" });
+    });
+
+    it("counts the running turn with its own clock and leaves the menus alone, then shows how long the turn took", () => {
+      const modes = `[{ id: "ask", name: "Ask" }, { id: "auto", name: "Auto" }]`;
+      const out = run(`${state}
+        state({ status: "busy", turn: { elapsedMs: 5000 }, mode: { current: "ask", options: ${modes} } });
+        const select = document.querySelector(".controls select");
+        const first = { text: document.querySelector(".clock").textContent, tip: document.querySelector(".clock").title, status: document.querySelector(".status").textContent };
+        setTimeout(() => {
+          const later = document.querySelector(".clock").textContent;
+          const sameSelect = document.querySelector(".controls select") === select;
+          state({ status: "ready", turn: { lastMs: 8432 }, mode: { current: "ask", options: ${modes} } });
+          const ended = { text: document.querySelector(".clock").textContent, tip: document.querySelector(".clock").title };
+          state({ status: "ready" });
+          document.getElementById("result").textContent = JSON.stringify({ ok: true, first, later, sameSelect, ended, none: document.querySelector(".clock") === null });
+        }, 2200);`);
+      expect(out).toMatchObject({
+        ok: true,
+        first: { text: "5 s", tip: "Time since you sent the message", status: "Working" },
+        later: "7 s", // 5 s from the host and 2 s of the clock of the page
+        sameSelect: true, // a tick changes the one element, so a menu that is open stays open
+        ended: { text: "last turn 8.4 s", tip: "How long the last turn took" },
+        none: true,
+      });
+    });
+  });
 });

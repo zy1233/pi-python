@@ -8,6 +8,7 @@ import type {
   TranscriptItem,
   WebviewMessage,
 } from "../core/protocol.js";
+import { describeContext, folderName, formatCost, formatDuration } from "../core/status-row.js";
 import { throttle, type Scheduler, type Throttled } from "../core/throttle.js";
 import { el, renderBlocks } from "./dom.js";
 
@@ -85,10 +86,74 @@ function button(label: string, onClick: () => void, className = "secondary"): HT
   return b;
 }
 
+/**
+ * The clock of the turn (design section 7d). The host says how long the turn has run each time it sends
+ * the state; between two messages this page counts with its own clock. Only this one element changes
+ * each time, so a menu that is open stays open.
+ */
+let clockEl: HTMLElement | undefined;
+let clockBase: { ms: number; at: number } | undefined;
+let clockTimer: number | undefined;
+
+function tickClock(): void {
+  if (!clockEl || !clockBase) return;
+  const text = formatDuration(clockBase.ms + (performance.now() - clockBase.at));
+  if (clockEl.textContent !== text) clockEl.textContent = text;
+}
+
+function stopClock(): void {
+  clockEl = undefined;
+  clockBase = undefined;
+  if (clockTimer !== undefined) {
+    window.clearInterval(clockTimer);
+    clockTimer = undefined;
+  }
+}
+
+/** The time of the turn: the clock that runs while the agent works, the time it took when it has ended. */
+function renderClock(): HTMLElement | null {
+  const turn = state.turn;
+  if (turn?.elapsedMs !== undefined) {
+    clockBase = { ms: turn.elapsedMs, at: performance.now() };
+    clockEl = el("span", { class: "clock", title: "Time since you sent the message", text: formatDuration(turn.elapsedMs) });
+    clockTimer ??= window.setInterval(tickClock, 500);
+    return clockEl;
+  }
+  stopClock();
+  if (turn?.lastMs !== undefined) {
+    return el("span", { class: "clock", title: "How long the last turn took", text: `last turn ${formatDuration(turn.lastMs, true)}` });
+  }
+  return null;
+}
+
+/**
+ * The context window, as the agent says it (`usage_update`). There is no row when the agent sends none: the
+ * page does not count tokens and does not guess a size.
+ */
+function renderUsage(): HTMLElement | null {
+  const usage = state.usage;
+  if (!usage) return null;
+  const view = describeContext(usage);
+  const row = el("div", { class: `usage ${view.level ?? "plain"}`, title: view.title, dataset: { testid: "usage" } }, el("span", { class: "usage-label", text: "Context" }));
+  if (usage.size !== undefined) {
+    const meter = el("meter", { class: "usage-meter" });
+    meter.min = 0;
+    meter.max = usage.size;
+    meter.value = Math.min(usage.used, usage.size);
+    meter.setAttribute("aria-label", "Context used");
+    row.append(meter);
+  }
+  row.append(el("span", { class: "usage-text", text: [view.short, view.count].filter((part) => part !== "").join(" · ") }));
+  if (usage.cost) row.append(el("span", { class: "usage-cost", title: "What this chat has cost, as the agent says", text: formatCost(usage.cost) }));
+  return row;
+}
+
 function renderHeader(): void {
   header.replaceChildren();
   const title = el("div", { class: "title" });
   title.append(el("span", { class: `dot ${state.status}` }), el("strong", { text: "zycode" }), el("span", { class: "status", text: STATUS_TEXT[state.status] }));
+  const clock = renderClock();
+  if (clock) title.append(clock);
   const alwaysApprove = state.mode?.current === "always-approve";
   root.classList.toggle("always-approve", alwaysApprove);
   if (alwaysApprove) {
@@ -103,7 +168,8 @@ function renderHeader(): void {
   const facts: string[] = [];
   if (state.agent) facts.push(`agent ${state.agent.version}${state.agent.source === "setting" ? " (your program)" : ""}`);
   if (state.model) facts.push(state.model);
-  const meta = el("div", { class: "meta", text: facts.join(" · ") });
+  if (state.cwd) facts.push(`folder ${folderName(state.cwd)}`);
+  const meta = el("div", { class: "meta", text: facts.join(" · "), title: state.cwd ?? "" });
   const controls = el("div", { class: "controls" });
   const mode = state.mode;
   if (mode && mode.options.length > 1) {
@@ -161,7 +227,10 @@ function renderHeader(): void {
     button("New chat", () => send({ type: "newChat" })),
     button("Restart", () => send({ type: "restartAgent" })),
   );
-  header.append(title, meta, controls);
+  header.append(title, meta);
+  const usageRow = renderUsage();
+  if (usageRow) header.append(usageRow);
+  header.append(controls);
 }
 
 function renderBanner(): void {

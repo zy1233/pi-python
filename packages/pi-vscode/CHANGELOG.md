@@ -6,6 +6,8 @@
 
 - The chat shows Markdown as Markdown. Before, only paragraphs, lists, code and links worked, and a heading, a table or bold text showed its marks (`##`, `|---|`, `**`). Now the chat shows headings, bold, italic, strikethrough, nested lists, quotes, rules and tables (with column alignment, and a scroll bar for a wide table). Bold text next to Chinese, Japanese or Korean characters works (`**重要：**文本`). Raw HTML in an answer stays text, an image is not loaded (it shows as a link), and a link with an address that the extension does not open (for example `javascript:`) shows as plain text with its address.
 
+- The status row of the chat is richer. It shows the time of the turn (a clock while the agent works, then `last turn 8.4 s`) and the folder of the chat. When the agent sends the standard ACP message `usage_update`, a **Context** row shows a bar, the percent, the tokens and the cost, and the VS Code status bar shows `· context 42%`. The bar turns to a warning colour from 80 % and to a danger colour from 90 %. **Agent 0.9.1, which is bundled, does not send `usage_update`, so the Context row does not show with it yet.** The extension does not count tokens and does not guess the size of the window. The agent was not changed: [an investigation record](https://github.com/zy1233/pi-python/blob/main/docs/specs/2026-11-13-agent-context-usage.md) says what a change of the agent needs.
+
 ### Changed
 
 - The chat draws a streamed answer at most once each 80 ms (the first piece at once, the last piece always). A long answer then needs less work while it streams in.

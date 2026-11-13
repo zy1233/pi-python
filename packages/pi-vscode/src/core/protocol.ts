@@ -61,6 +61,28 @@ export interface SetupInfo {
   variable?: string;
 }
 
+/**
+ * What the agent said about the context window, in its ACP `usage_update`
+ * (docs/specs/2026-11-13-agent-context-usage.md). The extension counts nothing itself: an agent that
+ * sends no `usage_update` leaves this out, and the view then shows no context row.
+ */
+export interface UsageState {
+  /** Tokens that are in the context now. */
+  used: number;
+  /** Size of the context window in tokens. Absent when the agent did not give a usable size. */
+  size?: number;
+  /** What the chat has cost, when the agent says so. */
+  cost?: { amount: number; currency: string };
+}
+
+/** Times that the host measures (the agent sends none). Design: section 7d. */
+export interface TurnState {
+  /** Milliseconds since the prompt was sent. Present only while a turn runs. */
+  elapsedMs?: number;
+  /** How long the last turn took. Present when no turn runs and one has ended in this chat. */
+  lastMs?: number;
+}
+
 export interface StateMessage {
   type: "state";
   status: Status;
@@ -69,6 +91,10 @@ export interface StateMessage {
   cwd?: string;
   mode?: ModeState;
   model?: string;
+  /** The context window, from the agent's `usage_update`. Absent until the agent sends one. */
+  usage?: UsageState;
+  /** The times of the turn. */
+  turn?: TurnState;
   /** The thinking level picker. Absent while the agent is not up. */
   thinking?: ThinkingState;
   /** Set while `status` is `needs-setup`: what is missing. */
