@@ -1,9 +1,28 @@
 name: CI
 
+# Ruff and pytest read Python. A change that touches only the paths below cannot change their result:
+# the extension has its own workflow (vscode-extension.yml), `docs/` is outside Ruff (`extend-exclude`)
+# and outside `testpaths`, and no Python test reads either folder. GitHub runs this workflow when ANY
+# changed file is left in the list, so a change that also touches another file still runs it.
+# The order matters: a `!` pattern takes a file out, and the last pattern puts every Python file back
+# (Ruff reads the three Python helpers inside `vscode/`). No check is required on `main`, so a run that
+# is skipped blocks no merge.
 on:
   push:
     branches: [main]
+    paths:
+      - "**"
+      - "!vscode/**"
+      - "!docs/**"
+      - "!.github/workflows/vscode-extension.yml"
+      - "**/*.py"
   pull_request:
+    paths:
+      - "**"
+      - "!vscode/**"
+      - "!docs/**"
+      - "!.github/workflows/vscode-extension.yml"
+      - "**/*.py"
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}

@@ -1,4 +1,4 @@
-# The zycode VS Code extension (packages/pi-vscode).
+# The zycode VS Code extension (vscode/).
 #
 # On a pull request that touches the extension: tests, and a linux-x64 VSIX with its smoke test.
 # By hand (Actions > "VS Code extension" > Run workflow): the same for the chosen targets, and,
@@ -9,7 +9,7 @@
 #   and the environment allows deployments from `main` only.
 # - Both registries name THIS FILE by its file name (`vscode-extension.yml`) in their trusted
 #   publisher entries. Do not rename it without changing both entries.
-# - The first upload to each registry is a hand upload (packages/pi-vscode/RELEASING.md).
+# - The first upload to each registry is a hand upload (vscode/RELEASING.md).
 
 name: VS Code extension
 
@@ -17,7 +17,7 @@ on:
   pull_request:
     paths:
       - ".github/workflows/vscode-extension.yml"
-      - "packages/pi-vscode/**"
+      - "vscode/**"
   workflow_dispatch:
     inputs:
       publish:
@@ -64,9 +64,9 @@ jobs:
         with:
           node-version: 22
       - run: npm ci
-        working-directory: packages/pi-vscode
+        working-directory: vscode
       - run: npm run check
-        working-directory: packages/pi-vscode
+        working-directory: vscode
 
   plan:
     name: Targets
@@ -108,16 +108,16 @@ jobs:
         with:
           python-version: "3.12" # for THIRD-PARTY-NOTICES
       - run: npm ci
-        working-directory: packages/pi-vscode
+        working-directory: vscode
       - name: Download the agent, check its sha256, build, write the notices, package, check the VSIX
         run: node scripts/package.mjs "$TARGET"
-        working-directory: packages/pi-vscode
+        working-directory: vscode
         env:
           TARGET: ${{ matrix.target }}
       - uses: actions/upload-artifact@v6
         with:
           name: vsix-${{ matrix.target }}
-          path: packages/pi-vscode/out/*.vsix
+          path: vscode/out/*.vsix
           if-no-files-found: error
           retention-days: 14
 
@@ -148,8 +148,8 @@ jobs:
         if: steps.has.outputs.linux_x64 == 'true'
         run: |
           npm ci
-          node scripts/smoke-vsix.mjs ../../vsix/*.vsix
-        working-directory: packages/pi-vscode
+          node scripts/smoke-vsix.mjs ../vsix/*.vsix
+        working-directory: vscode
 
   publish:
     name: Publish
@@ -179,7 +179,7 @@ jobs:
           merge-multiple: true
       - name: Install the pinned vsce and ovsx
         run: npm ci
-        working-directory: packages/pi-vscode
+        working-directory: vscode
       - name: Files to publish
         run: |
           ls -l vsix
@@ -187,17 +187,17 @@ jobs:
       # A repeat of a half-done publish skips what is already there (--skip-duplicate).
       - name: Open VSX
         if: inputs.registries != 'marketplace'
-        working-directory: packages/pi-vscode
+        working-directory: vscode
         run: |
           set -eu
-          for f in ../../vsix/*.vsix; do
+          for f in ../vsix/*.vsix; do
             npx --no-install ovsx publish --trusted-publishing --skip-duplicate "$f"
           done
       - name: Visual Studio Marketplace
         if: inputs.registries != 'open-vsx'
-        working-directory: packages/pi-vscode
+        working-directory: vscode
         run: |
           set -eu
-          for f in ../../vsix/*.vsix; do
+          for f in ../vsix/*.vsix; do
             npx --no-install vsce publish --oidc --skip-duplicate --packagePath "$f"
           done

@@ -54,7 +54,7 @@ The extension reads `usage_update` when an agent sends it (design section 7d). U
 
 ## 6. Release path
 
-An agent change is not enough. The extension bundles one fixed agent binary. After the change: release the agent, then change `zycodeAgentVersion` and the size and the sha256 in `packages/pi-vscode/agent-assets.json`, then release the extension. A user who sets `zycode.agentPath` gets the change as soon as that program is new.
+An agent change is not enough. The extension bundles one fixed agent binary. After the change: release the agent, then change `zycodeAgentVersion` and the size and the sha256 in `vscode/agent-assets.json`, then release the extension. A user who sets `zycode.agentPath` gets the change as soon as that program is new.
 
 ## 7. Open decisions (for the owner)
 

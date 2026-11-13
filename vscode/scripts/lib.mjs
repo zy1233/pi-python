@@ -6,7 +6,7 @@ import { fileURLToPath } from "node:url";
 import { gunzipSync, inflateRawSync } from "node:zlib";
 
 export const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
-export const REPO_ROOT = path.resolve(ROOT, "..", "..");
+export const REPO_ROOT = path.resolve(ROOT, "..");
 export const CACHE_DIR = path.join(ROOT, ".vsix-cache");
 export const OUT_DIR = path.join(ROOT, "out");
 

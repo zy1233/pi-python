@@ -11,7 +11,7 @@ import type { ChatController } from "../src/core/chat-controller.js";
 import { TestHost, newController, tempDir, waitFor } from "./helpers.js";
 
 const here = path.dirname(fileURLToPath(import.meta.url));
-const repo = path.resolve(here, "../../..");
+const repo = path.resolve(here, "../..");
 const python = process.env.ZYCODE_REAL_AGENT_PYTHON ?? path.join(repo, ".venv", "bin", "python");
 const enabled = process.env.ZYCODE_REAL_AGENT === "1" && existsSync(python) && process.platform !== "win32";
 

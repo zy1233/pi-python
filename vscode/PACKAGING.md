@@ -1,6 +1,6 @@
 # Packaging the zycode extension
 
-One VSIX per platform. Each VSIX holds the `zycode-agent` program of one release (`agent-assets.json`). Work from the `packages/pi-vscode` folder. Use Linux. The Linux and macOS programs must keep their execute bit in the VSIX, and only Linux is tested for that.
+One VSIX per platform. Each VSIX holds the `zycode-agent` program of one release (`agent-assets.json`). Work from the `vscode` folder. Use Linux. The Linux and macOS programs must keep their execute bit in the VSIX, and only Linux is tested for that.
 
 ## Make the files
 
