@@ -229,9 +229,12 @@ function withoutFinalNewline(text: string): string {
   return text.endsWith("\n") ? text.slice(0, -1) : text;
 }
 
+/** Marks nest only this deep. A deeper mark is dropped and its text stays, so a hostile text cannot make a deep DOM tree. */
+const MAX_INLINE_DEPTH = 32;
+
 type Frame =
-  | { kind: "strong" | "em" | "del"; children: Inline[] }
-  | { kind: "link"; url: string; children: Inline[] };
+  | { kind: "strong" | "em" | "del"; children: Inline[]; flat?: true }
+  | { kind: "link"; url: string; children: Inline[]; flat?: true };
 
 /** Reads the children of an `inline` token. A single newline is a line break, as in most chat apps. */
 function readInline(token: Token | undefined): Inline[] {
@@ -245,9 +248,12 @@ function readInline(token: Token | undefined): Inline[] {
     if (last?.t === "text") last.text += text;
     else target.push({ t: "text", text });
   };
+  const open = (frame: Frame) => {
+    stack.push(stack.length >= MAX_INLINE_DEPTH ? { ...frame, children: here(), flat: true } : frame);
+  };
   const closeTop = () => {
     const frame = stack.pop();
-    if (!frame) return;
+    if (!frame || frame.flat) return;
     if (frame.kind === "link") here().push({ t: "link", url: frame.url, children: frame.children });
     else if (frame.kind === "strong") here().push({ t: "strong", children: frame.children });
     else if (frame.kind === "em") here().push({ t: "em", children: frame.children });
@@ -270,25 +276,25 @@ function readInline(token: Token | undefined): Inline[] {
         here().push({ t: "br" });
         break;
       case "strong_open":
-        stack.push({ kind: "strong", children: [] });
+        open({ kind: "strong", children: [] });
         break;
       case "strong_close":
         close("strong");
         break;
       case "em_open":
-        stack.push({ kind: "em", children: [] });
+        open({ kind: "em", children: [] });
         break;
       case "em_close":
         close("em");
         break;
       case "s_open":
-        stack.push({ kind: "del", children: [] });
+        open({ kind: "del", children: [] });
         break;
       case "s_close":
         close("del");
         break;
       case "link_open":
-        stack.push({ kind: "link", url: attr(child, "href"), children: [] });
+        open({ kind: "link", url: attr(child, "href"), children: [] });
         break;
       case "link_close":
         close("link");

@@ -302,6 +302,26 @@ function checkBlocks(blocks: Block[]): void {
 }
 
 describe("parseMarkdown: hostile and random input", () => {
+  it("nests marks to a bounded depth and keeps the text", () => {
+    // Not recursive: the test must fail on an assertion, not on the stack of its own helper.
+    const depth = (inline: readonly Inline[]): number => {
+      let deepest = 0;
+      const todo: Array<[readonly Inline[], number]> = [[inline, 0]];
+      for (let item = todo.pop(); item; item = todo.pop()) {
+        deepest = Math.max(deepest, item[1]);
+        for (const part of item[0]) if ("children" in part) todo.push([part.children, item[1] + 1]);
+      }
+      return deepest;
+    };
+    for (const [open, close] of [["*a ", "a* "], ["**a ", "a** "], ["~~a ", "a~~ "]] as const) {
+      const [block] = parseMarkdown(open.repeat(5000) + close.repeat(5000));
+      expect(block?.t).toBe("p");
+      const inline = (block as Extract<Block, { t: "p" }>).inline;
+      expect(depth(inline)).toBeLessThanOrEqual(33);
+      expect(inlineText(inline).replace(/\s/g, "")).toBe("a".repeat(10000));
+    }
+  });
+
   it("returns for text that is built to be slow or deep, and the result has a valid shape", () => {
     const inputs = [
       "[".repeat(20000),
