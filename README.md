@@ -41,7 +41,7 @@ This repository is a monorepo containing:
 | `pi-dynamic-workflows-py` | **Beta** | [PyPI](https://pypi.org/project/pi-dynamic-workflows-py/) |
 | `pi-mcp-py` | **Alpha** | [PyPI](https://pypi.org/project/pi-mcp-py/) (from 0.6.0) |
 | `zypi` (Rust TUI) | **Beta** | [GitHub Releases](https://github.com/zy1233/pi-python/releases) (Linux x86_64) |
-| `zycode.zycode` (VS Code extension) | **Beta** | [VS Code Marketplace](https://marketplace.visualstudio.com/items?itemName=zycode.zycode) and [Open VSX](https://open-vsx.org/extension/zycode/zycode) (version 1.0.0, five platforms; Windows and macOS not verified) |
+| `zycode.zycode` (VS Code extension) | **Beta** | [VS Code Marketplace](https://marketplace.visualstudio.com/items?itemName=zycode.zycode) and [Open VSX](https://open-vsx.org/extension/zycode/zycode) (five platforms; the project owner tested the install of 1.0.0 and the update from 0.1.0 to 1.0.0 on Windows on 2026-11-12; the rest of the Windows flow, macOS and Linux in a real VS Code are not verified) |
 
 ## Features
 
@@ -157,10 +157,10 @@ The extension `zycode.zycode` ([`vscode`](vscode/README.md)) puts the zycode age
 
 - **VS Code:** install it from the [Visual Studio Marketplace](https://marketplace.visualstudio.com/items?itemName=zycode.zycode), or run `code --install-extension zycode.zycode`.
 - **VSCodium and other editors that use Open VSX:** install it from [Open VSX](https://open-vsx.org/extension/zycode/zycode).
-- **Platforms:** version 1.0.0 is published on both registries for five platforms: `linux-x64`, `linux-arm64`, `darwin-arm64`, `darwin-x64` and `win32-x64`. Each one has the agent program inside.
+- **Platforms:** the extension is published on both registries for five platforms: `linux-x64`, `linux-arm64`, `darwin-arm64`, `darwin-x64` and `win32-x64`. Each one has the agent program inside.
 - **What it has:** a chat view with a question card for each tool call that is not read-only; a **Show diff** button for `write` and `edit`; a getting-started guide and help for the first start (the setup runs in a VS Code terminal); a **Past chats** view; a mode menu (**Ask**, **Auto** and **Always approve**); and a **Thinking** menu.
 - **Auto is not a sandbox.** It guards what a call writes or runs. It does not guard what a call reads or sends. Use a container or a virtual machine if you need a boundary. See the [extension README](vscode/README.md) for the three modes.
-- **Limits:** the bundled agent is not code-signed, and it has only the OpenAI-format provider. The repository lists Windows and macOS as not verified. An install of 1.0.0 in a real VS Code is not measured yet. The release record is in [`RELEASING.md`](vscode/RELEASING.md).
+- **Limits:** the bundled agent is not code-signed, and it has only the OpenAI-format provider. The project owner tested the install of 1.0.0 and the update from 0.1.0 to 1.0.0 on Windows (2026-11-12). The rest of the Windows flow (the first-run setup in a terminal, a chat with a model, the unsigned agent on other machines or under an antivirus), all macOS flows, and Linux in a real VS Code are not verified. The release record is in [`RELEASING.md`](vscode/RELEASING.md).
 
 ### In Zed (custom agent)
 

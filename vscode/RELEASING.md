@@ -11,7 +11,8 @@ This file is the checklist for a release. How the files are made is in `PACKAGIN
 - Open VSX took the five VSIX files by Trusted Publishing (OIDC), from 08:18:55Z to 08:19:17Z. Then the Marketplace took them with `vsce publish --oidc`, from 08:19:24Z to 08:19:57Z. Both registries accepted the first try with no token. So the OIDC path and both trusted publisher registrations are proven.
 - Time until the version was visible: Open VSX 08:23Z to 08:25Z (target by target, the scan queue). Marketplace 08:26Z to 08:28Z (validation, about 7 to 9 minutes after the upload).
 - Checked with the public APIs: five targets at 1.0.0 on both registries. `preRelease` is false on Open VSX. The Marketplace has no PreRelease property for 1.0.0 (0.1.0 had it). The sha256 of the five Open VSX files equals the `sha256sum` in the Publish log (the CI artifacts).
-- Not verified: an install of 1.0.0 in a real VS Code, the update from 0.1.0 to 1.0.0, and the Windows and macOS flows.
+- 2026-11-12, 18:17 Asia/Shanghai: the project owner tested, on Windows, the install of 1.0.0 and the update from 0.1.0 to 1.0.0. His words: "I tested the install of 1.0 and the update from 0.1 on Windows." Nothing else is claimed from this test.
+- Not verified: the rest of the Windows flow (the first-run setup in a terminal, a chat with a model, the unsigned agent on other machines or under an antivirus), all macOS flows, and Linux in a real VS Code.
 
 ## Where things stand before the 1.0.0 run (read-only check on 2026-11-12, kept as history)
 

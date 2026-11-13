@@ -11,7 +11,7 @@
 //    process with the replay of the history, `_pi/yolo_mode_changed` (the mode must follow, and a
 //    new session must not start in it after the extension puts `ask` back), and `_pi/session/delete`.
 //    This is what the session list and the mode menu of the extension use.
-//   node scripts/smoke-vsix.mjs out/zycode-linux-x64-1.0.0.vsix
+//   node scripts/smoke-vsix.mjs out/zycode-linux-x64-*.vsix
 import { spawn } from "node:child_process";
 import http from "node:http";
 import { chmodSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";

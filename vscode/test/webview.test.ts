@@ -77,6 +77,19 @@ describe.skipIf(!chrome || !built)("webview in headless Chrome", () => {
     expect(out.codeBlock).toBe("<b>code</b>");
   });
 
+  it("draws the items that follow a deeply nested answer when the chat reloads", () => {
+    const deep = "*a ".repeat(5000) + "a* ".repeat(5000);
+    const out = run(`${state}
+      state({});
+      host({ type: "reset", transcript: [
+        { type: "agent", id: "a1", text: ${lit(deep)}, thought: "" },
+        { type: "notice", level: "info", text: "NOTICE-AFTER" },
+      ] });
+      window.__result = { text: document.querySelector("[data-testid=transcript]").textContent };`);
+    expect(out.ok).toBe(true);
+    expect(out.text).toContain("NOTICE-AFTER");
+  });
+
   it("posts send on Enter, not on Shift+Enter, and only when ready", () => {
     const out = run(`${state}
       const input = document.querySelector("textarea");
