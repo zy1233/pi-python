@@ -1,7 +1,7 @@
 """Prints, as JSON, the license data of every installed distribution of this Python.
 
 Run by scripts/notices.mjs inside a clean virtual environment, so the list is the closure of the
-packages that the agent binary is built from. Standard library only.
+packages that the agent binary is built from. Standard library only. (probe)
 """
 
 from __future__ import annotations
