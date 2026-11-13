@@ -1,0 +1,313 @@
+{
+  "name": "zycode",
+  "displayName": "zycode",
+  "description": "Chat with the zycode coding agent in VS Code. Unofficial; not affiliated with pi or Microsoft.",
+  "version": "1.0.0",
+  "publisher": "zycode",
+  "icon": "media/icon.png",
+  "galleryBanner": {
+    "color": "#15140f",
+    "theme": "dark"
+  },
+  "license": "MIT",
+  "homepage": "https://zycode.dev",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/zy1233/pi-python.git",
+    "directory": "vscode"
+  },
+  "bugs": {
+    "url": "https://github.com/zy1233/pi-python/issues"
+  },
+  "zycodeAgentVersion": "0.9.1",
+  "engines": {
+    "vscode": "^1.90.0"
+  },
+  "categories": [
+    "AI",
+    "Chat"
+  ],
+  "keywords": [
+    "zycode",
+    "agent",
+    "acp",
+    "coding agent",
+    "langchain"
+  ],
+  "extensionKind": [
+    "workspace"
+  ],
+  "capabilities": {
+    "untrustedWorkspaces": {
+      "supported": false,
+      "description": "zycode runs an agent that reads and writes files and runs commands in your folder."
+    },
+    "virtualWorkspaces": {
+      "supported": false,
+      "description": "zycode runs a program on the machine that holds your folder. A virtual workspace has no such folder."
+    }
+  },
+  "activationEvents": [
+    "onView:zycode.chat",
+    "onView:zycode.sessions"
+  ],
+  "main": "./dist/extension.js",
+  "contributes": {
+    "commands": [
+      {
+        "command": "zycode.openChat",
+        "title": "Open chat",
+        "category": "zycode"
+      },
+      {
+        "command": "zycode.newChat",
+        "title": "New chat",
+        "category": "zycode",
+        "icon": "$(add)"
+      },
+      {
+        "command": "zycode.stop",
+        "title": "Stop",
+        "category": "zycode"
+      },
+      {
+        "command": "zycode.restartAgent",
+        "title": "Restart agent",
+        "category": "zycode"
+      },
+      {
+        "command": "zycode.runSetup",
+        "title": "Set up model and API key",
+        "category": "zycode"
+      },
+      {
+        "command": "zycode.openGuide",
+        "title": "Open the getting-started guide",
+        "category": "zycode"
+      },
+      {
+        "command": "zycode.openAgentConfig",
+        "title": "Open agent.toml",
+        "category": "zycode"
+      },
+      {
+        "command": "zycode.showLog",
+        "title": "Show log",
+        "category": "zycode"
+      },
+      {
+        "command": "zycode.refreshSessions",
+        "title": "Refresh past chats",
+        "category": "zycode",
+        "icon": "$(refresh)"
+      },
+      {
+        "command": "zycode.openSession",
+        "title": "Open chat",
+        "category": "zycode"
+      },
+      {
+        "command": "zycode.deleteSession",
+        "title": "Delete chat",
+        "category": "zycode",
+        "icon": "$(trash)"
+      }
+    ],
+    "configuration": {
+      "title": "zycode",
+      "properties": {
+        "zycode.agentPath": {
+          "type": "string",
+          "default": "",
+          "scope": "machine",
+          "markdownDescription": "Absolute path of a program (or a program name found on `PATH`) to run instead of the `zycode-agent` binary in this extension. Leave empty to use the bundled binary."
+        },
+        "zycode.agentArgs": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "default": [],
+          "scope": "machine",
+          "markdownDescription": "Arguments for `#zycode.agentPath#`. For a Python install: path `python`, arguments `[\"-m\", \"pi_agent_cli\"]`."
+        },
+        "zycode.permissionMode": {
+          "type": "string",
+          "enum": [
+            "ask",
+            "auto"
+          ],
+          "enumDescriptions": [
+            "Ask before every action that is not read-only.",
+            "Run actions that are clearly in scope. Ask about the rest. Auto is not a sandbox: it guards what a call writes or runs, not what it reads or sends."
+          ],
+          "default": "ask",
+          "scope": "application",
+          "markdownDescription": "The mode of a start: which tool calls the agent runs without asking. The extension sets it for each session through the `mode` option of the agent. It overrides `permission` in `agent.toml`, including `always-approve`. This setting offers `ask` and `auto` only: **Always approve** is chosen in the mode menu of the chat, after a warning, and it is never restored for a new chat or after a restart. An agent without a `mode` option keeps the mode of `agent.toml`. `auto` can send your messages and some `bash` commands to a model (see the README)."
+        },
+        "zycode.showThinking": {
+          "type": "boolean",
+          "default": true,
+          "scope": "window",
+          "description": "Show the thinking blocks of the model in the chat (collapsed)."
+        }
+      }
+    },
+    "viewsContainers": {
+      "activitybar": [
+        {
+          "id": "zycode",
+          "title": "zycode",
+          "icon": "media/zycode.svg"
+        }
+      ]
+    },
+    "views": {
+      "zycode": [
+        {
+          "type": "webview",
+          "id": "zycode.chat",
+          "name": "Chat",
+          "icon": "media/zycode.svg"
+        },
+        {
+          "id": "zycode.sessions",
+          "name": "Past chats",
+          "icon": "media/zycode.svg",
+          "contextualTitle": "zycode: past chats"
+        }
+      ]
+    },
+    "menus": {
+      "commandPalette": [
+        {
+          "command": "zycode.openSession",
+          "when": "false"
+        },
+        {
+          "command": "zycode.deleteSession",
+          "when": "false"
+        }
+      ],
+      "view/title": [
+        {
+          "command": "zycode.newChat",
+          "when": "view == zycode.sessions",
+          "group": "navigation@1"
+        },
+        {
+          "command": "zycode.refreshSessions",
+          "when": "view == zycode.sessions",
+          "group": "navigation@2"
+        }
+      ],
+      "view/item/context": [
+        {
+          "command": "zycode.deleteSession",
+          "when": "view == zycode.sessions && viewItem == zycode.session",
+          "group": "inline"
+        },
+        {
+          "command": "zycode.deleteSession",
+          "when": "view == zycode.sessions && viewItem == zycode.session",
+          "group": "1_modification"
+        }
+      ]
+    },
+    "walkthroughs": [
+      {
+        "id": "zycode.gettingStarted",
+        "title": "Get started with zycode",
+        "description": "Open a folder, save a model and a key, and say hello. You can open this guide again at any time.",
+        "steps": [
+          {
+            "id": "openFolder",
+            "title": "Open a folder",
+            "description": "zycode works in the folder that is open in VS Code. Open a folder that you trust.\n[Open folder](command:workbench.action.files.openFolder)",
+            "media": {
+              "markdown": "media/walkthrough/open-folder.md"
+            },
+            "completionEvents": [
+              "onContext:workspaceFolderCount >= 1"
+            ]
+          },
+          {
+            "id": "setup",
+            "title": "Choose a model and save your key",
+            "description": "The setup asks for a provider, a model id and an API key in a terminal. The key stays in the agent's own folder.\n[Run setup](command:zycode.runSetup)",
+            "media": {
+              "markdown": "media/walkthrough/setup.md"
+            },
+            "completionEvents": [
+              "onCommand:zycode.runSetup"
+            ]
+          },
+          {
+            "id": "chat",
+            "title": "Say hello",
+            "description": "Write a message in the zycode view.\n[Open chat](command:zycode.openChat)",
+            "media": {
+              "markdown": "media/walkthrough/chat.md"
+            },
+            "completionEvents": [
+              "onCommand:zycode.openChat"
+            ]
+          },
+          {
+            "id": "modes",
+            "title": "Choose how much zycode asks",
+            "description": "Ask, Auto or Always approve. A new chat starts in Ask or Auto.\n[Open the setting](command:workbench.action.openSettings?%5B%22zycode.permissionMode%22%5D)",
+            "media": {
+              "markdown": "media/walkthrough/modes.md"
+            }
+          },
+          {
+            "id": "history",
+            "title": "Find your past chats",
+            "description": "The Past chats list shows the chats of this folder. Select one to open it.\n[Show past chats](command:zycode.sessions.focus)",
+            "media": {
+              "markdown": "media/walkthrough/history.md"
+            }
+          },
+          {
+            "id": "trouble",
+            "title": "If something does not work",
+            "description": "A key that is not accepted, a wrong model id, a server that cannot be reached.\n[Open agent.toml](command:zycode.openAgentConfig)\n[Show log](command:zycode.showLog)",
+            "media": {
+              "markdown": "media/walkthrough/trouble.md"
+            }
+          }
+        ]
+      }
+    ]
+  },
+  "scripts": {
+    "build": "node esbuild.mjs",
+    "typecheck": "tsc --noEmit -p tsconfig.json && tsc --noEmit -p src/webview/tsconfig.json",
+    "lint": "eslint .",
+    "test": "vitest run",
+    "test:agent": "ZYCODE_REAL_AGENT=1 vitest run test/real-agent.test.ts test/real-first-run.test.ts test/real-thinking.test.ts",
+    "check": "npm run typecheck && npm run lint && npm test",
+    "package": "node scripts/package.mjs",
+    "package:all": "node scripts/package.mjs all",
+    "notices": "node esbuild.mjs --production --metafile && node scripts/notices.mjs",
+    "smoke:vsix": "node scripts/smoke-vsix.mjs",
+    "icon": "node scripts/make-icon.mjs"
+  },
+  "devDependencies": {
+    "@agentclientprotocol/sdk": "2.4.0",
+    "@types/markdown-it": "^14.2.0",
+    "@types/node": "^22.20.5",
+    "@types/vscode": "~1.90.0",
+    "@vscode/vsce": "^4.1.0",
+    "esbuild": "^0.25.12",
+    "eslint": "^9.39.5",
+    "markdown-it": "15.0.3",
+    "markdown-it-cjk-friendly": "3.0.0",
+    "ovsx": "1.4.0",
+    "smol-toml": "1.9.1",
+    "typescript": "^5.9.3",
+    "typescript-eslint": "^8.72.1",
+    "vitest": "^3.2.7"
+  }
+}

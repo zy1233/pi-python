@@ -153,14 +153,14 @@ After installing, set up config and start the TUI — see [TUI & Code-Agent Guid
 
 ### VS Code extension
 
-The extension `zycode.zycode` ([`packages/pi-vscode`](packages/pi-vscode/README.md)) puts the zycode agent in a chat view in VS Code. It has the agent program inside, so you do not install the Python agent first. It is unofficial and not affiliated with pi or Microsoft.
+The extension `zycode.zycode` ([`vscode`](vscode/README.md)) puts the zycode agent in a chat view in VS Code. It has the agent program inside, so you do not install the Python agent first. It is unofficial and not affiliated with pi or Microsoft.
 
 - **VS Code:** install it from the [Visual Studio Marketplace](https://marketplace.visualstudio.com/items?itemName=zycode.zycode), or run `code --install-extension zycode.zycode`.
 - **VSCodium and other editors that use Open VSX:** install it from [Open VSX](https://open-vsx.org/extension/zycode/zycode).
 - **Platforms:** version 1.0.0 is published on both registries for five platforms: `linux-x64`, `linux-arm64`, `darwin-arm64`, `darwin-x64` and `win32-x64`. Each one has the agent program inside.
 - **What it has:** a chat view with a question card for each tool call that is not read-only; a **Show diff** button for `write` and `edit`; a getting-started guide and help for the first start (the setup runs in a VS Code terminal); a **Past chats** view; a mode menu (**Ask**, **Auto** and **Always approve**); and a **Thinking** menu.
-- **Auto is not a sandbox.** It guards what a call writes or runs. It does not guard what a call reads or sends. Use a container or a virtual machine if you need a boundary. See the [extension README](packages/pi-vscode/README.md) for the three modes.
-- **Limits:** the bundled agent is not code-signed, and it has only the OpenAI-format provider. The repository lists Windows and macOS as not verified. An install of 1.0.0 in a real VS Code is not measured yet. The release record is in [`RELEASING.md`](packages/pi-vscode/RELEASING.md).
+- **Auto is not a sandbox.** It guards what a call writes or runs. It does not guard what a call reads or sends. Use a container or a virtual machine if you need a boundary. See the [extension README](vscode/README.md) for the three modes.
+- **Limits:** the bundled agent is not code-signed, and it has only the OpenAI-format provider. The repository lists Windows and macOS as not verified. An install of 1.0.0 in a real VS Code is not measured yet. The release record is in [`RELEASING.md`](vscode/RELEASING.md).
 
 ### In Zed (custom agent)
 
