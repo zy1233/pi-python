@@ -1,5 +1,5 @@
 // Opens a VSIX and checks what the packaging promises (docs/specs/2026-11-04-vscode-extension-design.md, section 11).
-//   node scripts/check-vsix.mjs out/zycode-linux-x64-0.1.0.vsix
+//   node scripts/check-vsix.mjs out/zycode-linux-x64-*.vsix
 import { readFileSync } from "node:fs";
 import path from "node:path";
 

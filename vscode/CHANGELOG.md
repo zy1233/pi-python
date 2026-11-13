@@ -1,6 +1,8 @@
 # Changelog
 
-## Unreleased
+## 1.2.0 (2026-11-13)
+
+Stable release. It follows 1.0.0 and has the same bundled agent (0.9.1). A user of 1.0.0 gets it as an update.
 
 ### New
 

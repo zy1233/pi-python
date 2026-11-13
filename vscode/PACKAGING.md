@@ -23,7 +23,7 @@ The files in `out/` are ready for a hand upload. Do not edit them.
 ## Test a VSIX
 
 ```
-node scripts/smoke-vsix.mjs out/zycode-linux-x64-1.0.0.vsix
+node scripts/smoke-vsix.mjs out/zycode-linux-x64-*.vsix
 ```
 
 It unpacks the agent from the VSIX and starts it with a new home folder for each of three checks:
@@ -34,7 +34,7 @@ It unpacks the agent from the VSIX and starts it with a new home folder for each
 
 Checks 2 and 3 are what the extension does for its mode menu and its Past chats view. Use a VSIX of the platform that you run on.
 
-To try a VSIX in VS Code: `code --install-extension out/zycode-linux-x64-1.0.0.vsix`.
+To try a VSIX in VS Code: `code --install-extension out/zycode-linux-x64-*.vsix`.
 
 ## Publish
 

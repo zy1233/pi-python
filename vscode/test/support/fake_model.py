@@ -19,7 +19,7 @@ import sys
 from http.server import ThreadingHTTPServer
 from pathlib import Path
 
-REPO = Path(__file__).resolve().parents[4]
+REPO = Path(__file__).resolve().parents[3]
 sys.path.insert(0, str(REPO / "packaging" / "agent"))
 
 import smoke  # noqa: E402
