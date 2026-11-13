@@ -8,7 +8,7 @@ import { afterEach, describe, expect, it } from "vitest";
 import { TestHost, newController, ofType, tempDir, waitFor } from "./helpers.js";
 
 const here = path.dirname(fileURLToPath(import.meta.url));
-const repo = path.resolve(here, "../../..");
+const repo = path.resolve(here, "../..");
 const python = process.env.ZYCODE_REAL_AGENT_PYTHON ?? path.join(repo, ".venv", "bin", "python");
 const script = path.join(repo, "packages", "pi-agent-cli", "tests", "_tool_agent.py");
 const enabled = process.env.ZYCODE_REAL_AGENT === "1" && existsSync(python) && existsSync(script);

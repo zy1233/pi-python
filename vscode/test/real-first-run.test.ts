@@ -12,7 +12,7 @@ import type { SessionRow } from "../src/core/session-list.js";
 import { TestHost, newController, ofType, tempDir, waitFor, type TestHostOptions } from "./helpers.js";
 
 const here = path.dirname(fileURLToPath(import.meta.url));
-const repo = path.resolve(here, "../../..");
+const repo = path.resolve(here, "../..");
 const python = process.env.ZYCODE_REAL_AGENT_PYTHON ?? path.join(repo, ".venv", "bin", "python");
 const enabled = process.env.ZYCODE_REAL_AGENT === "1" && existsSync(python) && process.platform !== "win32";
 

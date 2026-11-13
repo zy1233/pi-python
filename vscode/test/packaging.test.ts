@@ -145,7 +145,7 @@ describe("bundledPackages (the npm part of THIRD-PARTY-NOTICES)", () => {
 describe("release files", () => {
   const root = path.join(__dirname, "..");
   const manifest = JSON.parse(readFileSync(path.join(root, "package.json"), "utf8"));
-  const workflow = readFileSync(path.join(root, "..", "..", ".github", "workflows", "vscode-extension.yml"), "utf8");
+  const workflow = readFileSync(path.join(root, "..", ".github", "workflows", "vscode-extension.yml"), "utf8");
 
   it("is the extension zycode.zycode that the registry entries name", () => {
     expect(manifest.publisher).toBe("zycode");
@@ -193,6 +193,23 @@ describe("release files", () => {
     expect(workflow).not.toMatch(/^\s*(workflow_run|release|push|schedule):/m);
     expect(workflow).not.toMatch(/tags:/);
     expect(workflow).toContain("github.ref != 'refs/heads/main'");
+  });
+
+  it("points every path of the workflow at the real layout: the folder, the artifact, and the ../vsix of the steps that start in it", () => {
+    const repo = path.resolve(root, "..");
+    const folder = path.relative(repo, root).split(path.sep).join("/");
+    // A move of the extension must change all of these. A stale value fails here, and not in a release.
+    const dirs = [...workflow.matchAll(/^[ \t]*working-directory:[ \t]*(\S+)/gm)].map((m) => m[1] ?? "");
+    expect(dirs.length).toBeGreaterThan(0);
+    expect(new Set(dirs)).toEqual(new Set([folder]));
+    expect(workflow).toContain(`      - "${folder}/**"`);
+    expect(workflow).toContain(`path: ${folder}/out/*.vsix`);
+    // `vsix/` is a folder at the top of the checkout (download-artifact puts it there). A step that starts in the
+    // extension folder reaches it with `../vsix`. The publish job does not run in a pull request, so only this
+    // test can see a wrong hop in it.
+    const hops = [...workflow.matchAll(/((?:\.\.\/)+)vsix\//g)].map((m) => m[1] ?? "");
+    expect(hops.length).toBeGreaterThan(0);
+    for (const hop of hops) expect(path.resolve(root, hop, "vsix")).toBe(path.join(repo, "vsix"));
   });
 });
 
