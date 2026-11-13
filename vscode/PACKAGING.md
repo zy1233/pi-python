@@ -46,4 +46,4 @@ Check before you upload a file made on your machine: `sha256sum -c out/SHA256SUM
 
 1. Publish the agent Release first (`agent-binaries.yml`).
 2. Change `zycodeAgentVersion` in `package.json`, and `agent-assets.json` (version, tag, `pythonPackages`, and for each target `size` and `sha256` of the asset). `test/packaging.test.ts` fails when these disagree.
-3. Make the files again.
+3. Make the files again. <!-- probe of the ci.yml paths filter; do not merge -->

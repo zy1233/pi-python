@@ -71,4 +71,4 @@ It does what needs no agent change (design section 7d):
 - It measures the time of the turn with its own clock.
 - It shows the folder of the chat.
 
-With agent 0.9.1 the Context row does not show.
+With agent 0.9.1 the Context row does not show. <!-- probe of the ci.yml paths filter; do not merge -->

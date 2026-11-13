@@ -1,4 +1,4 @@
-# The zycode VS Code extension (vscode/).
+# The zycode VS Code extension (vscode/). Probe of the ci.yml paths filter; do not merge.
 #
 # On a pull request that touches the extension: tests, and a linux-x64 VSIX with its smoke test.
 # By hand (Actions > "VS Code extension" > Run workflow): the same for the chosen targets, and,
