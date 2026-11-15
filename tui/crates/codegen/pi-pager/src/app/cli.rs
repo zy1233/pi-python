@@ -248,14 +248,10 @@ pub struct PagerArgs {
     /// Skip AGENTS.md / CLAUDE.md context file discovery (headless only).
     #[clap(long = "no-context-files", hide = true)]
     pub no_context_files: bool,
-    /// Compaction mode [summary|transcript|segments]: `summary` (default) adds
-    /// no pointer; `transcript` points at the raw transcript; `segments`
-    /// persists per-segment markdown to grep. Sets `GROK_COMPACTION_MODE`.
+    /// Legacy compatibility flag for compaction mode [summary|transcript|segments].
     #[clap(long = "compaction-mode", value_name = "MODE", hide = true)]
     pub compaction_mode: Option<String>,
-    /// Segments verbatim detail [none|minimal|balanced|verbose] (default
-    /// `verbose`). Only affects `--compaction-mode segments`. Sets
-    /// `GROK_COMPACTION_DETAIL`.
+    /// Legacy compatibility flag for segments verbatim detail [none|minimal|balanced|verbose].
     #[clap(long = "compaction-detail", value_name = "DETAIL", hide = true)]
     pub compaction_detail: Option<String>,
     /// Override the agent's system prompt (-p only; an interactive session reads

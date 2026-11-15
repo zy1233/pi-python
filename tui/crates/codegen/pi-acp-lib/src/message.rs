@@ -83,6 +83,10 @@ impl<T: AcpRequest, S: StorageMarker> AcpMethod for AcpArgsGeneric<T, S> {
     fn method_name(&self) -> &'static str {
         self.request.borrow().method_name()
     }
+
+    fn ext_name(&self) -> Option<&str> {
+        self.request.borrow().ext_name()
+    }
 }
 
 #[allow(type_alias_bounds)]
@@ -245,6 +249,14 @@ mod client {
                 Self::KillTerminalCommand(a) => a.method_name(),
                 Self::ExtMethod(a) => a.method_name(),
                 Self::ExtNotification(a) => a.method_name(),
+            }
+        }
+
+        fn ext_name(&self) -> Option<&str> {
+            match self {
+                Self::ExtMethod(a) => a.ext_name(),
+                Self::ExtNotification(a) => a.ext_name(),
+                _ => None,
             }
         }
     }
@@ -477,6 +489,14 @@ mod agent {
                 Self::ExtNotification(a) => a.method_name(),
                 Self::SetSessionModel(a) => a.method_name(),
                 Self::SetSessionConfigOption(a) => a.method_name(),
+            }
+        }
+
+        fn ext_name(&self) -> Option<&str> {
+            match self {
+                Self::ExtMethod(a) => a.ext_name(),
+                Self::ExtNotification(a) => a.ext_name(),
+                _ => None,
             }
         }
     }

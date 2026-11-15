@@ -10,8 +10,8 @@
 //! `_meta.yoloMode` / `_meta.autoMode`. What the other modes do against the real `zypi` is in the
 //! plan (section 10.11, appendix A, 1.P3) and in `scripts/tui_pty/mode_probe.py`:
 //!
-//! - **Plan** restricts nothing. `session/set_mode` has no handler on the Python side, so the call
-//!   fails and is only logged, while the UI goes on saying `plan`.
+//! - **Plan** restricts nothing. `session/set_mode` rejects `plan` with `invalid_params` on the
+//!   Python side, so the call fails and is only logged, while the UI goes on saying `plan`.
 //! - **Default** is dropped by Python (`default` is not one of the three values it recognises in
 //!   `pi/yolo_mode_changed`): after Always-Approve it shows Default and the agent still never asks.
 //!

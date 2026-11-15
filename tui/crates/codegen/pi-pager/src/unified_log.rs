@@ -17,18 +17,13 @@ fn now_ts() -> String {
     chrono::Utc::now().to_rfc3339_opts(chrono::SecondsFormat::Millis, true)
 }
 
-fn make_entry(
-    lvl: LogLevel,
-    msg: &str,
-    sid: Option<&str>,
-    ctx: Option<serde_json::Value>,
-) -> ClientLogEntry {
+fn make_entry(msg: &str, ctx: Option<serde_json::Value>) -> ClientLogEntry {
     ClientLogEntry {
         ts: now_ts(),
         pid: Some(std::process::id()),
         ver: Some(pi_version::VERSION.to_owned()),
-        lvl,
-        sid: sid.map(Into::into),
+        lvl: LogLevel::Info,
+        sid: None,
         msg: msg.into(),
         ctx,
     }
@@ -39,7 +34,7 @@ fn make_entry(
 pub fn write_direct_info(msg: &str, ctx: Option<serde_json::Value>) {
     pi_telemetry::unified_log::ingest_client_entries(
         LogSource::GrokPager,
-        &[make_entry(LogLevel::Info, msg, None, ctx)],
+        &[make_entry(msg, ctx)],
     );
 }
 

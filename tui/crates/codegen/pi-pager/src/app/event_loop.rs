@@ -896,6 +896,7 @@ pub(crate) async fn run(
     terminal: &mut PagerTerminal,
     connection: crate::acp::AcpConnection,
     pending_startup: pi_telemetry::startup::PendingStartup,
+    tracing_handle: crate::tracing::TracingHandle,
     config_watcher: &mut ConfigWatcher,
     args: &PagerArgs,
     session_cwd: Option<std::path::PathBuf>,
@@ -904,16 +905,6 @@ pub(crate) async fn run(
     materialized: crate::app::session_startup::MaterializedStartup,
     mut writer_event_rx: tokio::sync::mpsc::UnboundedReceiver<crate::render::draw::WriterEvent>,
 ) -> anyhow::Result<RunResult> {
-    // Initialize tracing capture. The channel `rx` will be wired to a
-    // TracingModel (and ultimately a tracing pane) once integrated.
-    // For now we drain-and-discard in `AppView::tick()` to avoid unbounded
-    // memory growth.
-    if args.log_sampling {
-        // SAFETY: called before any threads are spawned by init_tracing.
-        unsafe { std::env::set_var("GROK_LOG_SAMPLING", "1") };
-    }
-    let tracing_handle = crate::tracing::init_tracing();
-
     crate::unified_log::info("pager started", None, None);
     pi_telemetry::startup::enter(pi_telemetry::startup::StartupPhase::AppInit);
     let mut app = AppView::new(

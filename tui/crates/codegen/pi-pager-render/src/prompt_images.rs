@@ -1533,13 +1533,29 @@ pub fn load_for_send(img: &PastedImage) -> Option<(Vec<u8>, String)> {
 ///
 /// Path validation, extension allowlist, and the 50-MB size cap come
 /// from the shared helper so the TUI and the server use the same rules.
+/// Canonical prefixes allowed for orphan `[Image #N: <path>]` recovery in a workspace:
+/// [`pi_shared::placeholder_images::default_allowed_prefixes`] plus `<home>/pager-cache` when it
+/// exists on disk.
+fn allowed_prefixes_with_pager_cache_in(
+    workspace_cwd: &std::path::Path,
+    grok_home: &std::path::Path,
+) -> Vec<std::path::PathBuf> {
+    let mut prefixes = pi_shared::placeholder_images::default_allowed_prefixes(workspace_cwd);
+    if let Ok(cache) = dunce::canonicalize(grok_home.join(PAGER_CACHE_DIR)) {
+        prefixes.push(cache);
+        prefixes.sort();
+        prefixes.dedup();
+    }
+    prefixes
+}
+
 pub fn build_content_blocks_with_workspace(
     text: String,
     images: Vec<PastedImage>,
     workspace_cwd: Option<&std::path::Path>,
 ) -> Vec<agent_client_protocol::ContentBlock> {
     let allowed: Option<Vec<std::path::PathBuf>> =
-        workspace_cwd.map(pi_shared::placeholder_images::default_allowed_prefixes);
+        workspace_cwd.map(|cwd| allowed_prefixes_with_pager_cache_in(cwd, &pi_config::grok_home()));
     build_content_blocks_with_prefixes(text, images, allowed.as_deref())
 }
 
@@ -2072,6 +2088,39 @@ mod tests {
         assert!(kept.join("mermaid").join("a.png").exists());
         // Nothing there is not an error.
         remove_session_cache_in(home.path(), "s1").unwrap();
+    }
+
+    #[test]
+    fn orphan_placeholder_in_pager_cache_is_allowed_while_home_root_stays_out() {
+        let home = tempfile::tempdir().unwrap();
+        let workspace = tempfile::tempdir().unwrap();
+        let images_dir = session_cache_dir_in(home.path(), "s1")
+            .unwrap()
+            .join("images");
+        std::fs::create_dir_all(&images_dir).unwrap();
+        let cached = images_dir.join("pasted.png");
+        let outside = home.path().join("other.png");
+        let png = make_test_png(20, 20);
+        std::fs::write(&cached, &png).unwrap();
+        std::fs::write(&outside, &png).unwrap();
+
+        let allowed = allowed_prefixes_with_pager_cache_in(workspace.path(), home.path());
+        let text = format!(
+            "[Image #1: {}] [Image #2: {}]",
+            dunce::canonicalize(&cached).unwrap().display(),
+            dunce::canonicalize(&outside).unwrap().display(),
+        );
+        let blocks = build_content_blocks_with_prefixes(text, vec![], Some(&allowed));
+
+        assert_eq!(blocks.len(), 2, "only the pager-cache image may recover");
+        let agent_client_protocol::ContentBlock::Image(ic) = &blocks[1] else {
+            panic!("expected recovered Image block");
+        };
+        assert!(
+            ic.uri.as_deref().unwrap().contains("pasted.png"),
+            "got {:?}",
+            ic.uri
+        );
     }
 
     /// An id that climbs out of the cache directory must remove nothing: `remove_dir_all` runs

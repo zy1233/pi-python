@@ -21,12 +21,21 @@ fn grok_home_in(home: &Path) -> PathBuf {
         .join(".pi-python")
 }
 
-/// `$PI_HOME` or `$GROK_HOME` verbatim when non-empty, else `<home>/.pi-python`.
+/// `$PI_HOME` or `$GROK_HOME` verbatim when non-empty (expanding a leading `~`, `~/`, or `~\`
+/// when `os_home` resolves), else `<home>/.pi-python`.
 fn resolve_grok_home_from(
     grok_home_env: Option<&OsStr>,
     os_home: Option<&Path>,
 ) -> Option<PathBuf> {
     if let Some(env) = grok_home_env.filter(|env| !env.is_empty()) {
+        if let Some((home, s)) = os_home.zip(env.to_str()) {
+            if s == "~" {
+                return Some(home.to_path_buf());
+            }
+            if let Some(rest) = s.strip_prefix("~/").or_else(|| s.strip_prefix(r"~\")) {
+                return Some(home.join(rest));
+            }
+        }
         return Some(PathBuf::from(env));
     }
     os_home.map(grok_home_in)
@@ -78,6 +87,22 @@ mod tests {
         let resolved =
             resolve_grok_home_from(Some(OsStr::new("/custom/home")), Some(Path::new("/home/u")));
         assert_eq!(resolved, Some(PathBuf::from("/custom/home")));
+    }
+
+    #[test]
+    fn env_tilde_expands_against_os_home() {
+        assert_eq!(
+            resolve_grok_home_from(Some(OsStr::new("~")), Some(Path::new("/home/u"))),
+            Some(PathBuf::from("/home/u"))
+        );
+        assert_eq!(
+            resolve_grok_home_from(Some(OsStr::new("~/.pi-custom")), Some(Path::new("/home/u"))),
+            Some(PathBuf::from("/home/u").join(".pi-custom"))
+        );
+        assert_eq!(
+            resolve_grok_home_from(Some(OsStr::new(r"~\.pi-custom")), Some(Path::new("/home/u"))),
+            Some(PathBuf::from("/home/u").join(".pi-custom"))
+        );
     }
 
     #[test]

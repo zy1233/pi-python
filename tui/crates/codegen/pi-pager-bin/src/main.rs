@@ -400,7 +400,7 @@ fn refuse_interactive_flags(args: &PagerArgs) -> Option<i32> {
 
 /// Phase 4 P3: `pi -p` is pure Python headless, not grok `run_headless`.
 fn dispatch_python_print(args: &PagerArgs) -> Option<i32> {
-    if args.command.is_some() {
+    if args.version || args.command.is_some() {
         return None;
     }
     if args.single.is_none() && args.prompt_json.is_none() && args.prompt_file.is_none() {
@@ -476,11 +476,11 @@ fn main() {
     }
     set_release_channel(ReleaseChannel::from_label(NO_CHANNEL_LABEL));
     let args = PagerArgs::parse_cli();
-    if let Some(code) = dispatch_python_print(&args) {
-        std::process::exit(code);
-    }
     if dispatch_version_if_requested(&args) || dispatch_doctor_if_requested(&args) {
         return;
+    }
+    if let Some(code) = dispatch_python_print(&args) {
+        std::process::exit(code);
     }
     if let Some(code) = refuse_interactive_flags(&args) {
         std::process::exit(code);
@@ -569,12 +569,6 @@ fn main() {
 async fn async_main(args: PagerArgs) -> Result<()> {
     pi_extra_ca::ensure_default_crypto_provider();
     let mut args = args.apply_cwd()?;
-    if let Some(ref mode) = args.compaction_mode {
-        unsafe { std::env::set_var("GROK_COMPACTION_MODE", mode) };
-    }
-    if let Some(ref detail) = args.compaction_detail {
-        unsafe { std::env::set_var("GROK_COMPACTION_DETAIL", detail) };
-    }
     if let Some(ref path) = args.debug_file {
         unsafe {
             std::env::set_var("PI_DEBUG_LOG", path);
@@ -781,6 +775,9 @@ mod tests {
             subcommand.command,
             Some(Command::Version { json: false })
         ));
+        let with_print = PagerArgs::try_parse_from(["zypi", "-p", "hi", "-v"]).unwrap();
+        assert!(with_print.version);
+        assert_eq!(dispatch_python_print(&with_print), None);
     }
     #[cfg(all(feature = "jemalloc", unix))]
     struct TempHeapDump(std::path::PathBuf);

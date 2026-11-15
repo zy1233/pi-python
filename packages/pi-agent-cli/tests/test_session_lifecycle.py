@@ -117,3 +117,24 @@ async def test_deleting_a_session_stops_the_turn_in_flight(tmp_path: Path):
 
     response = await asyncio.wait_for(turn, 5)
     assert response.stop_reason == "cancelled"
+
+
+async def test_deleting_an_open_session_forgets_its_model_cwd_and_cancels_auto(tmp_path: Path):
+    from pi_agent_core.tests.mock_stream import mock_text_stream
+
+    agent = _agent(tmp_path, mock_text_stream)
+    session_id = await _new_session(agent, tmp_path)
+    auto = agent._autos[session_id]
+    cancelled: list[str] = []
+    orig_cancel = auto.cancel
+    auto.cancel = lambda: (cancelled.append(session_id), orig_cancel())  # type: ignore[method-assign]
+    assert session_id in agent._session_models
+    assert session_id in agent._session_cwds
+
+    await agent.ext_method("pi/session/delete", {"sessionId": session_id})
+
+    assert cancelled == [session_id]
+    assert session_id not in agent._session_models
+    assert session_id not in agent._session_cwds
+    assert session_id not in agent._autos
+    assert session_id not in agent._session_modes
