@@ -520,6 +520,11 @@ async fn bounded_resolve(
 ///
 pub async fn run(args: PagerArgs) -> anyhow::Result<()> {
     pi_tty_utils::redirect_native_stderr();
+    if args.log_sampling {
+        // SAFETY: called before any threads are spawned by init_tracing.
+        unsafe { std::env::set_var("GROK_LOG_SAMPLING", "1") };
+    }
+    let tracing_handle = crate::tracing::init_tracing();
     let screen_mode_override = screen_mode_relaunch::take_screen_mode_env_override();
     let cancel = CancellationToken::new();
     let startup_start = std::time::Instant::now();
@@ -681,13 +686,6 @@ pub async fn run(args: PagerArgs) -> anyhow::Result<()> {
         );
     }
     let connect_target = crate::acp::AgentKind::Embedded;
-    pi_telemetry::external::init(pi_shell::agent::config::resolve_external_otel_config(
-        pi_telemetry::external::config::ExternalClientInfo {
-            service_version: pi_version::full_version().to_owned(),
-            client_version: pi_version::VERSION.to_owned(),
-            app_entrypoint: "tui".to_owned(),
-        },
-    ));
     let pending_startup = pi_telemetry::startup::PendingStartup::new();
     let timer = pi_telemetry::startup::begin(crate::acp::Owner::Client);
     let connect_result =
@@ -706,6 +704,7 @@ pub async fn run(args: PagerArgs) -> anyhow::Result<()> {
             conn
         }
         Err(f) => {
+            tracing::error!(outcome = ?f.outcome, error = %f.error, "Connect failed");
             timer.emit_telemetry(connect_target, f.outcome, f.timeout_secs, false);
             if f.outcome == crate::acp::StartupOutcome::Cancelled {
                 pending_startup.abandon();
@@ -770,6 +769,7 @@ pub async fn run(args: PagerArgs) -> anyhow::Result<()> {
         &mut terminal,
         connection,
         pending_startup,
+        tracing_handle,
         &mut config_watcher,
         &effective_args,
         session_cwd,

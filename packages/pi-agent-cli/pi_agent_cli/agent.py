@@ -441,8 +441,10 @@ class PiAcpAgent(Agent):
             field_meta=self._session_response_meta(session_id),
         )
 
-    async def close_session(self, session_id: str, **kwargs: Any) -> CloseSessionResponse | None:
+    def _release_session(self, session_id: str) -> AgentHarness | None:
+        """Forget the in-memory state of *session_id* and return its harness, if any."""
         self._session_models.pop(session_id, None)
+        self._session_cwds.pop(session_id, None)
         self._reserved_ids.discard(session_id)
         harness = self._harnesses.pop(session_id, None)
         self._permission_locks.pop(session_id, None)
@@ -452,6 +454,10 @@ class PiAcpAgent(Agent):
         if auto is not None:
             auto.cancel()
         self._forget_mode(session_id)
+        return harness
+
+    async def close_session(self, session_id: str, **kwargs: Any) -> CloseSessionResponse | None:
+        harness = self._release_session(session_id)
         if harness is not None:
             await harness.close()
         return CloseSessionResponse()
@@ -579,12 +585,7 @@ class PiAcpAgent(Agent):
                 )
             session_id = session_id_raw.strip()
             metadata = await self._find_metadata(session_id)
-            harness = self._harnesses.pop(session_id, None)
-            self._reserved_ids.discard(session_id)
-            self._permission_locks.pop(session_id, None)
-            self._drop_trust(session_id)
-            self._forget_notices(session_id)
-            self._forget_mode(session_id)
+            harness = self._release_session(session_id)
             if harness is not None:
                 # Deleting ends the session, like ``session/close``: stop the turn, then run
                 # the extensions' cleanup (background workflows, worktrees).

@@ -473,6 +473,34 @@ def test_a_cfg_test_on_a_single_item_does_not_hide_the_code_after_it(tmp_path):
     assert _scan(tui) == ["crates/codegen/pi-pager/src/a.rs:7: list_summaries();"]
 
 
+def test_indented_or_single_line_cfg_test_module_does_not_hide_following_code(tmp_path):
+    """Audit R2-4: an indented or one-line `#[cfg(test)] mod tests` must not swallow the rest of
+    the file, and comments between `#[cfg(test)]` and `mod tests {` must not break the skip."""
+    text = (
+        "mod inner {\n"
+        "    #[cfg(test)]\n"
+        "    // comment between attribute and mod\n"
+        "    mod tests { // trailing comment\n"
+        "        fn t() {\n"
+        "            list_summaries();\n"
+        "        }\n"
+        "    } // end tests\n"
+        "    pub fn prod_in_inner() {\n"
+        "        list_summaries();\n"
+        "    }\n"
+        "}\n"
+        "#[cfg(test)] mod empty_tests {}\n"
+        "pub fn prod_after_empty() {\n"
+        '    let d = h.join("sessions");\n'
+        "}\n"
+    )
+    tui = _crate(tmp_path, {"a.rs": text})
+    assert _scan(tui) == [
+        "crates/codegen/pi-pager/src/a.rs:10: list_summaries();",
+        'crates/codegen/pi-pager/src/a.rs:15: let d = h.join("sessions");',
+    ]
+
+
 def test_manifest_session_disk_read_gate_is_well_formed():
     gate = _manifest()["gates"]["session_disk_reads"]
     assert gate["crates"] and gate["patterns"]

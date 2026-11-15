@@ -247,8 +247,9 @@ min_passed = 5301
 
 # Lib tests only; they were outside the manifest until r8 (plan section 10.10: 1,092 passed,
 # 2 ignored on Linux, 1.4 s). r45 (audit F-2) replaced 1 test of `prompt_images` with 6, so the
-# reference is 1,097 (1,092 + 5; the Linux number is derived, not measured: the r45 run was on
-# macOS, 1,094 passed, 2 ignored).
+# reference became 1,097 (1,092 + 5). The second audit (2026-11-15, R2-3) added 1 test for the
+# `<home>/pager-cache` orphan placeholder allowlist, so the reference is 1,098 (macOS: 1,095
+# passed, 2 ignored).
 [[test.suite]]
 package = "pi-pager-render"
 targets = ["--lib"]
@@ -258,7 +259,7 @@ targets = ["--lib"]
 # idle or with every core busy. Tolerated rather than skipped: the report still names it when it
 # fails, so a test that fails on every run is visible, but it does not block.
 known_failures = ["tmux_probe::tests::successful_near_deadline_exit_still_returns_captured_output"]
-reference_passed = 1097
+reference_passed = 1098
 min_passed = 1045
 
 # Lib tests only (79 passed on Linux). Its diff-background test used to fail under the default

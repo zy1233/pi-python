@@ -1045,11 +1045,11 @@ pub struct RemoteSettings {
     #[serde(default)]
     pub compaction_wall_clock_budget_secs: Option<u64>,
     /// Compaction mode (`summary` | `transcript` | `segments`) from remote settings.
-    /// Env (`GROK_COMPACTION_MODE`) and user config override it.
+    /// User config overrides it. No environment variable overrides it.
     #[serde(default)]
     pub compaction_mode: Option<String>,
     /// Segments verbatim detail (`none` | `minimal` | `balanced` | `verbose`)
-    /// from remote settings. Env (`GROK_COMPACTION_DETAIL`) and config override it.
+    /// from remote settings. Config overrides it. No environment variable overrides it.
     #[serde(default)]
     pub compaction_detail: Option<String>,
     /// remote settings verbatim-input flag; env (`GROK_COMPACTION_VERBATIM_INPUT`) and config override it. `None` = default (true).

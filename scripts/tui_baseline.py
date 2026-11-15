@@ -295,7 +295,7 @@ def count_residue(root: Path, phrases: Sequence[str]) -> dict[str, int]:
 
 
 TEST_FILE_STEMS = frozenset({"tests", "test_util", "test_fixtures"})
-TEST_MODULE_OPEN_RE = re.compile(r"^(?:pub(?:\([^)]*\))?\s+)?mod\s+\w+\s*\{$")
+TEST_MODULE_OPEN_RE = re.compile(r"^(?:pub(?:\([^)]*\))?\s+)?mod\s+\w+\s*\{\s*\}?$")
 
 
 def is_test_source(relative: Path) -> bool:
@@ -314,30 +314,37 @@ def is_test_source(relative: Path) -> bool:
 def production_lines(text: str) -> Iterator[tuple[int, str]]:
     """`(line number, stripped line)` for the lines of a Rust file that are not test or comment.
 
-    Left out: comment lines, and an inline test module (`#[cfg(test)]`, optionally more attributes,
-    then `mod name {`) up to its closing brace in column 0. A `#[cfg(test)]` on anything else is
-    not special: a `use` or a one-line `mod tests;` declaration holds no code to hide, and
-    skipping to the end of the file would hide the code that follows.
+    Left out: comment lines, and an inline test module (`#[cfg(test)]`, optionally more attributes
+    or comments, then `mod name {`) up to its matching closing brace at the same indentation (or on
+    the same line for `mod name {}`). A `#[cfg(test)]` on anything else is not special: a `use` or
+    a one-line `mod tests;` declaration holds no code to hide, and skipping to the end of the file
+    would hide the code that follows.
     """
     pending_cfg_test = False
-    in_test_module = False
+    test_close: str | None = None
     for number, line in enumerate(text.splitlines(), 1):
         stripped = line.strip()
-        if in_test_module:
-            in_test_module = line.rstrip() != "}"
+        if test_close is not None:
+            if line.split("//", 1)[0].rstrip() == test_close:
+                test_close = None
             continue
-        if stripped == "#[cfg(test)]":
-            pending_cfg_test = True
-            continue
-        if pending_cfg_test:
-            if stripped.startswith("#["):
-                continue
-            pending_cfg_test = False
-            if TEST_MODULE_OPEN_RE.match(stripped):
-                in_test_module = True
-                continue
         if stripped.startswith("//"):
             continue
+        if stripped.startswith("#[cfg(test)]"):
+            stripped = stripped.removeprefix("#[cfg(test)]").strip()
+            pending_cfg_test = True
+            if not stripped:
+                continue
+        if pending_cfg_test:
+            if not stripped or stripped.startswith("#["):
+                continue
+            pending_cfg_test = False
+            code = stripped.split("//", 1)[0].rstrip()
+            if TEST_MODULE_OPEN_RE.match(code):
+                if not code.endswith("}"):
+                    indent = line[: len(line) - len(line.lstrip())]
+                    test_close = f"{indent}}}"
+                continue
         yield number, stripped
 
 

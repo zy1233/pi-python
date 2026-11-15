@@ -161,7 +161,7 @@ pub enum MaterializedStartup {
         /// must send `legacy ext RPC` so agent `[cli] restore_code`
         /// cannot checkout in-place on the new local child. Always `false`
         /// for a session the agent listed (the remote restore path is gone
-        /// from the standard ACP client; plan item 1.P6 removes the rest).
+        /// from the standard ACP client).
         suppress_code_restore: bool,
     },
 }
