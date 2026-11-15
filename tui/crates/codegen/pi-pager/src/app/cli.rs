@@ -136,6 +136,12 @@ pub struct PagerArgs {
     /// Print version
     #[arg(short = 'v', short_alias = 'V', long = "version", action = ArgAction::SetTrue)]
     pub version: bool,
+    /// Choose a model and save its API key in the terminal, then exit.
+    #[arg(
+        long = "setup",
+        conflicts_with_all = &["single", "prompt_json", "prompt_file", "prompt"]
+    )]
+    pub setup: bool,
     /// Working directory.
     #[arg(long)]
     pub cwd: Option<PathBuf>,
@@ -890,5 +896,18 @@ mod tests {
             PagerArgs::try_parse_from(["zypi", "--effort", "high", "--reasoning-effort", "low"])
                 .expect("both effort flag names parse (reverse order)");
         assert_eq!(reverse.reasoning_effort.as_deref(), Some("low"));
+    }
+    #[test]
+    fn setup_flag_parses_and_conflicts_with_prompt_and_single() {
+        let args = PagerArgs::try_parse_from(["zypi", "--setup"]).expect("--setup parses");
+        assert!(args.setup);
+
+        let err_single = PagerArgs::try_parse_from(["zypi", "--setup", "-p", "hello"])
+            .expect_err("--setup + -p must conflict");
+        assert_eq!(err_single.kind(), clap::error::ErrorKind::ArgumentConflict);
+
+        let err_prompt = PagerArgs::try_parse_from(["zypi", "--setup", "positional prompt"])
+            .expect_err("--setup + positional PROMPT must conflict");
+        assert_eq!(err_prompt.kind(), clap::error::ErrorKind::ArgumentConflict);
     }
 }

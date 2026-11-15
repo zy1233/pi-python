@@ -109,11 +109,95 @@ def pack(program: Path, out: Path, target: str, version: str) -> Path:
     return archive
 
 
+def pack_bundle(
+    tui_program: Path,
+    agent_program: Path,
+    out: Path,
+    target: str,
+    version: str,
+) -> Path:
+    out.mkdir(parents=True, exist_ok=True)
+    archive = out / f"zycode-{target}-{version}.tar.gz"
+    with tarfile.open(archive, "w:gz") as tf:
+        for prog, arcname in [(tui_program, "zypi"), (agent_program, "zycode-agent")]:
+            info = tf.gettarinfo(str(prog), arcname=arcname)
+            info.mode = 0o755
+            info.uid = info.gid = 0
+            info.uname = info.gname = ""
+            with prog.open("rb") as handle:
+                tf.addfile(info, handle)
+    return archive
+
+
+def bundle_from_agent_archive(
+    tui_program: Path,
+    agent_archive: Path,
+    out: Path,
+    target: str,
+    version: str,
+) -> Path:
+    import tempfile
+
+    with tempfile.TemporaryDirectory() as tmpdir:
+        tmp_path = Path(tmpdir)
+        extracted_agent: Path | None = None
+        if tarfile.is_tarfile(agent_archive):
+            with tarfile.open(agent_archive, "r:*") as tf:
+                for member in tf.getmembers():
+                    if member.name in ("zycode-agent", "zycode-agent.exe"):
+                        with (
+                            tf.extractfile(member) as src,
+                            (tmp_path / member.name).open("wb") as dst,
+                        ):
+                            if src is not None:
+                                shutil.copyfileobj(src, dst)
+                        extracted_agent = tmp_path / member.name
+                        break
+        elif zipfile.is_zipfile(agent_archive):
+            with zipfile.ZipFile(agent_archive, "r") as zf:
+                for name in zf.namelist():
+                    if name in ("zycode-agent", "zycode-agent.exe"):
+                        zf.extract(name, tmp_path)
+                        extracted_agent = tmp_path / name
+                        break
+        if not extracted_agent or not extracted_agent.is_file():
+            raise FileNotFoundError(f"zycode-agent not found in archive {agent_archive}")
+        return pack_bundle(tui_program, extracted_agent, out, target, version)
+
+
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     parser.add_argument("--out", type=Path, default=ROOT / "dist" / "agent")
     parser.add_argument("--work", type=Path, default=ROOT / "build" / "agent")
+    parser.add_argument(
+        "--bundle-from-archive",
+        type=Path,
+        default=None,
+        help="Pack combined bundle from an existing agent archive",
+    )
+    parser.add_argument(
+        "--tui-binary",
+        type=Path,
+        default=None,
+        help="Path to zypi binary for combined bundle",
+    )
+    parser.add_argument("--target", type=str, default=None, help="Target name (e.g. linux-x86_64)")
+    parser.add_argument("--version", type=str, default=None, help="Version string (e.g. 1.0.0)")
     args = parser.parse_args()
+
+    if args.bundle_from_archive is not None:
+        if args.tui_binary is None:
+            raise SystemExit("--tui-binary is required when using --bundle-from-archive")
+        target = args.target or target_name()
+        version = args.version or agent_version()
+        archive = bundle_from_agent_archive(
+            args.tui_binary, args.bundle_from_archive, args.out, target, version
+        )
+        digest = hashlib.sha256(archive.read_bytes()).hexdigest()
+        print(f"target:  {target}")
+        print(f"bundle:  {archive} ({archive.stat().st_size / 1e6:.1f} MB)")
+        print(f"sha256:  {digest}")
+        return
 
     target, version = target_name(), agent_version()
     shutil.rmtree(args.work, ignore_errors=True)

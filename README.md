@@ -25,7 +25,7 @@ This repository is a monorepo containing:
 - `pi-dynamic-workflows-py` / `pi_dynamic_workflows`: workflow orchestration extension.
 - `pi-mcp-py` / `pi_mcp`: optional extension that connects the MCP servers an ACP client (an editor) passes (see [`packages/pi-mcp`](packages/pi-mcp/README.md)).
 
-**Rust TUI** (beta — prebuilt binary in [GitHub Releases](https://github.com/zy1233/pi-python/releases)):
+**Rust TUI** (prebuilt binaries in [GitHub Releases](https://github.com/zy1233/pi-python/releases)):
 
 - `zypi`: full-screen terminal UI for interactive coding-agent sessions. Vendored fork of [grok-build](https://github.com/xai-org/grok-build) (Apache-2.0), with all `x.ai/*` vendor extensions removed. It offers three permission modes (Shift+Tab): Normal (`ask`, the start mode), Auto and Always-Approve. See [TUI & Code-Agent Guide](docs/TUI-AND-CODE-AGENT.md) for details.
 
@@ -35,13 +35,13 @@ This repository is a monorepo containing:
 |-----------|--------|--------------|
 | `pi-agent-core-lc` | **Stable** | [PyPI](https://pypi.org/project/pi-agent-core-lc/) |
 | `pi-agent-harness-lc` | **Stable** | [PyPI](https://pypi.org/project/pi-agent-harness-lc/) |
-| `pi-agent-cli-lc` | **Beta** | [PyPI](https://pypi.org/project/pi-agent-cli-lc/) |
-| `pi-web-access-py` | **Beta** | [PyPI](https://pypi.org/project/pi-web-access-py/) |
-| `pi-goal-x-py` | **Beta** | [PyPI](https://pypi.org/project/pi-goal-x-py/) |
-| `pi-dynamic-workflows-py` | **Beta** | [PyPI](https://pypi.org/project/pi-dynamic-workflows-py/) |
-| `pi-mcp-py` | **Alpha** | [PyPI](https://pypi.org/project/pi-mcp-py/) (from 0.6.0) |
-| `zypi` (Rust TUI) | **Beta** | [GitHub Releases](https://github.com/zy1233/pi-python/releases) (Linux x86_64) |
-| `zycode.zycode` (VS Code extension) | **Beta** | [VS Code Marketplace](https://marketplace.visualstudio.com/items?itemName=zycode.zycode) and [Open VSX](https://open-vsx.org/extension/zycode/zycode) (five platforms; the project owner tested the install of 1.0.0 and the update from 0.1.0 to 1.0.0 on Windows on 2026-11-12; the rest of the Windows flow, macOS and Linux in a real VS Code are not verified) |
+| `pi-agent-cli-lc` | **Stable** | [PyPI](https://pypi.org/project/pi-agent-cli-lc/) |
+| `pi-web-access-py` | **Stable** | [PyPI](https://pypi.org/project/pi-web-access-py/) |
+| `pi-goal-x-py` | **Stable** | [PyPI](https://pypi.org/project/pi-goal-x-py/) |
+| `pi-dynamic-workflows-py` | **Stable** | [PyPI](https://pypi.org/project/pi-dynamic-workflows-py/) |
+| `pi-mcp-py` | **Stable** | [PyPI](https://pypi.org/project/pi-mcp-py/) (from 0.6.0) |
+| `zypi` (Rust TUI) | **Stable** | [GitHub Releases](https://github.com/zy1233/pi-python/releases) (Linux x86_64 and aarch64, macOS arm64) |
+| `zycode.zycode` (VS Code extension) | **Stable** | [VS Code Marketplace](https://marketplace.visualstudio.com/items?itemName=zycode.zycode) and [Open VSX](https://open-vsx.org/extension/zycode/zycode) (five platforms; the project owner tested the install of 1.0.0 and the update from 0.1.0 to 1.0.0 on Windows on 2026-11-12; the rest of the Windows flow, macOS and Linux in a real VS Code are not verified) |
 
 ## Features
 
@@ -72,7 +72,7 @@ This repository is a monorepo containing:
 - LangChain `BaseTool` → `AgentTool` adapter (`from_langchain_tool`) — MCP tools via `langchain-mcp-adapters` work out of the box
 - The CLI itself has no MCP client. The optional `pi-mcp-py` extension connects the MCP servers that an ACP client passes in `session/new` (stdio, Streamable HTTP, SSE) and shows their tools as `mcp__<server>__<tool>`; without it, the agent says that their tools are not available in the session
 
-**Coding Agent CLI** (Phase 4 — beta)
+**Coding Agent CLI** (Phase 4)
 
 - `pi_agent_cli`: standard ACP coding agent over `AgentHarness` — no `x.ai/*` vendor extensions
 - Headless mode: `python -m pi_agent_cli -p "prompt"` for scripting and CI
@@ -83,12 +83,12 @@ This repository is a monorepo containing:
 - Extensions that fail to load (import error, bad entry point, `activate()` raising, invalid tool name) are skipped, and the agent says so at session start (ACP agent message; headless stderr) instead of just not having them. `PI_HOME` moves the whole home: config, `extensions/`, saved workflows and workflow journals
 - Git workspace context (`<git_status>`) is a session-start snapshot in the system prompt (kept stable for the provider prompt cache; the block tells the model to run `git status` for live state); `--no-git-context` or `[git] enabled = false` turns it off. The snapshot is taken only for a trusted project (see project trust below): `git status` runs the program that a repository's own `.git/config` names in `core.fsmonitor`, so an untrusted project, which includes the default case of a project that ships no extensions or prompt files, gets no `<git_status>` block (to get it back: `[extensions]` `trusted_projects = ["~/work"]` in `~/.pi-python/agent.toml`, or `default_project_trust = "always"`). The block (branch name and the paths of changed and untracked files) goes to the model provider with the rest of the system prompt, so turn it off if such names are sensitive
 
-**TUI — `zypi`** (Phase 4 — beta)
+**TUI — `zypi`** (Phase 4)
 
 - Full-screen Rust terminal UI for interactive coding-agent sessions
-- Spawns the Python ACP agent (`python -m pi_agent_cli`) as the backend
+- Spawns `zycode-agent` next to it or on `PATH` by default, or the Python ACP agent when configured (`PI_AGENT_COMMAND`, `[agent].command`, or `PI_PYTHON`)
 - Session management, markdown rendering, Mermaid diagrams, MCP support
-- Prebuilt Linux x86_64 binary in [GitHub Releases](https://github.com/zy1233/pi-python/releases); build from source for other platforms
+- Prebuilt binaries for Linux (x86_64, aarch64) and macOS (arm64) in [GitHub Releases](https://github.com/zy1233/pi-python/releases); standalone tarballs (`zycode-<target>-<version>.tar.gz`) bundle `zypi` and `zycode-agent` together with zero Python dependencies required
 - See [TUI & Code-Agent Guide](docs/TUI-AND-CODE-AGENT.md) for setup and usage
 
 **FrontierHarness Evaluation** (30-task benchmark)
@@ -131,20 +131,27 @@ pip install -e "./packages/pi-mcp"   # optional: MCP servers that the editor pas
 
 </details>
 
-### TUI binary (`zypi`) — beta
+### TUI binary (`zypi`)
 
-Download the prebuilt binary for Linux x86_64 or macOS arm64 from [GitHub Releases](https://github.com/zy1233/pi-python/releases):
+Download the prebuilt binary or the complete standalone archive for Linux (x86_64 or aarch64) or macOS arm64 from [GitHub Releases](https://github.com/zy1233/pi-python/releases):
 
 ```bash
-# Download and install (Linux x86_64)
+# Option 1: Standalone bundle (contains both zypi and zycode-agent; no Python required)
+curl -L -o zycode.tar.gz https://github.com/zy1233/pi-python/releases/latest/download/zycode-linux-x86_64-1.0.0.tar.gz
+tar -xzf zycode.tar.gz
+sudo mv zypi zycode-agent /usr/local/bin/
+
+# Option 2: Standalone zypi (spawns zycode-agent next to it, on PATH, or via PI_AGENT_COMMAND / PI_PYTHON)
 curl -L -o zypi https://github.com/zy1233/pi-python/releases/latest/download/zypi-linux-x86_64
 chmod +x zypi
 sudo mv zypi /usr/local/bin/
 
-# macOS arm64 (Apple silicon): the same steps with the file zypi-macos-arm64
-# (built in CI, not yet run by a person; see the TUI guide)
+# Set up model and API key directly in terminal:
+zypi --setup
+```
 
-# Or build from source (requires Rust toolchain)
+Or build from source (requires Rust toolchain):
+```bash
 cd tui && cargo build --profile release-dist -p pi-pager-bin
 # binary at target/release-dist/zypi
 ```
@@ -571,7 +578,7 @@ Use `.venv-test-real` for pytest real-LLM tests; the smoke script can run from t
 - **Phase 2.5 (core hardening)** — done: retries, runaway protection, observability, granular events, guardrail hooks, `ContextBudget`, structured output, tool-result images
 - **Phase 3 (AgentHarness)** — done: H1 session tree, H2 runtime, H3 compaction/tree navigation, H4 skills/templates/system prompt/LocalExecutionEnv ([design doc](docs/specs/2026-07-03-phase3-agent-harness-design.md))
 - **Phase 3.5 (tool ecosystem)** — done: all 7 built-in tools (read/bash/edit/write/grep/find/ls), group factories, and the LangChain `BaseTool` adapter ([design doc](docs/specs/2026-07-03-phase3.5-tool-ecosystem-design.md))
-- **Phase 4 (Coding Agent CLI — beta)** — done: `tui/` vendored grok-build fork (Apache-2.0); `pi_agent_cli` standard ACP agent; TUI binary `zypi`; `x.ai/*` vendor RPCs removed; session management (`/new` `/resume` `/quit`); headless `-p`; `config.toml` + Windows notes ([design doc](docs/specs/2026-08-25-phase4-coding-agent-cli-design.md), [Windows](docs/WINDOWS.md), [TUI guide](docs/TUI-AND-CODE-AGENT.md))
+- **Phase 4 (Coding Agent CLI)** — done: `tui/` vendored grok-build fork (Apache-2.0); `pi_agent_cli` standard ACP agent; TUI binary `zypi`; `x.ai/*` vendor RPCs removed; session management (`/new` `/resume` `/quit`); headless `-p`; `config.toml` + Windows notes ([design doc](docs/specs/2026-08-25-phase4-coding-agent-cli-design.md), [Windows](docs/WINDOWS.md), [TUI guide](docs/TUI-AND-CODE-AGENT.md))
 - **Phase 5 (Coding Agent prompt engine)** — done: pi-aligned `build_system_prompt` + tool contributions + context files + `<available_skills>` ([design doc](docs/specs/2026-09-02-phase5-prompt-engine-design.md))
 - **Phase 6 (extended integrations)** — done: git workspace context in the system prompt; opt-in multi-provider live matrix. MCP stays a caller-side `BaseTool` import ([design doc](docs/specs/2026-09-24-phase6-extended-integrations-design.md)); the optional `pi-mcp-py` extension (2026-10) connects the servers an editor passes, and the core, harness and CLI still hold no MCP client ([design doc](docs/specs/2026-10-23-mcp-extension-design.md))
 - **Phase 7 (extension packages)** — done: `pi-web-access-py`, `pi-goal-x-py`, `pi-dynamic-workflows-py` ([design doc](docs/specs/2026-09-22-phase7-extension-api-design.md))

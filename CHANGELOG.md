@@ -7,7 +7,23 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
-## [0.9.1] - 2026-11-12
+## [1.0.0] - 2026-11-15
+
+This is the 1.0.0 (Production/Stable) release of zycode. All components across the monorepo are promoted to 1.0.0 Stable.
+
+### Added
+
+- **Standalone ACP agent resolution in TUI (`zypi`)**: `zypi` resolves `zycode-agent` (`zycode-agent.exe` on Windows) by default next to the `zypi` executable (or following symlinks) or on `PATH`. It no longer falls back to bare `python -m pi_agent_cli` when `PI_PYTHON` is unset. Resolution order: `PI_AGENT_COMMAND` → `[agent].command` (in `agent.toml` / `config.toml`) → `PI_PYTHON` (only when explicitly set and non-empty) → default `zycode-agent` binary.
+- **Terminal setup command `zypi --setup`**: Added `--setup` flag to `zypi` to directly launch the agent's interactive setup dialog in the terminal to configure the provider, model, and API key before running interactive sessions.
+- **Combined standalone bundles (`zycode-<target>-<version>.tar.gz`)**: Release workflows and `packaging/agent/build.py` now build combined tarballs bundling both `zypi` and `zycode-agent` at archive root (`0o755`), providing a zero-Python installation experience.
+- **Linux aarch64 TUI binary in release workflow**: Added `build-tui-linux-arm` job to `.github/workflows/release.yml` on `ubuntu-24.04-arm` to build and publish `zypi-linux-aarch64`.
+- **Omarchy Linux Agent integration**: Full specification, packaging, and integration scripts for adding zycode (`zypi`) to Omarchy Linux's Agent menu and mise configuration.
+
+### Changed
+
+- **Version 1.0.0 Stable promotion**: All Python packages (`pi-agent-core-lc`, `pi-agent-harness-lc`, `pi-agent-cli-lc`, `pi-web-access-py`, `pi-goal-x-py`, `pi-dynamic-workflows-py`, `pi-mcp-py`), Rust TUI (`pi-pager-bin`, `pi-version`), and documentation/web are promoted to `1.0.0` with `Development Status :: 5 - Production/Stable`.
+- Refusal message for `zypi --oauth` updated to direct users to `zypi --setup`.
+- Updated spawn error messages to guide placing `zycode-agent` next to `zypi` or setting `PI_AGENT_COMMAND` / `PI_PYTHON`.
 
 This is a patch release. It has one fix: `provider = "openai"` now shows the thinking that a gateway streams as `reasoning_content`. **Fixed** has the details. The VS Code extension needs a new agent binary to get the fix, so it needs a new Release and a new VSIX. **Changed** has the new version numbers. **Known issues** says that the 0.9.0 list still holds.
 

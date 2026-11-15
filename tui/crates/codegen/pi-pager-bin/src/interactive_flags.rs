@@ -182,7 +182,7 @@ pub(crate) static REFUSALS: &[Refusal] = &[
         flag: "--oauth",
         also: &[],
         reason: "zypi has no sign-in screen with the Python agent. \
-                 Run python -m pi_agent_cli --setup to set the model and the key.",
+                 Run zypi --setup to set the model and the key.",
         given: |args| args.oauth,
     },
 ];

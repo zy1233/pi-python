@@ -299,7 +299,39 @@ fn windows_path_to_wsl(path: &str) -> Option<std::path::PathBuf> {
     Some(std::path::PathBuf::from(format!("/mnt/{drive}/{rest}")))
 }
 
-/// Resolve the Python ACP agent command (`PI_AGENT_COMMAND` / `PI_PYTHON`).
+/// The binary name of the standalone ACP agent program.
+pub const AGENT_BINARY_NAME: &str = if cfg!(windows) {
+    "zycode-agent.exe"
+} else {
+    "zycode-agent"
+};
+
+/// Check if `AGENT_BINARY_NAME` exists as a file in the same directory as `exe`.
+pub fn sibling_agent_binary(exe: &std::path::Path) -> Option<std::path::PathBuf> {
+    let candidate = exe.parent()?.join(AGENT_BINARY_NAME);
+    if candidate.is_file() {
+        Some(candidate)
+    } else {
+        None
+    }
+}
+
+/// Resolve the default agent program when no command or Python interpreter is configured.
+pub fn default_agent_program(current_exe: Option<&std::path::Path>) -> std::ffi::OsString {
+    if let Some(sibling) = current_exe.and_then(sibling_agent_binary) {
+        return sibling.into_os_string();
+    }
+    if let Some(sibling) = current_exe
+        .and_then(|p| std::fs::canonicalize(p).ok())
+        .as_deref()
+        .and_then(sibling_agent_binary)
+    {
+        return sibling.into_os_string();
+    }
+    std::ffi::OsString::from(AGENT_BINARY_NAME)
+}
+
+/// Resolve the Python ACP agent command (`PI_AGENT_COMMAND` / `PI_PYTHON` / `zycode-agent`).
 pub fn pi_agent_command() -> (std::ffi::OsString, Vec<std::ffi::OsString>) {
     if let Ok(raw) = std::env::var("PI_AGENT_COMMAND")
         && let Some((prog, args)) = parse_agent_command(&raw)
@@ -309,16 +341,18 @@ pub fn pi_agent_command() -> (std::ffi::OsString, Vec<std::ffi::OsString>) {
     if let Some((prog, args)) = agent_command_from_config(&grok_home()) {
         return (resolve_spawn_program(&prog), args);
     }
-    let python = std::env::var_os("PI_PYTHON").unwrap_or_else(|| {
-        if cfg!(windows) {
-            "python".into()
-        } else {
-            "python3".into()
+    if let Ok(python) = std::env::var("PI_PYTHON") {
+        if !python.trim().is_empty() {
+            return (
+                resolve_spawn_program(std::ffi::OsStr::new(&python)),
+                vec!["-m".into(), "pi_agent_cli".into()],
+            );
         }
-    });
+    }
+    let current_exe = std::env::current_exe().ok();
     (
-        resolve_spawn_program(&python),
-        vec!["-m".into(), "pi_agent_cli".into()],
+        default_agent_program(current_exe.as_deref()),
+        Vec::new(),
     )
 }
 
@@ -444,6 +478,61 @@ mod pi_agent_command_tests {
                 std::ffi::OsString::from("pi_agent_cli"),
             ]
         );
+    }
+
+    #[test]
+    fn sibling_agent_binary_finds_file_next_to_exe_and_ignores_directory() {
+        let tmp = tempfile::tempdir().unwrap();
+        let exe = tmp.path().join("zypi");
+        std::fs::write(&exe, "").unwrap();
+
+        // No sibling binary exists yet
+        assert_eq!(sibling_agent_binary(&exe), None);
+
+        // A directory with the agent binary name is ignored
+        let dir_candidate = tmp.path().join(AGENT_BINARY_NAME);
+        std::fs::create_dir(&dir_candidate).unwrap();
+        assert_eq!(sibling_agent_binary(&exe), None);
+        std::fs::remove_dir(&dir_candidate).unwrap();
+
+        // A file with the agent binary name is found
+        std::fs::write(&dir_candidate, "").unwrap();
+        assert_eq!(sibling_agent_binary(&exe), Some(dir_candidate));
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn default_agent_program_follows_symlink_to_sibling_binary() {
+        let tmp = tempfile::tempdir().unwrap();
+        let target_dir = tmp.path().join("release-extract");
+        let bin_dir = tmp.path().join("local-bin");
+        std::fs::create_dir_all(&target_dir).unwrap();
+        std::fs::create_dir_all(&bin_dir).unwrap();
+
+        let real_zypi = target_dir.join("zypi");
+        let real_agent = target_dir.join(AGENT_BINARY_NAME);
+        std::fs::write(&real_zypi, "").unwrap();
+        std::fs::write(&real_agent, "").unwrap();
+
+        let symlink_zypi = bin_dir.join("zypi");
+        std::os::unix::fs::symlink(&real_zypi, &symlink_zypi).unwrap();
+
+        let resolved = default_agent_program(Some(&symlink_zypi));
+        let expected = std::fs::canonicalize(&real_agent).unwrap().into_os_string();
+        assert_eq!(resolved, expected);
+    }
+
+    #[test]
+    fn default_agent_program_falls_back_to_binary_name_on_path() {
+        let tmp = tempfile::tempdir().unwrap();
+        let standalone_zypi = tmp.path().join("zypi");
+        std::fs::write(&standalone_zypi, "").unwrap();
+
+        let resolved = default_agent_program(Some(&standalone_zypi));
+        assert_eq!(resolved, std::ffi::OsString::from(AGENT_BINARY_NAME));
+
+        let none_resolved = default_agent_program(None);
+        assert_eq!(none_resolved, std::ffi::OsString::from(AGENT_BINARY_NAME));
     }
 }
 
@@ -632,7 +721,7 @@ async fn spawn_python_stdio_bridge(
                     .map_err(|e| {
                         anyhow::anyhow!(
                             "failed to spawn ACP agent {program:?} {args:?}: {e}\n\
-                             Set PI_AGENT_COMMAND or PI_PYTHON, and install pi-agent-cli-lc."
+                             Put zycode-agent next to zypi or on PATH, or set PI_AGENT_COMMAND or PI_PYTHON."
                         )
                     })?;
 

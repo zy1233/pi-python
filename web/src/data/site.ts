@@ -42,21 +42,21 @@ export interface PackageInfo {
 export const packages: PackageInfo[] = [
   { id: 'core', name: 'pi-agent-core-lc', level: 'stable', sources: [{ where: 'pypi', href: 'https://pypi.org/project/pi-agent-core-lc/' }] },
   { id: 'harness', name: 'pi-agent-harness-lc', level: 'stable', sources: [{ where: 'pypi', href: 'https://pypi.org/project/pi-agent-harness-lc/' }] },
-  { id: 'cli', name: 'pi-agent-cli-lc', level: 'beta', sources: [{ where: 'pypi', href: 'https://pypi.org/project/pi-agent-cli-lc/' }] },
-  { id: 'zypi', name: 'zypi', level: 'beta', sources: [{ where: 'releases', href: links.releases }] },
+  { id: 'cli', name: 'pi-agent-cli-lc', level: 'stable', sources: [{ where: 'pypi', href: 'https://pypi.org/project/pi-agent-cli-lc/' }] },
+  { id: 'zypi', name: 'zypi', level: 'stable', sources: [{ where: 'releases', href: links.releases }] },
   {
     id: 'vscode',
     name: 'zycode.zycode',
-    level: 'beta',
+    level: 'stable',
     sources: [
       { where: 'marketplace', href: links.vscodeMarketplace },
       { where: 'openVsx', href: links.openVsx },
     ],
   },
-  { id: 'webAccess', name: 'pi-web-access-py', level: 'beta', sources: [{ where: 'pypi', href: 'https://pypi.org/project/pi-web-access-py/' }] },
-  { id: 'goalX', name: 'pi-goal-x-py', level: 'beta', sources: [{ where: 'pypi', href: 'https://pypi.org/project/pi-goal-x-py/' }] },
-  { id: 'workflows', name: 'pi-dynamic-workflows-py', level: 'beta', sources: [{ where: 'pypi', href: 'https://pypi.org/project/pi-dynamic-workflows-py/' }] },
-  { id: 'mcp', name: 'pi-mcp-py', level: 'alpha', sources: [{ where: 'pypi', href: 'https://pypi.org/project/pi-mcp-py/' }] },
+  { id: 'webAccess', name: 'pi-web-access-py', level: 'stable', sources: [{ where: 'pypi', href: 'https://pypi.org/project/pi-web-access-py/' }] },
+  { id: 'goalX', name: 'pi-goal-x-py', level: 'stable', sources: [{ where: 'pypi', href: 'https://pypi.org/project/pi-goal-x-py/' }] },
+  { id: 'workflows', name: 'pi-dynamic-workflows-py', level: 'stable', sources: [{ where: 'pypi', href: 'https://pypi.org/project/pi-dynamic-workflows-py/' }] },
+  { id: 'mcp', name: 'pi-mcp-py', level: 'stable', sources: [{ where: 'pypi', href: 'https://pypi.org/project/pi-mcp-py/' }] },
 ];
 
 /** Code that is the same in every language. */

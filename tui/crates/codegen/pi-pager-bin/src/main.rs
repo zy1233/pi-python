@@ -398,6 +398,28 @@ fn refuse_interactive_flags(args: &PagerArgs) -> Option<i32> {
     Some(interactive_flags::REFUSED_EXIT_CODE)
 }
 
+/// Run `--setup` on the resolved ACP agent: choose a model and save its API key in the terminal.
+fn dispatch_python_setup(args: &PagerArgs) -> Option<i32> {
+    if args.version || args.command.is_some() || !args.setup {
+        return None;
+    }
+    let (program, mut agent_args) = pi_pager::acp::spawn::pi_agent_command();
+    agent_args.push("--setup".into());
+    match print_mode::agent_command(&program, &agent_args)
+        .env("PI_HOME", pi_shell::util::grok_home::grok_home())
+        .status()
+    {
+        Ok(status) => Some(status.code().unwrap_or(1)),
+        Err(err) => {
+            eprintln!(
+                "failed to spawn ACP agent {program:?} {agent_args:?}: {err}\n\
+                 Put zycode-agent next to zypi or on PATH, or set PI_AGENT_COMMAND or PI_PYTHON."
+            );
+            Some(1)
+        }
+    }
+}
+
 /// Phase 4 P3: `pi -p` is pure Python headless, not grok `run_headless`.
 fn dispatch_python_print(args: &PagerArgs) -> Option<i32> {
     if args.version || args.command.is_some() {
@@ -458,7 +480,7 @@ fn run_python_print(args: &PagerArgs) -> i32 {
         Err(err) => {
             eprintln!(
                 "failed to spawn ACP agent {program:?} {agent_args:?}: {err}\n\
-                 Set PI_AGENT_COMMAND or PI_PYTHON, and install pi-agent-cli-lc."
+                 Put zycode-agent next to zypi or on PATH, or set PI_AGENT_COMMAND or PI_PYTHON."
             );
             1
         }
@@ -478,6 +500,9 @@ fn main() {
     let args = PagerArgs::parse_cli();
     if dispatch_version_if_requested(&args) || dispatch_doctor_if_requested(&args) {
         return;
+    }
+    if let Some(code) = dispatch_python_setup(&args) {
+        std::process::exit(code);
     }
     if let Some(code) = dispatch_python_print(&args) {
         std::process::exit(code);
