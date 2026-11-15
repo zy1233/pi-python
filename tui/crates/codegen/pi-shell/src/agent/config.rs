@@ -2725,12 +2725,13 @@ pub struct Features {
     pub image_gen_model_override: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub image_edit_model_override: Option<String>,
-    /// `summary` (default) | `transcript` | `segments`. `None` = defer to CLI /
-    /// env (`GROK_COMPACTION_MODE`). Parsed via `CompactionMode::parse`.
+    /// `summary` (default) | `transcript` | `segments`. `None` = defer to the
+    /// default. No environment variable overrides it. Parsed via `CompactionMode::parse`.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub compaction_mode: Option<String>,
     /// `none` | `minimal` | `balanced` | `verbose` (default). `None` = defer to
-    /// env (`GROK_COMPACTION_DETAIL`). The `segments` verbatim detail level.
+    /// the default. No environment variable overrides it. The `segments` verbatim
+    /// detail level.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub compaction_detail: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]

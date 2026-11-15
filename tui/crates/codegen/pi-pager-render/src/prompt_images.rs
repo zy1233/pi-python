@@ -1512,6 +1512,22 @@ pub fn load_for_send(img: &PastedImage) -> Option<(Vec<u8>, String)> {
 // ACP content block construction
 // -------------------------------------------------------------------------
 
+/// Canonical prefixes allowed for orphan `[Image #N: <path>]` recovery in a workspace:
+/// [`pi_shared::placeholder_images::default_allowed_prefixes`] plus `<home>/pager-cache` when it
+/// exists on disk.
+fn allowed_prefixes_with_pager_cache_in(
+    workspace_cwd: &std::path::Path,
+    grok_home: &std::path::Path,
+) -> Vec<std::path::PathBuf> {
+    let mut prefixes = pi_shared::placeholder_images::default_allowed_prefixes(workspace_cwd);
+    if let Ok(cache) = dunce::canonicalize(grok_home.join(PAGER_CACHE_DIR)) {
+        prefixes.push(cache);
+        prefixes.sort();
+        prefixes.dedup();
+    }
+    prefixes
+}
+
 /// Build ACP `ContentBlock` values from prompt text and attached images,
 /// with an optional fallback that re-loads orphan
 /// `[Image #N: <path>]` placeholders from disk.
@@ -1533,22 +1549,6 @@ pub fn load_for_send(img: &PastedImage) -> Option<(Vec<u8>, String)> {
 ///
 /// Path validation, extension allowlist, and the 50-MB size cap come
 /// from the shared helper so the TUI and the server use the same rules.
-/// Canonical prefixes allowed for orphan `[Image #N: <path>]` recovery in a workspace:
-/// [`pi_shared::placeholder_images::default_allowed_prefixes`] plus `<home>/pager-cache` when it
-/// exists on disk.
-fn allowed_prefixes_with_pager_cache_in(
-    workspace_cwd: &std::path::Path,
-    grok_home: &std::path::Path,
-) -> Vec<std::path::PathBuf> {
-    let mut prefixes = pi_shared::placeholder_images::default_allowed_prefixes(workspace_cwd);
-    if let Ok(cache) = dunce::canonicalize(grok_home.join(PAGER_CACHE_DIR)) {
-        prefixes.push(cache);
-        prefixes.sort();
-        prefixes.dedup();
-    }
-    prefixes
-}
-
 pub fn build_content_blocks_with_workspace(
     text: String,
     images: Vec<PastedImage>,

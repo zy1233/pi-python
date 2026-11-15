@@ -2,10 +2,10 @@
 
 > **审计日期**：2026-11-15。发现、修复与本文在同一天完成。
 >
-> **审计范围**：在第一次审计（[`AUDIT-RUST-RUNTIME-REMOVAL-2026-11-08.md`](AUDIT-RUST-RUNTIME-REMOVAL-2026-11-08.md)，PR [#115](https://github.com/zy1233/pi-python/pull/115)）合入之后，对照 [`PLAN-RUST-AGENT-RUNTIME-REMOVAL.md`](../PLAN/PLAN-RUST-AGENT-RUNTIME-REMOVAL.md)（r48）、[`docs/DESIGN.md`](../DESIGN.md) §8 與 [ACP 扩展登记](../specs/2026-11-05-acp-extension-registry.md)，对 `main` @ `3431699` 做第二次全量代码实现审计。覆盖：
+> **审计范围**：在第一次审计（[`AUDIT-RUST-RUNTIME-REMOVAL-2026-11-08.md`](AUDIT-RUST-RUNTIME-REMOVAL-2026-11-08.md)，PR [#115](https://github.com/zy1233/pi-python/pull/115)）合入之后，对照 [`PLAN-RUST-AGENT-RUNTIME-REMOVAL.md`](../PLAN/PLAN-RUST-AGENT-RUNTIME-REMOVAL.md)（r48）、[`docs/DESIGN.md`](../DESIGN.md) §8 与 [ACP 扩展登记](../specs/2026-11-05-acp-extension-registry.md)，对 `main` @ `3431699` 做第二次全量代码实现审计。覆盖：
 > - Rust TUI：`tui/crates/codegen/{pi-pager,pi-pager-bin,pi-pager-render,pi-acp-lib,pi-home,pi-shell,pi-workspace,pi-shared,pi-telemetry}`；
 > - Python ACP agent：`packages/pi-agent-cli/pi_agent_cli/`；
-> - VS Code ACP client：`packages/pi-vscode/src/core/`；
+> - VS Code ACP client：`vscode/src/core/`；
 > - 门禁脚本：`scripts/tui_baseline.py` 与 `scripts/tui_baseline.toml`。
 >
 > **状态图例**：`[x]` 已修复并验证
@@ -24,7 +24,7 @@
 | R2-4 | 低–中 | `scripts/tui_baseline.py` | `production_lines()` 只识别行首顶格的 `mod tests {` 与 `}`，对缩进的 `#[cfg(test)] mod tests {` 或单行 `mod tests {}` 会吞掉后续生产代码，导致 `session_disk_reads` / `no_callers` 门禁存在盲区 | `[x]` |
 | R2-5 | 低–中 | `tui/crates/codegen/pi-home/src/lib.rs` | Rust 侧 `pi-home` 解析 `PI_HOME` / `GROK_HOME` 时未展开 `~` / `~/...`，若用户导出 `PI_HOME=~/.pi-python`，`zypi` 会在当前工作目录下创建字面量 `./~` 目录，与 Python / VS Code 端不一致 | `[x]` |
 | R2-6 | 低 | `tui/crates/codegen/pi-pager-bin/src/{main.rs,print_mode.rs}` | ① `zypi -p "hi" -v` 先进入 `dispatch_python_print` 拉起 Python agent，而非优先处理 `-v`/`--version`；② `async_main` 仍设置无读取者的 `GROK_COMPACTION_MODE` / `GROK_COMPACTION_DETAIL` 环境变量；③ `print_mode::ignored_flags` 遗漏 `--trust`、`--compaction-mode`、`--compaction-detail`、`--worktree-ref`、`--restore-code`、`--no-ask-user`、`--no-wait-for-background`、`--oauth` | `[x]` |
-| R2-7 | 低 | `docs/specs/2026-11-05-acp-extension-registry.md`、`pi-acp-lib/src/message.rs` | ① ACP 扩展登记未 반영 `packages/pi-vscode` 对 X1、X3、X5、X8 的读写，§5 未列全 `zypi` 发送而 Python 忽略的客户端 `_meta` 键；② `AcpArgsGeneric` / `AcpClientMessageGeneric` / `AcpAgentMessageGeneric` 未转发 `AcpMethod::ext_name()`；③ `agent_modes.rs` 与 `session_startup.rs` 的两处过期注释 | `[x]` |
+| R2-7 | 低 | `docs/specs/2026-11-05-acp-extension-registry.md`、`pi-acp-lib/src/message.rs` | ① ACP 扩展登记未记录 `vscode/` 对 X1、X3、X5、X8 的读写，§5 未列全 `zypi` 发送而 Python 忽略的客户端 `_meta` 键；② `AcpArgsGeneric` / `AcpClientMessageGeneric` / `AcpAgentMessageGeneric` 未转发 `AcpMethod::ext_name()`；③ `agent_modes.rs` 与 `session_startup.rs` 的两处过期注释 | `[x]` |
 
 ---
 
@@ -32,8 +32,8 @@
 
 ### R2-1. `[x]` `pi/session/delete` 清理与 `session/close` 对齐
 
-- **问题**：`packages/pi-agent-cli/pi_agent_cli/agent.py` 中，`close_session` 依次弹出 `_sessions`、`_session_models`、`_session_cwds`、释放 `_reserved_ids`，并在存在 `auto` gate 时调用 `auto.cancel()`；而 `ext_method("pi/session/delete")` 只弹出了 `_sessions` 与 `_reserved_ids`，遗漏了 `_session_models.pop`、`_session_cwds.pop` 与 `auto.cancel()`。
-- **修复**：抽出 `_release_session(self, session_id: str) -> AgentHarness | None`，由 `close_session` 与 `ext_method("pi/session/delete")` 共同调用，确保两处清理路径完全一致。
+- **问题**：`packages/pi-agent-cli/pi_agent_cli/agent.py` 中，`close_session` 弹出 `_session_models`、`_harnesses`、`_permission_locks`，释放 `_reserved_ids`，并在存在 `auto` gate 时调用 `auto.cancel()`，但没有弹出 `_session_cwds`；而 `ext_method("pi/session/delete")` 只弹出了 `_harnesses`、`_permission_locks` 并释放 `_reserved_ids`（另清理信任、通知与模式状态），遗漏了 `_session_models.pop`、`_session_cwds.pop` 与 `auto.cancel()`。
+- **修复**：抽出 `_release_session(self, session_id: str) -> AgentHarness | None`，由 `close_session` 与 `ext_method("pi/session/delete")` 共同调用，确保两处清理路径完全一致。`close_session` 因此也新增了 `_session_cwds.pop`（此前遗漏）。
 - **测试**：`packages/pi-agent-cli/tests/test_session_lifecycle.py` 新增 `test_deleting_an_open_session_forgets_its_model_cwd_and_cancels_auto`。
 
 ### R2-2. `[x]` 启动阶段 `tracing` 初始化前置、去重 `pi_telemetry::external::init` 与 `unified_log` 清理
@@ -63,7 +63,7 @@
 
 ### R2-5. `[x]` `pi-home` 支持展开 `PI_HOME` / `GROK_HOME` 中的 `~`
 
-- **问题**：Python 端（`pi_agent_core/home.py` 的 `expanduser()`）与 VS Code 扩展（`packages/pi-vscode/src/core/first-run.ts` 的 `expandHome`）都会将 `PI_HOME=~/...` 展开为用户家目录，而 Rust 端 `tui/crates/codegen/pi-home/src/lib.rs` 直接使用 `PathBuf::from(trimmed)`，导致 `PI_HOME=~/.pi-python` 在相对路径下读写 `./~/.pi-python`。
+- **问题**：Python 端（`pi_agent_core/home.py` 的 `expanduser()`）与 VS Code 扩展（`vscode/src/core/first-run.ts` 的 `expandHome`）都会将 `PI_HOME=~/...` 展开为用户家目录，而 Rust 端 `tui/crates/codegen/pi-home/src/lib.rs` 直接使用 `PathBuf::from(trimmed)`，导致 `PI_HOME=~/.pi-python` 在相对路径下读写 `./~/.pi-python`。
 - **修复**：在 `pi-home/src/lib.rs` 中新增 `expand_tilde(trimmed, os_home)`，对 `~`、`~/...`、`~\...` 按 `os_home` 展开。
 - **测试**：`pi-home/src/lib.rs` 新增 `env_tilde_expands_against_os_home`。
 
@@ -83,5 +83,5 @@
 
 - **修复**：
   1. `tui/crates/codegen/pi-acp-lib/src/message.rs`：在 `AcpArgsGeneric`、`AcpClientMessageGeneric`、`AcpAgentMessageGeneric` 上转发 `ext_name(&self)`，消除泛型包装层漏转发的隐患；
-  2. `docs/specs/2026-11-05-acp-extension-registry.md`：更新 X1、X3、X5、X8 的发送方/读取方（补入 `packages/pi-vscode`），并在 §5 补齐 `zypi` 发送而 Python 忽略的客户端 `_meta` 键；
+  2. `docs/specs/2026-11-05-acp-extension-registry.md`：更新 X1、X3、X5、X8 的发送方/读取方（补入 `vscode/` 的调用方：`acp-connection.ts` 与 `chat-controller.ts`），并在 §5 补齐 `zypi` 发送而 Python 忽略的客户端 `_meta` 键；
   3. 清理第一次审计 F-5 留下的两处过期注释（`agent_modes.rs` 与 `session_startup.rs`）。

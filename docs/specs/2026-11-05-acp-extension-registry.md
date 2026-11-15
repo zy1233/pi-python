@@ -1,18 +1,18 @@
 # ACP extensions: the register
 
-> Scope: every item on the ACP wire that is not standard ACP, between a client (`zypi`, `packages/pi-vscode`, Zed, or another client) and `pi_agent_cli`. For each item the register gives the name, the direction, the schema, who sends it, who reads it, the tests, and the status. It also says how to add, change or remove an item.
-> Decided: 2026-11-05, in round r44 of the plan `docs/PLAN/PLAN-RUST-AGENT-RUNTIME-REMOVAL.md`. After round r43 the user asked to move the register out of `packages/pi-agent-cli/AGENTS.md`. This document is the register that rule 3 of `docs/DESIGN.md` section 8.5 asks for. No item is new and no behaviour changes: each item was on the wire before this document. (Updated 2026-11-15 after the second audit to record the `packages/pi-vscode` callers and the full list of client-only `_meta` keys in section 5.)
+> Scope: every item on the ACP wire that is not standard ACP, between a client (`zypi`, `vscode/`, Zed, or another client) and `pi_agent_cli`. For each item the register gives the name, the direction, the schema, who sends it, who reads it, the tests, and the status. It also says how to add, change or remove an item.
+> Decided: 2026-11-05, in round r44 of the plan `docs/PLAN/PLAN-RUST-AGENT-RUNTIME-REMOVAL.md`. After round r43 the user asked to move the register out of `packages/pi-agent-cli/AGENTS.md`. This document is the register that rule 3 of `docs/DESIGN.md` section 8.5 asks for. No item is new and no behaviour changes: each item was on the wire before this document. (Updated 2026-11-15 after the second audit to record the `vscode/` callers and the full list of client-only `_meta` keys in section 5.)
 > Status: **Written.** It lists eight items (X1 to X8) and points to one more spec. Section 4 says which of the five admission rules each item meets. Section 7 has one question for the owner. The owner answered it on 2026-11-05: rules 4 and 5 apply to new items only.
 > Base of the facts: `origin/main` at `2235210` (updated against `3431699` on 2026-11-15). Python SDK `agent-client-protocol` 0.12.1, with the ACP schema `schema-v1.19.0`. The facts were read in the tree. The tests that section 3 names run in CI.
-> Code: `packages/pi-agent-cli/pi_agent_cli/{agent,events,permission_modes,auth_methods}.py`. In the pager: `tui/crates/codegen/pi-pager/src/app/effects/{mod,helpers}.rs`, `tui/crates/codegen/pi-pager/src/acp/meta.rs`, and `tui/crates/codegen/pi-pager-render/src/prompt_images.rs`. In the VS Code extension: `packages/pi-vscode/src/core/{session-service,session-projector}.ts`.
-> Tests: the files in `packages/pi-agent-cli/tests/` that section 3 names, `packages/pi-vscode/test/`, and `tui/crates/codegen/pi-pager/tests/python_agent_e2e.rs`.
+> Code: `packages/pi-agent-cli/pi_agent_cli/{agent,events,permission_modes,auth_methods}.py`. In the pager: `tui/crates/codegen/pi-pager/src/app/effects/{mod,helpers}.rs`, `tui/crates/codegen/pi-pager/src/acp/meta.rs`, and `tui/crates/codegen/pi-pager-render/src/prompt_images.rs`. In the VS Code extension: `vscode/src/core/{acp-connection,chat-controller}.ts`.
+> Tests: the files in `packages/pi-agent-cli/tests/` that section 3 names, `vscode/test/`, and `tui/crates/codegen/pi-pager/tests/python_agent_e2e.rs`.
 
 ---
 
 ## 0. Summary
 
 - **What is here.** Eight items. Four have a standard equivalent and stay as legacy items: X1, X4, X7 and X8. Four have none: X2, X3, X5 and X6.
-- **Who reads what.** The agent reads X1, X2, X7 and X8. The pager reads X4 and X5. The VS Code extension (`packages/pi-vscode`) sends X1 and X8, and reads X3 and X5. Zed reads X6. No code in this repository reads X6.
+- **Who reads what.** The agent reads X1, X2, X7 and X8. The pager reads X4 and X5. The VS Code extension (`vscode/`) sends X1 and X8, and reads X3 and X5. Zed reads X6. No code in this repository reads X6.
 - **The gap.** No item is negotiated in `initialize` (rule 5). No item that has a Rust party has its type in `pi-acp-lib` (rule 4). Section 4 has the facts. The owner decided on 2026-11-05 that rules 4 and 5 apply to new items only (section 7), so the eight items stay as they are. This document changes no behaviour.
 - **Not in the register.** The pager sends and reads keys that the agent does not use (section 5). They are not part of the contract.
 
@@ -69,7 +69,7 @@ Paths of the pager are relative to `tui/crates/codegen/pi-pager/src/`. Paths of 
 - **Result.** `{"sessionId": string, "deleted": true}`. The result is the same when the session does not exist, so the call is idempotent. The pager takes any success as done and ignores the body.
 - **Error.** `sessionId` missing, not a string, or blank: `invalid_params` with the data `{"reason": "sessionId is required", "method": "pi/session/delete"}`.
 - **Effect.** If the agent holds the session, it stops the turn and closes the harness, as `session/close` does. It forgets the state of the session and its reserved id. Then it deletes the session file.
-- **Sent by.** The pager: `Effect::DeleteSession` in `app/effects/mod.rs`. Two actions start it: the delete action of the session picker (`app/dispatch/router.rs`) and the command that deletes the current session (`app/dispatch/session/lifecycle.rs`). The VS Code extension: `SessionService.deleteSession` in `packages/pi-vscode/src/core/session-service.ts`.
+- **Sent by.** The pager: `Effect::DeleteSession` in `app/effects/mod.rs`. Two actions start it: the delete action of the session picker (`app/dispatch/router.rs`) and the command that deletes the current session (`app/dispatch/session/lifecycle.rs`). The VS Code extension: `AcpConnection.deleteSession` in `vscode/src/core/acp-connection.ts` (called by `ChatController.deleteSession` in `vscode/src/core/chat-controller.ts`).
 - **Read by.** `PiAcpAgent.ext_method` in `agent.py`. Any other extension method gets `method_not_found`.
 - **Tests.** `test_acp_agent.py` (`test_ext_method_pi_session_delete_removes_repo_session`, `test_ext_method_pi_session_delete_requires_session_id`), `test_session_lifecycle.py`, `test_session_chosen_id.py`.
 - **Status.** Legacy, kept. The plan keeps it and registers it (ADR4). The standard method exists: schema `schema-v1.19.0` has `session/delete` (param `sessionId`) and the capability `sessionCapabilities.delete`. SDK 0.12.1 has the types and the method name, but no route in `acp/agent/router.py`. A standard request therefore gets `method_not_found`, and the agent cannot serve it. When the SDK has the route, the agent must serve and announce the method, the pager must send it, and X1 goes away.
@@ -91,7 +91,7 @@ Paths of the pager are relative to `tui/crates/codegen/pi-pager/src/`. Paths of 
 - **Wire.** Key in the `_meta` of the `session/new`, `session/load` and `session/resume` responses, agent to client.
 - **Schema.** A string: the directory in which the session works. For `load` and `resume`, the directory saved with the session wins over the `cwd` of the request. The key is absent when the agent does not know the directory.
 - **Sent by.** `PiAcpAgent._session_response_meta` in `agent.py`.
-- **Read by.** The VS Code extension: `readSavedCwd` in `packages/pi-vscode/src/core/session-service.ts` (reads `response._meta["pi/cwd"]` after `session/load`). The pager does not read it. A client that knows only where it was started can also use it (`zypi --resume <id>` from another directory).
+- **Read by.** The VS Code extension: `ChatController.loadSessionInto` in `vscode/src/core/chat-controller.ts` (reads `response._meta["pi/cwd"]` after `session/load`). The pager does not read it. A client that knows only where it was started can also use it (`zypi --resume <id>` from another directory).
 - **Tests.** `test_session_chosen_id.py`, `test_blank_session_reopen.py`, `test_acp_stdio_contract.py` (`test_loading_a_session_says_which_directory_it_works_in`).
 - **Status.** In use. Added in round r10 with ADR1 (PR 1). The responses have no `cwd` field in schema `schema-v1.19.0`.
 
@@ -109,7 +109,7 @@ Paths of the pager are relative to `tui/crates/codegen/pi-pager/src/`. Paths of 
 - **Wire.** Key in the `_meta` of `session/update` notifications, agent to client.
 - **Schema.** The boolean `true`. A live update does not have the key. `session/resume` does not replay.
 - **Where.** The agent sets it on each update that `session/load` replays: `user_message_chunk`, `agent_thought_chunk`, `agent_message_chunk`, `tool_call` and `tool_call_update` (`project_message_replay` in `events.py`).
-- **Read by.** The pager: `NotificationMeta::from_json` in `acp/meta.rs` (a missing key is `false`) and `export_cmd/replay.rs` (`zypi export`). The pager needs the flag because a replayed update can arrive after the response to `session/load` (`late_replay_until` in `app/agent_view/mod.rs`), and it must not show that update as live. The VS Code extension: `projectNotification` in `packages/pi-vscode/src/core/session-projector.ts`.
+- **Read by.** The pager: `NotificationMeta::from_json` in `acp/meta.rs` (a missing key is `false`) and `export_cmd/replay.rs` (`zypi export`). The pager needs the flag because a replayed update can arrive after the response to `session/load` (`late_replay_until` in `app/agent_view/mod.rs`), and it must not show that update as live. The VS Code extension: `ChatController.onUpdate` in `vscode/src/core/chat-controller.ts` (reads `update._meta.isReplay`).
 - **Tests.** `test_acp_agent.py` (`test_load_session_replays_history`, `test_resume_session_does_not_replay_history`); `python_agent_e2e.rs` (`a_session_is_listed_with_a_title_and_replayed_by_a_later_agent`).
 - **Status.** In use. The plan keeps the replay of `session/load` (appendix A.1, row "历史回放"). `SessionNotification` has no replay field in schema `schema-v1.19.0`.
 
@@ -143,7 +143,7 @@ Paths of the pager are relative to `tui/crates/codegen/pi-pager/src/`. Paths of 
 - **Wire.** Notification, client to agent. Wire name `_pi/yolo_mode_changed`. Nothing answers it.
 - **Params.** `{"yolo_mode": boolean, "auto_mode": boolean, "permission_mode": string}`. The agent reads only `permission_mode` (it also reads `permissionMode`). The value must be `ask`, `auto` or `always-approve`. The agent ignores letter case and spaces at the ends. It ignores any other value. The agent takes any method whose last part is `yolo_mode_changed` or `permission_mode_changed`; only the first has a sender.
 - **Effect.** The notification has no session id. The agent sets the mode of every open session. The mode is also the start mode of the sessions that open later.
-- **Sent by.** The pager: `persist_permission_mode_and_notify` in `app/effects/helpers.rs`. It sends the notification when the user changes the mode, and only when a session exists. In the variant with rollback, it sends the notification only when the write of the config file succeeded. The VS Code extension: `notifyYoloModeChanged` in `packages/pi-vscode/src/core/session-service.ts` (moves the agent into or out of `always-approve` without writing `always-approve` through `session/set_config_option`).
+- **Sent by.** The pager: `persist_permission_mode_and_notify` in `app/effects/helpers.rs`. It sends the notification when the user changes the mode, and only when a session exists. In the variant with rollback, it sends the notification only when the write of the config file succeeded. The VS Code extension: `AcpConnection.notifyPermissionMode` in `vscode/src/core/acp-connection.ts` (moves the agent into or out of `always-approve` without writing `always-approve` through `session/set_config_option`).
 - **Read by.** `PiAcpAgent.ext_notification` in `agent.py`, with `mode_from_notification` in `permission_modes.py`.
 - **Tests.** `test_permission_mode_wire.py`, `test_acp_stdio_tools.py` (over the wire), `test_acp_agent.py` (`test_permission_mode_notification_updates_live_session_policy`, `test_invalid_permission_mode_notification_is_ignored`), `python_agent_e2e.rs` (`announce_mode`).
 - **Status.** Legacy, kept, with the same decisions as X7. The standard equivalent is `session/set_config_option` (`mode`) or `session/set_mode`. The standard way is per session. This notification moves all sessions.
@@ -204,5 +204,5 @@ The pager sends and reads more keys than the agent uses. The agent neither reads
 
 - The Rust libraries of the pager (`agent-client-protocol` 0.10.4, schema 0.11.4) were not checked for `session/delete`. If they lack it, the pager cannot send the standard request, and X1 cannot go away until they are upgraded.
 - The reading of the X6 keys by Zed comes from the source of Zed, not from a run in Zed. Zed reads `exit_code` as an unsigned integer. The agent sends a negative number only if the `bash` tool reports one. That was not checked.
-- It is not known whether an external client reads X3 or X4 (`packages/pi-vscode` reads X3).
+- It is not known whether an external client reads X3 or X4 (`vscode/` reads X3).
 - Section 5 lists the keys that `zypi` sends or reads and `pi_agent_cli` ignores, as checked in the 2026-11-15 audit.
