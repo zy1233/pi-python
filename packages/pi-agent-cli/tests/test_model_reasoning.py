@@ -40,6 +40,7 @@ async def build_model(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, config: C
         (CliConfig(thinking_level="off"), False),
         (CliConfig(thinking_level="high"), True),
         (CliConfig(thinking_level="xhigh"), True),
+        (CliConfig(thinking_level="max"), True),
         (CliConfig(thinking_level="high", reasoning=False), False),
         (CliConfig(thinking_level="off", reasoning=True), True),
     ],

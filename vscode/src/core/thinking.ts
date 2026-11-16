@@ -5,6 +5,8 @@
  * What agent v0.9.1 offers (read from its source and measured on the 0.9.0 and 0.9.1 binaries):
  * - The level lives in `agent.toml` only: the top-level key `thinking_level`, one of `off`,
  *   `minimal`, `low`, `medium`, `high`, `xhigh`. A missing or invalid value is `off`.
+ *   A later agent adds `max` (`MAX_LEVEL_SINCE`). An agent that does not know `max` reads it as `off`
+ *   and says nothing, so the menu has `max` only for an agent that knows it (`thinkingLevelsFor`).
  * - The agent reads it when the process starts. `session/new` has no thinking option or `_meta`,
  *   `session/set_config_option` refuses any id but `model` and `mode`, and the agent has no
  *   custom method for it. The harness has `set_thinking_level`, but the ACP agent never calls it.
@@ -24,9 +26,23 @@ import path from "node:path";
 import { parse as parseToml } from "smol-toml";
 
 import type { ThinkingLevel, ThinkingLevelOption } from "./protocol.js";
+import { agentVersionAtLeast } from "./version.js";
 
-/** The order of the pager menu (`effort_levels.rs`): strongest first. The ids are the agent's. */
+/**
+ * The first agent release that knows the level `max` (`ThinkingLevel` in `pi_agent_core/types.py`).
+ * An agent before it reads `max` as `off` and says nothing. The user would then think that the model
+ * reasons at the highest level, while it does not reason at all. So the menu has `max` only for an
+ * agent of this version or later.
+ *
+ * This number must be the first release that has `max`, or a later one. A number that is too low shows
+ * `max` to an agent that does not know it. A number that is too high only hides `max`. Check it when
+ * the pin of the bundled agent moves (`vscode/PACKAGING.md`, "Change the agent version").
+ */
+export const MAX_LEVEL_SINCE = "1.0.0";
+
+/** Every level that an agent can know. The order is the one of the pager menu (`effort_levels.rs`): strongest first. The ids are the agent's. */
 export const THINKING_LEVELS: readonly ThinkingLevelOption[] = [
+  { id: "max", name: "max", description: "Maximum reasoning" },
   { id: "xhigh", name: "xhigh", description: "Extended reasoning" },
   { id: "high", name: "high", description: "Heavy reasoning" },
   { id: "medium", name: "medium", description: "Balanced reasoning" },
@@ -35,8 +51,17 @@ export const THINKING_LEVELS: readonly ThinkingLevelOption[] = [
   { id: "off", name: "off", description: "No reasoning" },
 ];
 
-export function isThinkingLevel(value: unknown): value is ThinkingLevel {
-  return typeof value === "string" && THINKING_LEVELS.some((level) => level.id === value);
+/**
+ * The levels that an agent of this version knows, strongest first. `agentVersion` is `agentInfo.version`.
+ * A version that is missing or cannot be read gets the levels that every agent knows.
+ */
+export function thinkingLevelsFor(agentVersion: string | undefined): readonly ThinkingLevelOption[] {
+  return agentVersionAtLeast(agentVersion, MAX_LEVEL_SINCE) ? THINKING_LEVELS : THINKING_LEVELS.filter((level) => level.id !== "max");
+}
+
+/** Whether `value` is one of `levels`. With no `levels`, the ones that every agent knows. */
+export function isThinkingLevel(value: unknown, levels: readonly ThinkingLevelOption[] = thinkingLevelsFor(undefined)): value is ThinkingLevel {
+  return typeof value === "string" && levels.some((level) => level.id === value);
 }
 
 /** What `agent.toml` says about thinking. */
@@ -70,7 +95,11 @@ function stripBom(text: string): string {
   return text.charCodeAt(0) === 0xfeff ? text.slice(1) : text;
 }
 
-export function readThinking(text: string): ThinkingRead {
+/**
+ * What `text` (the content of `agent.toml`) says about thinking. `levels` are the levels that the
+ * agent knows (`thinkingLevelsFor`): any other value is `invalidLevel`, and the agent uses `off`.
+ */
+export function readThinking(text: string, levels: readonly ThinkingLevelOption[] = thinkingLevelsFor(undefined)): ThinkingRead {
   let data: Record<string, unknown>;
   try {
     data = parseToml(stripBom(text));
@@ -80,7 +109,7 @@ export function readThinking(text: string): ThinkingRead {
   const raw = data.thinking_level;
   const value: ThinkingFile = { level: "off", reasoning: undefined };
   if (raw !== undefined) {
-    if (isThinkingLevel(raw)) value.level = raw;
+    if (isThinkingLevel(raw, levels)) value.level = raw;
     else value.invalidLevel = typeof raw === "string" ? raw : typeof raw;
   }
   const model = isTable(data.model) ? data.model : {};

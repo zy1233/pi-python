@@ -10,7 +10,7 @@ import os
 from collections.abc import Callable, Mapping
 from dataclasses import dataclass, field, replace
 from pathlib import Path
-from typing import Any, Literal
+from typing import Any, Literal, get_args
 
 from pi_agent_core.coding_tools.bash import MAX_TIMEOUT_SECONDS
 from pi_agent_core.home import pi_home
@@ -22,7 +22,9 @@ DefaultProjectTrust = Literal["ask", "never", "always"]
 
 _VALID_PERMISSION: set[str] = {"ask", "auto", "always-approve"}
 _VALID_DEFAULT_TRUST: set[str] = {"ask", "never", "always"}
-_VALID_THINKING: set[str] = {"off", "minimal", "low", "medium", "high", "xhigh"}
+# The levels come from the type, so a level that the core learns is valid here at once.
+_THINKING_LEVELS: tuple[str, ...] = get_args(ThinkingLevel)
+_VALID_THINKING: set[str] = set(_THINKING_LEVELS)
 
 # ``pi_home`` (imported above and re-exported from here) is the one place that decides where
 # pi-python keeps its files; the extension loader and the extensions use the same function.
@@ -131,6 +133,8 @@ class ModelChoice:
     In ``[[models]]`` entries unset fields inherit from the default ``[model]`` table, but
     ``base_url`` / ``api_key_env`` / ``supports_images`` are only inherited when ``provider``
     is unset or equals the default provider (credentials never leak across providers).
+    ``context_window`` is never inherited: the size of a context window belongs to one model,
+    and another model of the same provider can have another size.
     """
 
     id: str
@@ -139,7 +143,15 @@ class ModelChoice:
     base_url: str | None = None
     api_key_env: str | None = None
     supports_images: bool | None = None
+    # The context window of the model, in tokens, as the user wrote it. ``None``: not written.
+    # Only a model with a value gets a ``usage_update`` (``context_usage``), and only its value
+    # reaches ``Model.context_window`` (``factory.model_for_choice``).
+    context_window: int | None = None
 
+
+# The largest ``context_window`` that is accepted. It is far above any model that exists. A
+# value above it is a typing error, and a client could not read it as a size.
+MAX_CONTEXT_WINDOW = 1_000_000_000
 
 AutoClassifier = Literal["rules", "model"]
 
@@ -191,8 +203,14 @@ class CliConfig:
     base_url: str | None = None
     thinking_level: ThinkingLevel = "off"
     max_turns: int | None = None
+    # Whether the agent compacts the context by itself. ``None``: not set, and then
+    # ``factory.auto_compact_enabled`` decides.
+    auto_compact: bool | None = None
     api_key_env: str | None = None
     supports_images: bool | None = None
+    # ``[model] context_window``: the window of the default model, in tokens. ``None``: not set
+    # (see ``ModelChoice.context_window``).
+    context_window: int | None = None
     # Whether the model can reason (``Model.reasoning``). ``None``: not set, and then asking
     # for a thinking level is taken as saying so (``model_reasoning``).
     reasoning: bool | None = None
@@ -238,6 +256,7 @@ class CliConfig:
             base_url=self.base_url,
             api_key_env=self.api_key_env,
             supports_images=self.supports_images,
+            context_window=self.context_window,
         )
 
     def model_choices(self) -> tuple[ModelChoice, ...]:
@@ -263,6 +282,8 @@ class CliConfig:
                     supports_images=item.supports_images
                     if item.supports_images is not None or not same_provider
                     else self.supports_images,
+                    # Not inherited, not even from the same provider: see ``ModelChoice``.
+                    context_window=item.context_window,
                 )
             )
         return tuple(out)
@@ -359,11 +380,26 @@ def _from_toml(data: dict[str, Any]) -> CliConfig:
         )
         permission = "ask"
     thinking = data.get("thinking_level", "off")
-    if thinking not in _VALID_THINKING:
+    thinking_note: str | None = None
+    if not isinstance(thinking, str) or thinking not in _VALID_THINKING:
+        # No thinking, and the user is told. This was silent, so a typo looked like "off".
+        thinking_note = (
+            "thinking_level in agent.toml must be "
+            + ", ".join(f'"{level}"' for level in _THINKING_LEVELS[:-1])
+            + f' or "{_THINKING_LEVELS[-1]}". The agent uses "off".'
+        )
         thinking = "off"
     max_turns = data.get("max_turns")
     if max_turns is not None:
         max_turns = int(max_turns)
+
+    auto_compact_raw = data.get("auto_compact")
+    auto_compact: bool | None = None
+    compact_note: str | None = None
+    if isinstance(auto_compact_raw, bool):
+        auto_compact = auto_compact_raw
+    elif auto_compact_raw is not None:
+        compact_note = "auto_compact in agent.toml must be true or false, and it is ignored."
 
     raw_paths = skills.get("paths") or skills.get("dirs") or []
     skills_dirs: tuple[str, ...] = ()
@@ -374,6 +410,20 @@ def _from_toml(data: dict[str, Any]) -> CliConfig:
     if supports_images_raw is None:
         supports_images_raw = data.get("supports_images")
     supports_images = bool(supports_images_raw) if supports_images_raw is not None else None
+
+    # A ``context_window`` that cannot be used is dropped, and the user is told (``auto.notes``).
+    window_notes: list[str] = []
+
+    def _window(value: object, where: str) -> int | None:
+        window, note = _context_window(value, where)
+        if note is not None:
+            window_notes.append(note)
+        return window
+
+    context_window_raw = model.get("context_window")
+    if context_window_raw is None:
+        context_window_raw = data.get("context_window")
+    context_window = _window(context_window_raw, "[model]")
 
     reasoning_raw = model.get("reasoning")
     if reasoning_raw is None:
@@ -413,12 +463,20 @@ def _from_toml(data: dict[str, Any]) -> CliConfig:
                     base_url=_optional_str(item.get("base_url")),
                     api_key_env=_optional_str(item.get("api_key_env")),
                     supports_images=bool(images) if images is not None else None,
+                    context_window=_window(
+                        item.get("context_window"), f'the "{model_id}" entry of [[models]]'
+                    ),
                 )
             )
 
     auto = _auto_config(data.get("auto"))
-    if permission_note is not None:
-        auto = replace(auto, notes=(permission_note, *auto.notes))
+    leading_notes = [
+        note
+        for note in (permission_note, thinking_note, *window_notes, compact_note)
+        if note is not None
+    ]
+    if leading_notes:
+        auto = replace(auto, notes=(*leading_notes, *auto.notes))
 
     config = CliConfig(
         permission=permission,  # type: ignore[arg-type]
@@ -427,8 +485,10 @@ def _from_toml(data: dict[str, Any]) -> CliConfig:
         base_url=model.get("base_url") or data.get("base_url"),
         thinking_level=thinking,  # type: ignore[arg-type]
         max_turns=max_turns,
+        auto_compact=auto_compact,
         api_key_env=model.get("api_key_env") or data.get("api_key_env"),
         supports_images=supports_images,
+        context_window=context_window,
         reasoning=reasoning,
         skills_dirs=skills_dirs,
         agent_command=agent_command,
@@ -598,6 +658,26 @@ def _default_project_trust(value: object) -> DefaultProjectTrust | None:
         return None
     text = value.strip().lower()
     return text if text in _VALID_DEFAULT_TRUST else None  # type: ignore[return-value]
+
+
+def _context_window(value: object, where: str) -> tuple[int | None, str | None]:
+    """The ``context_window`` of one model: ``(tokens, None)``, or ``(None, note)``.
+
+    The value is a whole number from 1 to ``MAX_CONTEXT_WINDOW``. A key that is not there gives
+    ``(None, None)``. Any other value cannot be used: it is dropped, and the note says so. The
+    agent then sends no context size for that model, and it does not guess one. A TOML float
+    with no fraction (``1.28e5``) is a whole number; a boolean is not.
+    """
+    if value is None:
+        return None, None
+    if isinstance(value, float) and value.is_integer():
+        value = int(value)
+    if isinstance(value, int) and not isinstance(value, bool) and 0 < value <= MAX_CONTEXT_WINDOW:
+        return value, None
+    return None, (
+        f"context_window of {where} must be a whole number of tokens from 1 to "
+        f"{MAX_CONTEXT_WINDOW}. The agent ignores it and sends no context size for that model."
+    )
 
 
 def _as_bool(value: object, default: bool) -> bool:

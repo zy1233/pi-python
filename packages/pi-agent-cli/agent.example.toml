@@ -24,8 +24,14 @@ permission = "ask" # ask | auto | always-approve
 # `always-approve` asks about nothing. Headless (-p) runs always use it. Before this version,
 # `auto` meant "ask about nothing": use `always-approve` for that.
 
-thinking_level = "off" # off | minimal | low | medium | high | xhigh
-max_turns = 50
+thinking_level = "off" # off | minimal | low | medium | high | xhigh | max
+# The most model calls that one prompt may make. It stops a loop that does not end, and it does
+# not limit the size of the context. Unset: no limit.
+max_turns = 200
+# Does the agent compact the context by itself when it is nearly full? Unset: yes when the model
+# has a `context_window` (below) or `max_turns` is 30 or more. `false` turns it off. `true` turns
+# it on for a model with no `context_window` too (the agent then assumes 128,000 tokens).
+# auto_compact = true
 
 [model]
 provider = "deepseek"
@@ -35,13 +41,21 @@ api_key_env = "REAL_LLM_API_KEY" # key for `provider` only; other providers use 
 # Can the model reason? A thinking_level other than "off" is sent to the provider only if so.
 # Unset: any level but "off" says it can. `false` keeps a model that rejects reasoning parameters out of them.
 # reasoning = true
+# The context window of the model, in tokens (a whole number). With it the agent tells a client how
+# full the context is (ACP `usage_update`; the VS Code extension shows it as a Context row), and
+# compaction (see `auto_compact`) starts before the window is full. Unset: the agent sends no
+# context size and does not guess one (compaction then assumes 128,000 tokens). Use the real window
+# that your provider serves: a wrong number gives a wrong percent.
+# context_window = 1000000
 
 # Extra models for the TUI `/model` picker (ACP session config option "model").
 # `[model]` above is always offered first; unset fields inherit from it, but
 # base_url / api_key_env / supports_images only when `provider` is unset or the same.
+# `context_window` is never inherited: a window belongs to one model, so set it in each entry.
 # [[models]]
 # id = "deepseek-ai/DeepSeek-V4-Pro"
 # name = "DeepSeek V4 Pro"
+# context_window = 1000000
 #
 # [[models]]
 # provider = "openai"

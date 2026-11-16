@@ -136,6 +136,7 @@ provider = "deepseek"                              # or "openai", "anthropic"
 id = "deepseek-ai/DeepSeek-V4-Flash"
 api_key_env = "REAL_LLM_API_KEY"                   # env var holding the key for `provider` only
 base_url = "https://api.siliconflow.cn/v1"         # for OpenAI-compatible gateways
+context_window = 128000                            # tokens; the agent then tells a client how full the context is (ACP `usage_update`)
 
 [skills]
 # ".pi/skills" is relative to the project, so it loads only for a trusted project (see [extensions]).

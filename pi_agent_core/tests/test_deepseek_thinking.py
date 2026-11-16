@@ -92,6 +92,7 @@ class TestThinkingOn:
             ("medium", "high"),
             ("high", "high"),
             ("xhigh", "max"),
+            ("max", "max"),
         ],
     )
     @pytest.mark.parametrize("base_url", [None, "https://api.deepseek.com/v1"])
@@ -131,7 +132,7 @@ class TestThinkingOff:
 
         assert kwargs == {"extra_body": {"thinking": NOT_THINKING}}
 
-    @pytest.mark.parametrize("level", ["minimal", "high", "xhigh"])
+    @pytest.mark.parametrize("level", ["minimal", "high", "xhigh", "max"])
     def test_a_model_not_declared_to_reason_does_not_think_whatever_the_level(self, level: str):
         kwargs = _apply_reasoning_params({}, deepseek(reasoning=False), level)  # type: ignore[arg-type]
 
@@ -149,7 +150,7 @@ class TestThinkingOff:
 class TestGatewaysAreLeftAlone:
     @pytest.mark.parametrize("base_url", GATEWAYS)
     @pytest.mark.parametrize("reasoning", [True, False])
-    @pytest.mark.parametrize("level", ["off", "low", "xhigh", None])
+    @pytest.mark.parametrize("level", ["off", "low", "xhigh", "max", None])
     def test_nothing_is_added(self, base_url: str, reasoning: bool, level: str | None):
         model = deepseek(reasoning=reasoning, base_url=base_url)
 
@@ -170,6 +171,7 @@ class TestOtherProvidersAreNotAffected:
         )
 
         assert _apply_reasoning_params({}, model, "high") == {"reasoning_effort": "high"}
+        assert _apply_reasoning_params({}, model, "max") == {"reasoning_effort": "max"}
         assert _apply_reasoning_params({}, model, "off") == {}
 
 

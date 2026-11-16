@@ -264,7 +264,7 @@ def test_model_reasoning_follows_the_thinking_level_unless_set():
     ``reasoning`` setting overrides that either way."""
     assert CliConfig().model_reasoning is False
     assert CliConfig(thinking_level="off").model_reasoning is False
-    for level in ("minimal", "low", "medium", "high", "xhigh"):
+    for level in ("minimal", "low", "medium", "high", "xhigh", "max"):
         assert CliConfig(thinking_level=level).model_reasoning is True  # type: ignore[arg-type]
     assert CliConfig(thinking_level="high", reasoning=False).model_reasoning is False
     assert CliConfig(thinking_level="off", reasoning=True).model_reasoning is True
@@ -603,3 +603,45 @@ def test_a_file_of_the_project_cannot_set_the_auto_table(tmp_path: Path):
 
     assert config.permission == "ask"
     assert config.auto == AutoConfig()
+
+
+# ---------------------------------------------------------------------------------------------
+# ``thinking_level``: the levels, and what a value that is not one of them does
+# ---------------------------------------------------------------------------------------------
+
+
+@pytest.mark.parametrize("level", ["off", "minimal", "low", "medium", "high", "xhigh", "max"])
+def test_every_thinking_level_is_read_and_needs_no_note(tmp_path: Path, level: str):
+    config = _load(tmp_path, f'thinking_level = "{level}"\n')
+
+    assert config.thinking_level == level
+    assert config.auto.notes == ()
+
+
+def test_no_thinking_level_is_off_and_needs_no_note(tmp_path: Path):
+    config = _load(tmp_path, 'permission = "ask"\n')
+
+    assert config.thinking_level == "off"
+    assert config.auto.notes == ()
+
+
+def test_max_asks_the_model_to_reason(tmp_path: Path):
+    """The level is how a user says that the model can reason, ``max`` included."""
+    assert _load(tmp_path, 'thinking_level = "max"\n').model_reasoning is True
+
+
+@pytest.mark.parametrize(
+    "raw",
+    ['"ultra"', '"MAX"', '""', "5", "true", '["high"]'],
+    ids=["unknown", "other-case", "empty", "number", "boolean", "list"],
+)
+def test_a_thinking_level_that_is_not_known_is_off_and_the_user_is_told(tmp_path: Path, raw: str):
+    """It was silent: a typo looked like ``off``. A list used to stop the loading too."""
+    config = _load(tmp_path, f"thinking_level = {raw}\n")
+
+    assert config.thinking_level == "off"
+    assert config.model_reasoning is False
+    (note,) = config.auto.notes
+    assert note.startswith("thinking_level in agent.toml must be ")
+    assert '"xhigh" or "max"' in note  # every level is named, in the order of the type
+    assert note.endswith('The agent uses "off".')
