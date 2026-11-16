@@ -57,14 +57,43 @@ def model_for_choice(choice: ModelChoice, *, reasoning: bool = False) -> Model:
     The choice is the ``[model]`` default or a ``[[models]]`` entry. ``reasoning`` (whether
     the model can think, ``CliConfig.model_reasoning``) is a property of the whole session
     configuration, so every choice gets the same value.
+
+    ``Model.context_window`` is set only when the choice has a ``context_window``. A choice
+    with none keeps the default of the core (128,000), which is a placeholder: compaction uses
+    it, and ``context_usage`` never sends it to a client.
     """
     provider = choice.provider or "mock"
-    return Model(
+    model = Model(
         provider=provider,
         model_id=choice.id,
         base_url=choice.base_url,
         supports_images=_detect_vlm_support(provider, choice.id, choice.supports_images),
         reasoning=reasoning,
+    )
+    if choice.context_window is not None:
+        model.context_window = choice.context_window
+    return model
+
+
+def compaction_settings(choice: ModelChoice, *, auto_compact: bool) -> CompactionSettings:
+    """Compaction limits for ``choice``.
+
+    The defaults of the harness keep 16,384 tokens free (``reserve_tokens``) and keep the last
+    20,000 tokens as they are (``keep_recent_tokens``). They fit a window of about 64,000
+    tokens or more. In a smaller window the limit for compaction falls below the part that is
+    kept, and compaction would run again after every turn. So for a choice with a declared
+    ``context_window`` the two numbers are cut to a share of the window (a quarter and a
+    third); a large window keeps the defaults. A choice with no window keeps the defaults:
+    its window is the placeholder of the core (``model_for_choice``).
+    """
+    window = choice.context_window
+    if window is None:
+        return CompactionSettings(auto_compact=auto_compact)
+    defaults = CompactionSettings()
+    return CompactionSettings(
+        auto_compact=auto_compact,
+        reserve_tokens=max(1, min(defaults.reserve_tokens, window // 4)),
+        keep_recent_tokens=max(1, min(defaults.keep_recent_tokens, window // 3)),
     )
 
 
@@ -279,7 +308,7 @@ async def create_session_harness(
         system_prompt=system_prompt_callback,
         thinking_level=config.thinking_level,
         max_turns=config.max_turns,
-        compaction=CompactionSettings(auto_compact=auto_compact),
+        compaction=compaction_settings(choice, auto_compact=auto_compact),
         auto_discover_extensions=True,
         trust_project_extensions=(
             trust.trusted if trust is not None else project_extensions_trusted(config, cwd_s)

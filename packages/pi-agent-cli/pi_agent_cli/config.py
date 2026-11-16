@@ -131,6 +131,8 @@ class ModelChoice:
     In ``[[models]]`` entries unset fields inherit from the default ``[model]`` table, but
     ``base_url`` / ``api_key_env`` / ``supports_images`` are only inherited when ``provider``
     is unset or equals the default provider (credentials never leak across providers).
+    ``context_window`` is never inherited: the size of a context window belongs to one model,
+    and another model of the same provider can have another size.
     """
 
     id: str
@@ -139,7 +141,15 @@ class ModelChoice:
     base_url: str | None = None
     api_key_env: str | None = None
     supports_images: bool | None = None
+    # The context window of the model, in tokens, as the user wrote it. ``None``: not written.
+    # Only a model with a value gets a ``usage_update`` (``context_usage``), and only its value
+    # reaches ``Model.context_window`` (``factory.model_for_choice``).
+    context_window: int | None = None
 
+
+# The largest ``context_window`` that is accepted. It is far above any model that exists. A
+# value above it is a typing error, and a client could not read it as a size.
+MAX_CONTEXT_WINDOW = 1_000_000_000
 
 AutoClassifier = Literal["rules", "model"]
 
@@ -193,6 +203,9 @@ class CliConfig:
     max_turns: int | None = None
     api_key_env: str | None = None
     supports_images: bool | None = None
+    # ``[model] context_window``: the window of the default model, in tokens. ``None``: not set
+    # (see ``ModelChoice.context_window``).
+    context_window: int | None = None
     # Whether the model can reason (``Model.reasoning``). ``None``: not set, and then asking
     # for a thinking level is taken as saying so (``model_reasoning``).
     reasoning: bool | None = None
@@ -238,6 +251,7 @@ class CliConfig:
             base_url=self.base_url,
             api_key_env=self.api_key_env,
             supports_images=self.supports_images,
+            context_window=self.context_window,
         )
 
     def model_choices(self) -> tuple[ModelChoice, ...]:
@@ -263,6 +277,8 @@ class CliConfig:
                     supports_images=item.supports_images
                     if item.supports_images is not None or not same_provider
                     else self.supports_images,
+                    # Not inherited, not even from the same provider: see ``ModelChoice``.
+                    context_window=item.context_window,
                 )
             )
         return tuple(out)
@@ -375,6 +391,20 @@ def _from_toml(data: dict[str, Any]) -> CliConfig:
         supports_images_raw = data.get("supports_images")
     supports_images = bool(supports_images_raw) if supports_images_raw is not None else None
 
+    # A ``context_window`` that cannot be used is dropped, and the user is told (``auto.notes``).
+    window_notes: list[str] = []
+
+    def _window(value: object, where: str) -> int | None:
+        window, note = _context_window(value, where)
+        if note is not None:
+            window_notes.append(note)
+        return window
+
+    context_window_raw = model.get("context_window")
+    if context_window_raw is None:
+        context_window_raw = data.get("context_window")
+    context_window = _window(context_window_raw, "[model]")
+
     reasoning_raw = model.get("reasoning")
     if reasoning_raw is None:
         reasoning_raw = data.get("reasoning")
@@ -413,12 +443,16 @@ def _from_toml(data: dict[str, Any]) -> CliConfig:
                     base_url=_optional_str(item.get("base_url")),
                     api_key_env=_optional_str(item.get("api_key_env")),
                     supports_images=bool(images) if images is not None else None,
+                    context_window=_window(
+                        item.get("context_window"), f'the "{model_id}" entry of [[models]]'
+                    ),
                 )
             )
 
     auto = _auto_config(data.get("auto"))
-    if permission_note is not None:
-        auto = replace(auto, notes=(permission_note, *auto.notes))
+    leading_notes = [note for note in (permission_note, *window_notes) if note is not None]
+    if leading_notes:
+        auto = replace(auto, notes=(*leading_notes, *auto.notes))
 
     config = CliConfig(
         permission=permission,  # type: ignore[arg-type]
@@ -429,6 +463,7 @@ def _from_toml(data: dict[str, Any]) -> CliConfig:
         max_turns=max_turns,
         api_key_env=model.get("api_key_env") or data.get("api_key_env"),
         supports_images=supports_images,
+        context_window=context_window,
         reasoning=reasoning,
         skills_dirs=skills_dirs,
         agent_command=agent_command,
@@ -598,6 +633,26 @@ def _default_project_trust(value: object) -> DefaultProjectTrust | None:
         return None
     text = value.strip().lower()
     return text if text in _VALID_DEFAULT_TRUST else None  # type: ignore[return-value]
+
+
+def _context_window(value: object, where: str) -> tuple[int | None, str | None]:
+    """The ``context_window`` of one model: ``(tokens, None)``, or ``(None, note)``.
+
+    The value is a whole number from 1 to ``MAX_CONTEXT_WINDOW``. A key that is not there gives
+    ``(None, None)``. Any other value cannot be used: it is dropped, and the note says so. The
+    agent then sends no context size for that model, and it does not guess one. A TOML float
+    with no fraction (``1.28e5``) is a whole number; a boolean is not.
+    """
+    if value is None:
+        return None, None
+    if isinstance(value, float) and value.is_integer():
+        value = int(value)
+    if isinstance(value, int) and not isinstance(value, bool) and 0 < value <= MAX_CONTEXT_WINDOW:
+        return value, None
+    return None, (
+        f"context_window of {where} must be a whole number of tokens from 1 to "
+        f"{MAX_CONTEXT_WINDOW}. The agent ignores it and sends no context size for that model."
+    )
 
 
 def _as_bool(value: object, default: bool) -> bool:
