@@ -24,7 +24,7 @@ permission = "ask" # ask | auto | always-approve
 # `always-approve` asks about nothing. Headless (-p) runs always use it. Before this version,
 # `auto` meant "ask about nothing": use `always-approve` for that.
 
-thinking_level = "off" # off | minimal | low | medium | high | xhigh
+thinking_level = "off" # off | minimal | low | medium | high | xhigh | max
 max_turns = 50
 
 [model]

@@ -146,7 +146,9 @@ agent_start → turn_start → message_start(user) → message_end(user)
 
 ### 5.2 Thinking / Reasoning
 
-`ThinkingLevel`（off/minimal/low/medium/high/xhigh）映射为 provider 参数：Anthropic `thinking.budget_tokens` + 联动 `max_tokens`；OpenAI `reasoning_effort`；DeepSeek 官方 API 经 `extra_body` 发 `thinking: enabled|disabled` 与 `reasoning_effort`（它默认开启思考，所以闸门关闭时显式发 `disabled`；网关不发。见 Phase 6 规格 §5.4）。Anthropic thinking 块流式捕获为 `ThinkingContent`（含 `signature` 用于多轮工具回放），以 `thinking_delta` 事件实时发射。DeepSeek 风格网关流式返回的 `reasoning_content`（或 `reasoning`）同样捕获：`provider="deepseek"` 由 `ChatDeepSeek` 保留，`provider="openai"` 由 `adapters/openai_reasoning.py` 的 `ChatOpenAI` 子类保留（普通 `ChatOpenAI` 会丢掉它；冻结版只有 openai provider，靠这个才能显示思考；该子类只保留流，不回传）。DeepSeek 官方 API 开启思考时，之前 assistant 消息的这部分在后续请求里按 `reasoning_content` 回传（不回传会 400；`adapters/deepseek_replay.py`，Phase 6 规格 §5.5），网关不回传。
+`ThinkingLevel`（off/minimal/low/medium/high/xhigh/max）映射为 provider 参数：Anthropic `thinking.budget_tokens` + 联动 `max_tokens`；OpenAI `reasoning_effort`；DeepSeek 官方 API 经 `extra_body` 发 `thinking: enabled|disabled` 与 `reasoning_effort`（它默认开启思考，所以闸门关闭时显式发 `disabled`；网关不发。见 Phase 6 规格 §5.4）。Anthropic thinking 块流式捕获为 `ThinkingContent`（含 `signature` 用于多轮工具回放），以 `thinking_delta` 事件实时发射。DeepSeek 风格网关流式返回的 `reasoning_content`（或 `reasoning`）同样捕获：`provider="deepseek"` 由 `ChatDeepSeek` 保留，`provider="openai"` 由 `adapters/openai_reasoning.py` 的 `ChatOpenAI` 子类保留（普通 `ChatOpenAI` 会丢掉它；冻结版只有 openai provider，靠这个才能显示思考；该子类只保留流，不回传）。DeepSeek 官方 API 开启思考时，之前 assistant 消息的这部分在后续请求里按 `reasoning_content` 回传（不回传会 400；`adapters/deepseek_replay.py`，Phase 6 规格 §5.5），网关不回传。
+
+`max` 是 `xhigh` 之上的等级（上游 pi 在 v0.80.6 加入；pi 靠每个模型的 `thinkingLevelMap` 决定哪些等级可用，本适配器没有这张表）。它在 OpenAI 格式（含网关）和 DeepSeek 官方 API 上原样发 `"max"`；Anthropic 的预算形式没有比 `xhigh` 更高的一档，所以 `max` 用 `xhigh` 的预算（40000）。适配器不按模型降级：模型不接受 `max` 时，服务端返回错误，错误会显示出来。三张映射表（`_ANTHROPIC_BUDGET`、`_OPENAI_EFFORT`、`_DEEPSEEK_EFFORT`）必须列出每一个等级（测试检查）：缺一个键，请求里就没有推理参数，模型会静默不思考。`agent.toml` 里写了不认识的等级时，agent 用 `off`，并在会话开始时告诉用户。Anthropic 的文档说，较新的模型（Claude 4.7 及以后）会拒绝 `budget_tokens`，要用自适应思考加 `effort`；本适配器只发预算形式（未对真实 API 验证；这是另一项工作）。
 
 ### 5.3 跨 Provider 消息回放 (`transform.py`)
 

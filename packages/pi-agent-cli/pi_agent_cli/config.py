@@ -10,7 +10,7 @@ import os
 from collections.abc import Callable, Mapping
 from dataclasses import dataclass, field, replace
 from pathlib import Path
-from typing import Any, Literal
+from typing import Any, Literal, get_args
 
 from pi_agent_core.coding_tools.bash import MAX_TIMEOUT_SECONDS
 from pi_agent_core.home import pi_home
@@ -22,7 +22,9 @@ DefaultProjectTrust = Literal["ask", "never", "always"]
 
 _VALID_PERMISSION: set[str] = {"ask", "auto", "always-approve"}
 _VALID_DEFAULT_TRUST: set[str] = {"ask", "never", "always"}
-_VALID_THINKING: set[str] = {"off", "minimal", "low", "medium", "high", "xhigh"}
+# The levels come from the type, so a level that the core learns is valid here at once.
+_THINKING_LEVELS: tuple[str, ...] = get_args(ThinkingLevel)
+_VALID_THINKING: set[str] = set(_THINKING_LEVELS)
 
 # ``pi_home`` (imported above and re-exported from here) is the one place that decides where
 # pi-python keeps its files; the extension loader and the extensions use the same function.
@@ -375,7 +377,14 @@ def _from_toml(data: dict[str, Any]) -> CliConfig:
         )
         permission = "ask"
     thinking = data.get("thinking_level", "off")
-    if thinking not in _VALID_THINKING:
+    thinking_note: str | None = None
+    if not isinstance(thinking, str) or thinking not in _VALID_THINKING:
+        # No thinking, and the user is told. This was silent, so a typo looked like "off".
+        thinking_note = (
+            "thinking_level in agent.toml must be "
+            + ", ".join(f'"{level}"' for level in _THINKING_LEVELS[:-1])
+            + f' or "{_THINKING_LEVELS[-1]}". The agent uses "off".'
+        )
         thinking = "off"
     max_turns = data.get("max_turns")
     if max_turns is not None:
@@ -450,7 +459,9 @@ def _from_toml(data: dict[str, Any]) -> CliConfig:
             )
 
     auto = _auto_config(data.get("auto"))
-    leading_notes = [note for note in (permission_note, *window_notes) if note is not None]
+    leading_notes = [
+        note for note in (permission_note, thinking_note, *window_notes) if note is not None
+    ]
     if leading_notes:
         auto = replace(auto, notes=(*leading_notes, *auto.notes))
 

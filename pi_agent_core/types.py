@@ -22,7 +22,7 @@ from pi_agent_core.messages import (
     UsageCost,
 )
 
-ThinkingLevel = Literal["off", "minimal", "low", "medium", "high", "xhigh"]
+ThinkingLevel = Literal["off", "minimal", "low", "medium", "high", "xhigh", "max"]
 ToolExecutionMode = Literal["sequential", "parallel"]
 QueueMode = Literal["all", "one-at-a-time"]
 
