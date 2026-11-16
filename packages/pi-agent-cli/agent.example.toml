@@ -25,7 +25,13 @@ permission = "ask" # ask | auto | always-approve
 # `auto` meant "ask about nothing": use `always-approve` for that.
 
 thinking_level = "off" # off | minimal | low | medium | high | xhigh | max
-max_turns = 50
+# The most model calls that one prompt may make. It stops a loop that does not end, and it does
+# not limit the size of the context. Unset: no limit.
+max_turns = 200
+# Does the agent compact the context by itself when it is nearly full? Unset: yes when the model
+# has a `context_window` (below) or `max_turns` is 30 or more. `false` turns it off. `true` turns
+# it on for a model with no `context_window` too (the agent then assumes 128,000 tokens).
+# auto_compact = true
 
 [model]
 provider = "deepseek"
@@ -37,9 +43,10 @@ api_key_env = "REAL_LLM_API_KEY" # key for `provider` only; other providers use 
 # reasoning = true
 # The context window of the model, in tokens (a whole number). With it the agent tells a client how
 # full the context is (ACP `usage_update`; the VS Code extension shows it as a Context row), and
-# compaction (`max_turns` of 30 or more) uses it. Unset: the agent sends no context size and does not
-# guess one. Use the real window of your model: a wrong number gives a wrong percent.
-# context_window = 128000
+# compaction (see `auto_compact`) starts before the window is full. Unset: the agent sends no
+# context size and does not guess one (compaction then assumes 128,000 tokens). Use the real window
+# that your provider serves: a wrong number gives a wrong percent.
+# context_window = 1000000
 
 # Extra models for the TUI `/model` picker (ACP session config option "model").
 # `[model]` above is always offered first; unset fields inherit from it, but
@@ -48,7 +55,7 @@ api_key_env = "REAL_LLM_API_KEY" # key for `provider` only; other providers use 
 # [[models]]
 # id = "deepseek-ai/DeepSeek-V4-Pro"
 # name = "DeepSeek V4 Pro"
-# context_window = 128000
+# context_window = 1000000
 #
 # [[models]]
 # provider = "openai"

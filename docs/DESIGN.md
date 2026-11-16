@@ -163,7 +163,7 @@ messages → normalize_tool_call_ids → downgrade_thinking → strip_unsupporte
 ### 5.4 流式重试与失控保护
 
 - **重试**：首 token 前指数退避 + 抖动（`Retry-After` 感知），可配 `max_retries`
-- **`max_turns`**：超限抛 `MaxTurnsExceededError`，Agent 转为 error-stop assistant message
+- **`max_turns`**：超限抛 `MaxTurnsExceededError`，Agent 转为 error-stop assistant message。错误文本以 `MAX_TURNS_MESSAGE` 开头；ACP CLI 靠它把这次停止报成 `max_turn_requests`（其他错误仍是 `end_turn`）。默认值是 `None`（不限制）
 - **`tool_timeout`**：单工具超时 → error tool result（LLM 可见可自纠）
 
 ### 5.5 Guardrail Hooks 与可观测性

@@ -101,6 +101,7 @@ from pi_agent_cli.extension_trust import (
 )
 from pi_agent_cli.factory import (
     api_key_for_choice,
+    auto_compact_enabled,
     compaction_settings,
     create_session_harness,
     default_stream_fn,
@@ -137,7 +138,7 @@ from pi_agent_cli.trust_prompt import (
 from pi_agent_cli.trust_store import TrustStore
 from pi_agent_core.coding_tools.path_utils import normalize_host_path
 from pi_agent_core.messages import ImageContent
-from pi_agent_core.types import StreamFn
+from pi_agent_core.types import MAX_TURNS_MESSAGE, StreamFn
 from pi_agent_harness import (
     AgentHarness,
     AgentHarnessError,
@@ -575,9 +576,10 @@ class PiAcpAgent(Agent):
                 {"configId": config_id, "value": value, "reason": "unknown model"}
             )
         await harness.set_model(model_for_choice(choice, reasoning=self._config.model_reasoning))
-        # The limits of compaction depend on the window of the model (``compaction_settings``).
+        # Whether the agent compacts by itself, and the limits of compaction, depend on the
+        # window of the model (``auto_compact_enabled``, ``compaction_settings``).
         harness.compaction = compaction_settings(
-            choice, auto_compact=harness.compaction.auto_compact
+            choice, auto_compact=auto_compact_enabled(self._config, choice)
         )
         harness.get_api_key = api_key_for_choice(choice)
         self._session_models[session_id] = choice
@@ -1579,6 +1581,10 @@ def _stop_reason(message: Any) -> str:
 
     ACP stopReason enum: 'end_turn' | 'max_tokens' | 'max_turn_requests' | 'refusal' | 'cancelled'.
     Internal stopReason values: 'stop' | 'length' | 'toolUse' | 'error' | 'aborted'.
+
+    An 'error' is 'max_turn_requests' when the loop hit its ``max_turns`` limit (the one error
+    that ACP has a word for), 'refusal' when the text says the provider refused, and 'end_turn'
+    for any other error: the client shows the text of the error as a message of the agent.
     """
     reason = getattr(message, "stopReason", None) or "stop"
     if reason == "aborted":
@@ -1587,6 +1593,8 @@ def _stop_reason(message: Any) -> str:
         return "max_tokens"
     if reason == "error":
         err = str(getattr(message, "errorMessage", "") or "")
+        if MAX_TURNS_MESSAGE in err:
+            return "max_turn_requests"
         if any(w in err.lower() for w in ("refus", "policy", "filter", "safety")):
             return "refusal"
         return "end_turn"

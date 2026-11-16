@@ -203,6 +203,9 @@ class CliConfig:
     base_url: str | None = None
     thinking_level: ThinkingLevel = "off"
     max_turns: int | None = None
+    # Whether the agent compacts the context by itself. ``None``: not set, and then
+    # ``factory.auto_compact_enabled`` decides.
+    auto_compact: bool | None = None
     api_key_env: str | None = None
     supports_images: bool | None = None
     # ``[model] context_window``: the window of the default model, in tokens. ``None``: not set
@@ -390,6 +393,14 @@ def _from_toml(data: dict[str, Any]) -> CliConfig:
     if max_turns is not None:
         max_turns = int(max_turns)
 
+    auto_compact_raw = data.get("auto_compact")
+    auto_compact: bool | None = None
+    compact_note: str | None = None
+    if isinstance(auto_compact_raw, bool):
+        auto_compact = auto_compact_raw
+    elif auto_compact_raw is not None:
+        compact_note = "auto_compact in agent.toml must be true or false, and it is ignored."
+
     raw_paths = skills.get("paths") or skills.get("dirs") or []
     skills_dirs: tuple[str, ...] = ()
     if isinstance(raw_paths, list):
@@ -460,7 +471,9 @@ def _from_toml(data: dict[str, Any]) -> CliConfig:
 
     auto = _auto_config(data.get("auto"))
     leading_notes = [
-        note for note in (permission_note, thinking_note, *window_notes) if note is not None
+        note
+        for note in (permission_note, thinking_note, *window_notes, compact_note)
+        if note is not None
     ]
     if leading_notes:
         auto = replace(auto, notes=(*leading_notes, *auto.notes))
@@ -472,6 +485,7 @@ def _from_toml(data: dict[str, Any]) -> CliConfig:
         base_url=model.get("base_url") or data.get("base_url"),
         thinking_level=thinking,  # type: ignore[arg-type]
         max_turns=max_turns,
+        auto_compact=auto_compact,
         api_key_env=model.get("api_key_env") or data.get("api_key_env"),
         supports_images=supports_images,
         context_window=context_window,

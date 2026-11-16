@@ -54,7 +54,7 @@ The change follows the proposal of the first version of this record. The differe
 
 ## 5. Risks and side effects
 
-- **Compaction changes (on purpose).** For a model with a `context_window`, `should_compact` uses the real window, in each session that has `auto_compact` on (`max_turns >= 30`; `agent.example.toml` sets 50). A model with a window under 128,000 compacts earlier (this is correct). A model with a larger window compacts later. A model with no `context_window` does not change. Test: `test_compaction_uses_the_window_that_the_user_declared`.
+- **Compaction changes (on purpose).** For a model with a `context_window`, `should_compact` uses the real window, in each session that has `auto_compact` on (since 2026-11-16 the key `auto_compact` and a declared window decide, and `max_turns >= 30` still counts: see `2026-11-16-thinking-max-and-turn-limit.md`). A model with a window under 128,000 compacts earlier (this is correct). A model with a larger window compacts later. A model with no `context_window` does not change. Test: `test_compaction_uses_the_window_that_the_user_declared`.
 - **The count is partly an estimate.** A tool result that the model has not read yet is an estimate. The count after a compaction is an estimate for the messages only: it has no system prompt and no tool descriptions, and 4 characters for 1 token is too low for Chinese, Japanese and Korean text. The next model call gives an exact count.
 - **Gateways.** A gateway that sends no usage gives no update. The agent does not show an estimate that has no number of a provider behind it.
 - **A window that is too small.** A user who writes a window under the real one can see more than 100 %. The agent sends the number as it is.

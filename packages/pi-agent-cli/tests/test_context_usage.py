@@ -33,7 +33,7 @@ from pi_agent_cli.context_usage import (
     usage_update,
 )
 from pi_agent_cli.extension_trust import TRUST_ENV
-from pi_agent_cli.factory import compaction_settings, model_for_choice
+from pi_agent_cli.factory import auto_compact_enabled, compaction_settings, model_for_choice
 from pi_agent_core.event_stream import AssistantMessageEventStream
 from pi_agent_core.extensions import ExtensionLoader
 from pi_agent_core.messages import AssistantMessage, ToolResultMessage, Usage, UserMessage
@@ -423,6 +423,10 @@ class Recorder:
 
 
 def make_config(window: int | None = 200_000, **extra: Any) -> CliConfig:
+    # The agent compacts by itself only when a test asks for it. A window of 40 tokens would
+    # otherwise compact after every answer, and the tests that count after a compaction that
+    # they start themselves would lose their steps. ``auto_compact=None`` is the rule of the file.
+    extra.setdefault("auto_compact", False)
     return CliConfig(
         permission="ask", provider="mock", model_id="mock", context_window=window, **extra
     )
@@ -703,7 +707,8 @@ async def test_compaction_uses_the_window_that_the_user_declared(tmp_path):
     async def run(window: int | None) -> bool:
         home = tmp_path / ("declared" if window else "undeclared")
         home.mkdir()
-        config = make_config(window=window, max_turns=30)  # 30 turns or more: auto-compaction
+        # The rule of the file (``auto_compact=None``), and 30 turns or more: both say "on".
+        config = make_config(window=window, max_turns=30, auto_compact=None)
         script = Script(*(Step(total=900) for _ in range(3)))
         agent, _ = make_agent(home, script, config)
         session_id = (await agent.new_session(cwd=str(home))).session_id
@@ -713,3 +718,141 @@ async def test_compaction_uses_the_window_that_the_user_declared(tmp_path):
 
     assert await run(window=1_000) is True  # 900 tokens is above 1,000 - 250
     assert await run(window=None) is False  # 900 tokens is far below 128,000 - 16,384
+
+
+# --- Compaction: when the agent does it by itself -----------------------------------------
+
+
+@pytest.mark.parametrize(
+    ("auto_compact", "max_turns", "window", "expected"),
+    [
+        (None, None, None, False),  # nothing says so, and the window is a guess
+        (None, 29, None, False),
+        (None, 30, None, True),  # the rule from before the key existed
+        (None, 200, None, True),
+        (None, None, 1_000_000, True),  # a declared window
+        (None, 5, 1_000_000, True),
+        (False, 200, 1_000_000, False),  # the key wins over both rules
+        (False, None, None, False),
+        (True, None, None, True),
+        (True, None, 1_000_000, True),
+    ],
+)
+def test_the_rule_for_compaction_by_the_agent(auto_compact, max_turns, window, expected):
+    config = CliConfig(provider="mock", auto_compact=auto_compact, max_turns=max_turns)
+    choice = ModelChoice(id="m", context_window=window)
+
+    assert auto_compact_enabled(config, choice) is expected
+
+
+@pytest.mark.parametrize(("raw", "expected"), [("true", True), ("false", False)])
+def test_auto_compact_is_read_from_the_file(tmp_path, raw, expected):
+    config = _load(tmp_path, f"auto_compact = {raw}\n")
+
+    assert config.auto_compact is expected
+    assert config.auto.notes == ()
+
+
+def test_a_file_with_no_auto_compact_leaves_it_not_set(tmp_path):
+    config = _load(tmp_path, "max_turns = 200\n")
+
+    assert config.auto_compact is None
+    assert config.auto.notes == ()
+
+
+@pytest.mark.parametrize(
+    "raw",
+    ['"yes"', '"true"', "1", "0", "[true]"],
+    ids=["text", "text-true", "one", "zero", "list"],
+)
+def test_an_auto_compact_that_is_not_a_boolean_is_ignored_and_the_user_is_told(tmp_path, raw):
+    config = _load(tmp_path, f"auto_compact = {raw}\n")
+
+    assert config.auto_compact is None
+    (note,) = config.auto.notes
+    assert note == "auto_compact in agent.toml must be true or false, and it is ignored."
+
+
+async def _compacts(home: Path, config: CliConfig, *, total: int, size: int = 4_000) -> bool:
+    """Whether the agent compacted by itself, after three answers that each count ``total``.
+
+    ``size`` is the length of each request. A window of the placeholder size keeps the last
+    20,000 tokens, so there is nothing to compact until the requests are longer than that.
+    """
+    home.mkdir(parents=True, exist_ok=True)
+    agent, _ = make_agent(home, Script(*(Step(total=total) for _ in range(3))), config)
+    session_id = (await agent.new_session(cwd=str(home))).session_id
+    for index in range(3):
+        await say(agent, session_id, f"request {index} " + "a" * size)
+    return any(isinstance(e, CompactionEntry) for e in await _entries(agent, session_id))
+
+
+@pytest.mark.asyncio
+async def test_a_declared_window_turns_compaction_on_with_no_turn_limit(tmp_path):
+    declared = make_config(window=1_000, auto_compact=None)
+    undeclared = make_config(window=None, auto_compact=None)
+
+    assert await _compacts(tmp_path / "declared", declared, total=900) is True
+    # No window and no turn limit: nothing is guessed, even above the placeholder of 128,000.
+    # The requests are long enough that a compaction would find something to compact.
+    guessed = await _compacts(tmp_path / "undeclared", undeclared, total=120_000, size=100_000)
+    assert guessed is False
+
+
+@pytest.mark.asyncio
+async def test_auto_compact_false_turns_compaction_off_for_a_long_run(tmp_path):
+    config = make_config(window=1_000, max_turns=200, auto_compact=False)
+
+    assert await _compacts(tmp_path, config, total=900) is False
+
+
+@pytest.mark.asyncio
+async def test_auto_compact_true_turns_it_on_for_a_model_with_no_window(tmp_path):
+    """The placeholder of 128,000 tokens applies then, which is why `agent.example.toml` says to
+    set the real window."""
+    config = make_config(window=None, auto_compact=True)
+
+    over = await _compacts(tmp_path / "over", config, total=120_000, size=100_000)  # > 111,616
+    under = await _compacts(tmp_path / "under", config, total=100_000, size=100_000)
+
+    assert (over, under) == (True, False)
+
+
+@pytest.mark.asyncio
+async def test_a_change_of_model_decides_again_whether_the_agent_compacts(tmp_path):
+    config = make_config(
+        window=None,
+        auto_compact=None,
+        models=(
+            ModelChoice(id="small", provider="mock", context_window=32_000),
+            ModelChoice(id="unknown", provider="mock"),
+        ),
+    )
+    agent, _ = make_agent(tmp_path, Script(), config)
+    session_id = (await agent.new_session(cwd=str(tmp_path))).session_id
+    await settle(agent)
+    harness = agent._harnesses[session_id]
+    assert harness.compaction.auto_compact is False  # the default model has no window
+
+    await agent.set_config_option(config_id="model", session_id=session_id, value="small")
+    assert harness.compaction.auto_compact is True
+
+    await agent.set_config_option(config_id="model", session_id=session_id, value="unknown")
+    assert harness.compaction.auto_compact is False
+
+
+@pytest.mark.asyncio
+async def test_a_change_of_model_keeps_what_the_key_says(tmp_path):
+    config = make_config(
+        window=None,
+        auto_compact=False,
+        models=(ModelChoice(id="small", provider="mock", context_window=32_000),),
+    )
+    agent, _ = make_agent(tmp_path, Script(), config)
+    session_id = (await agent.new_session(cwd=str(tmp_path))).session_id
+    await settle(agent)
+    harness = agent._harnesses[session_id]
+
+    await agent.set_config_option(config_id="model", session_id=session_id, value="small")
+
+    assert harness.compaction.auto_compact is False

@@ -16,6 +16,7 @@ from pi_agent_core.messages import (
     ToolResultMessage,
 )
 from pi_agent_core.types import (
+    MAX_TURNS_MESSAGE,
     AfterToolCallContext,
     AfterToolCallResult,
     AgentContext,
@@ -226,7 +227,7 @@ async def _run_loop(
             # the Agent wrapper turns this into an error-stop assistant message.
             turn_count += 1
             if config.max_turns is not None and turn_count > config.max_turns:
-                raise MaxTurnsExceededError(f"Agent loop exceeded max_turns={config.max_turns}")
+                raise MaxTurnsExceededError(f"{MAX_TURNS_MESSAGE}{config.max_turns}")
 
             if not first_turn:
                 await _emit(emit, TurnStartEvent())

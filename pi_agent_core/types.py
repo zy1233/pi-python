@@ -37,6 +37,12 @@ class MaxTurnsExceededError(RuntimeError):
     """
 
 
+# The text of MaxTurnsExceededError, up to the number. The wrapper keeps only the text of an error
+# (`errorMessage`), so a caller that must know that the limit was the reason (the ACP agent, for
+# the stop reason `max_turn_requests`) finds it by this text.
+MAX_TURNS_MESSAGE = "Agent loop exceeded max_turns="
+
+
 # Extensible custom messages — apps can subclass or use TypedDict merging patterns
 CustomAgentMessages = dict[str, Any]
 AgentMessage = Message | Any

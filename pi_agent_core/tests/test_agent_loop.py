@@ -674,7 +674,7 @@ def _noop_tool() -> SimpleTool:
 @pytest.mark.asyncio
 async def test_max_turns_raises():
     """#2: a tool loop that never converges must stop at max_turns."""
-    from pi_agent_core.types import MaxTurnsExceededError
+    from pi_agent_core.types import MAX_TURNS_MESSAGE, MaxTurnsExceededError
 
     ctx = AgentContext(system_prompt="", messages=[], tools=[_noop_tool()])
     config = AgentLoopConfig(model=_model(), convert_to_llm=default_convert_to_llm, max_turns=3)
@@ -685,7 +685,7 @@ async def test_max_turns_raises():
         if e.type == "turn_start":
             turn_starts["n"] += 1
 
-    with pytest.raises(MaxTurnsExceededError, match="max_turns=3"):
+    with pytest.raises(MaxTurnsExceededError, match="max_turns=3") as raised:
         await run_agent_loop(
             [UserMessage(content="go", timestamp=int(time.time() * 1000))],
             ctx,
@@ -694,6 +694,8 @@ async def test_max_turns_raises():
             stream_fn=_endless_tool_stream(),
         )
     assert turn_starts["n"] == 3
+    # The ACP agent finds this failure by the text (``MAX_TURNS_MESSAGE``): keep the two tied.
+    assert str(raised.value) == f"{MAX_TURNS_MESSAGE}3"
 
 
 @pytest.mark.asyncio

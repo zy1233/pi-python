@@ -75,6 +75,27 @@ def model_for_choice(choice: ModelChoice, *, reasoning: bool = False) -> Model:
     return model
 
 
+# With ``auto_compact`` not set, a session of this many turns (``max_turns``) or more compacts by
+# itself. This was the only rule before the key existed, and the benchmark path relies on it.
+AUTO_COMPACT_MIN_TURNS = 30
+
+
+def auto_compact_enabled(config: CliConfig, choice: ModelChoice) -> bool:
+    """Whether the agent compacts the context by itself for ``choice``.
+
+    ``auto_compact`` in agent.toml decides when it is set. When it is not set, compaction is on
+    for a model with a declared ``context_window`` (the agent knows when the context is full),
+    and for a session with ``max_turns`` of ``AUTO_COMPACT_MIN_TURNS`` or more. A model with no
+    window in a session with no such limit does not compact by itself: its window is the
+    placeholder of the core, and the agent does not guess one.
+    """
+    if config.auto_compact is not None:
+        return config.auto_compact
+    if config.max_turns is not None and config.max_turns >= AUTO_COMPACT_MIN_TURNS:
+        return True
+    return choice.context_window is not None
+
+
 def compaction_settings(choice: ModelChoice, *, auto_compact: bool) -> CompactionSettings:
     """Compaction limits for ``choice``.
 
@@ -296,7 +317,7 @@ async def create_session_harness(
             system_prompt_options=options,
         )
 
-    auto_compact = config.max_turns is not None and config.max_turns >= 30
+    auto_compact = auto_compact_enabled(config, choice)
     harness = AgentHarness(
         session=session,
         model=model,
