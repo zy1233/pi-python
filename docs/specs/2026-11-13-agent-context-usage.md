@@ -1,7 +1,7 @@
 # Context use and cost from the agent: investigation record
 
 > Date: 2026-11-13 (investigation); 2026-11-16 (built).
-> Status: **built (Plan A), not released.** Sections 1 to 3 are the investigation of 2026-11-13. They describe agent 0.9.1, and they are not changed. Section 4 says what the agent does now.
+> Status: **built (Plan A) and released in agent 1.0.0 (2026-11-16); the extension bundles that agent from 1.4.0.** Sections 1 to 3 are the investigation of 2026-11-13. They describe agent 0.9.1, and they are not changed. Section 4 says what the agent does now.
 > Reason: the user asked for the context use in the status row of the VS Code extension. On 2026-11-13 the user said: if the agent must change, write down the result of the investigation, and do not make the change. On 2026-11-16 the user asked for the change, with Plan A (option A of section 4, item 1, in the first version of this record).
 > Related: `docs/specs/2026-11-04-vscode-extension-design.md` section 7d (the extension side, which is built); `docs/specs/2026-11-05-acp-extension-registry.md` section 5; the entry of 2026-10-13 in `docs/PLAN/archive/PLAN-RUST-AGENT-RUNTIME-REMOVAL-EXECUTION-LOG.md` (the pager had the same question).
 
@@ -65,11 +65,11 @@ The change follows the proposal of the first version of this record. The differe
 
 An agent change is not enough. The extension bundles one fixed agent binary. After the change: release the agent, then change `zycodeAgentVersion` and the size and the sha256 in `vscode/agent-assets.json`, then release the extension. A user who sets `zycode.agentPath` gets the change as soon as that program is new.
 
-At the extension release, change the sentences that say that the bundled agent sends no `usage_update`: `vscode/README.md` (the Context row), `vscode/CHANGELOG.md` and design section 7d. They are true for agent 0.9.1 only.
+At the extension release, change the sentences that say that the bundled agent sends no `usage_update`: `vscode/README.md` (the Context row), `vscode/CHANGELOG.md` and design section 7d. They are true for agent 0.9.1 only. **Done** in extension 1.4.0 (2026-11-16): the pin moved to agent 1.0.0 and these three places say that the Context row shows for a model that has `context_window`.
 
 ## 7. Decisions
 
-1. Change the agent? **Yes** (the user, 2026-11-16). It is built, and it is not released.
+1. Change the agent? **Yes** (the user, 2026-11-16). It is built, and it is released in agent 1.0.0.
 2. The source of the window size: **A** (section 4, item 1).
 3. Compaction by the real window, in the same change? **Yes.** It follows from setting `Model.context_window`. It has its own test, and a guard for small windows (section 4, item 5).
 4. Teach the pager to read `usage_update`? **Open.** Not decided, not built.
@@ -82,4 +82,4 @@ It does what needs no agent change (design section 7d):
 - It measures the time of the turn with its own clock.
 - It shows the folder of the chat.
 
-With agent 0.9.1, which the extension bundles now, the Context row does not show. With an agent that has the change in section 4, it shows for a model that has a `context_window`. The extension reads the message in tests with a fake agent. Its chat controller ran once against the changed agent (section 4, item 7). The extension has not been run against the changed agent in a real VS Code.
+With agent 0.9.1, which extensions 1.0.0 and 1.2.0 bundle, the Context row does not show. With an agent that has the change in section 4 (agent 1.0.0, which extension 1.4.0 bundles), it shows for a model that has a `context_window`. The extension reads the message in tests with a fake agent. Its chat controller ran once against the changed agent (section 4, item 7). The extension has not been run against the changed agent in a real VS Code.

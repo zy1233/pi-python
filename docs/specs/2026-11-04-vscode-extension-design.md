@@ -17,7 +17,8 @@
 - **Two kinds of trust.** VS Code Workspace Trust decides if the extension starts at all. The agent's own project trust decides if the project may load its extensions. The text of the two prompts says so.
 - **Publishing.** Open VSX first, then the Marketplace. The first upload to each (0.1.0, a pre-release) was a hand upload of a VSIX that the packaging script made. The publish workflow (`.github/workflows/vscode-extension.yml`, section 11) runs from `main` by `workflow_dispatch`, with Trusted Publishing and the environment `vscode-publish`; it publishes the stable releases, 1.0.0 first.
 - **Added in 1.0.0.** A first-run guide, `always-approve` in the mode menu (with a warning, never restored), a Past chats view (list, open, delete), and a Thinking menu. All four use what the bundled agent already has (0.1.0 bundled 0.9.0; 1.0.0 bundles **0.9.1**): no wire item and no agent change. The Thinking menu edits one line of `agent.toml` and restarts the agent, because 0.9.0 has no live setting (section 7c).
-- **Added after 1.0.0.** Markdown in the chat (section 2, rule 5, and D34), and a richer status row (section 7d): the context window and the cost when the agent sends the standard `usage_update`, the time of the turn, and the folder. Agent 0.9.1 sends no `usage_update`, so the Context row does not show with the bundled agent. The agent change that sends it was built on 2026-11-16 (`docs/specs/2026-11-13-agent-context-usage.md`); it is not released, so the row shows after the next agent release and a new pin.
+- **Added after 1.0.0.** Markdown in the chat (section 2, rule 5, and D34), and a richer status row (section 7d): the context window and the cost when the agent sends the standard `usage_update`, the time of the turn, and the folder. Agent 0.9.1 sent no `usage_update`, so the Context row did not show with the agent that 1.0.0 and 1.2.0 bundle. The agent change that sends it was built on 2026-11-16 (`docs/specs/2026-11-13-agent-context-usage.md`) and released in agent 1.0.0. Extension 1.4.0 bundles that agent, so the row shows for a model that has `context_window`.
+- **Added in 1.4.0.** The pin moves from agent 0.9.1 to agent 1.0.0. The Thinking menu offers the level `max` to an agent of 1.0.0 or later (section 7c), and the Context row shows with the bundled agent (section 7d). The agent still has no live thinking setting: `set_config_option` of 1.0.0 takes only `model` and `mode` (read in `pi_agent_cli/agent.py`), so the menu still edits `agent.toml` and restarts the agent.
 - **Not yet.** Model choice, images, `@file`, MCP servers, fallback package, and everything of report section 3.3 from Phase 2 on (section 12).
 
 ## 1. Facts the design rests on
@@ -352,7 +353,7 @@ Nothing else is needed, so there is **no wire item to add and no agent change**.
 | Time of the turn | the clock of the host, from `send` to the end of the turn | in the header after the state: `Working · 1 min 12 s`, then `Ready · last turn 8.4 s` until the next turn; a line of the tooltip | While a turn runs, and after it. |
 | Folder | `cwd` of the session | in the line of the agent and the model: `folder pi-python` (the full path is its tooltip); a line of the tooltip of the status bar item | When the chat has a folder. |
 
-**Agent 0.9.1 sends no `usage_update`, so the Context row does not show with the bundled agent.** What was found is in `docs/specs/2026-11-13-agent-context-usage.md`. The agent change that sends `usage_update` (for a model that has `context_window` in `agent.toml`) was built later, on 2026-11-16. It is not released, and no pin was moved.
+**Agent 0.9.1 sent no `usage_update`, so the Context row did not show with the agent that extensions 1.0.0 and 1.2.0 bundle.** What was found is in `docs/specs/2026-11-13-agent-context-usage.md`. The agent change that sends `usage_update` (for a model that has `context_window` in `agent.toml`) was built later, on 2026-11-16, and released in agent 1.0.0. Extension 1.4.0 moves the pin to that agent, so the row shows for a model that has `context_window`. The agent sends no cost, so the Cost line does not show. The extension was not run against agent 1.0.0 in a real VS Code window with a real model.
 
 **Design notes.**
 
@@ -536,7 +537,7 @@ From the report, section 3.3 (Phase 2 and later), and from the limits above:
 
 ## 14. Decisions
 
-**Status of D15 to D33:** the user adopted all of them as recommended (2026-11-12, 14:49 Asia/Shanghai: "都按你的建议", one answer for every decision). Each row marked (adopted) is built as the row says. The bundled agent of 1.0.0 is **0.9.1** (`agent-assets.json`, pinned with size and sha256).
+**Status of D15 to D33:** the user adopted all of them as recommended (2026-11-12, 14:49 Asia/Shanghai: "都按你的建议", one answer for every decision). Each row marked (adopted) is built as the row says. The bundled agent of extension 1.0.0 is **0.9.1** (`agent-assets.json`, pinned with size and sha256). Extension 1.4.0 bundles agent 1.0.0.
 
 **Status of D34 and D35:** both are newer (2026-11-12, after 1.0.0). D34 is the answer of the user to a question with three options: the user chose option A. D35 is a part of the work for D34. The user was not asked about D35.
 
