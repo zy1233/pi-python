@@ -303,7 +303,7 @@ pi (Rust TUI)  --stdio 标准 ACP-->  python -m pi_agent_cli  -->  AgentHarness
 
 ### 8.3 TUI 改造要点
 
-spawn 默认为 `python -m pi_agent_cli`（`PI_AGENT_COMMAND` / `PI_PYTHON` 可覆盖）。`acp_send` 丢弃 `x.ai/*` 扩展 RPC；空 `auth_methods` 跳过 xAI 登录；auto-update 关闭；交互路径不装 otel。家目录 `PI_HOME` / `~/.pi-python`。斜杠菜单只有 `/new` `/resume` `/model` `/exit`（别名 `/quit`）与本地命令（`/help` `/theme` `/settings` `/multiline` `/home`）；`/resume` 走标准 `session/list` + `session/load`，`/model` 走 ACP Session Config Options（`session/set_config_option`）。`pi -p` 转发到 `python -m pi_agent_cli -p`，不复用 grok headless。
+spawn 默认为 `zycode-agent`（先找 `zypi` 旁边，再找 `PATH`；`PI_AGENT_COMMAND`、`[agent].command` 与 `PI_PYTHON` 可覆盖。只有设了 `PI_PYTHON`，才会运行 `python -m pi_agent_cli`；没有 Python 回退）。`acp_send` 丢弃 `x.ai/*` 扩展 RPC；空 `auth_methods` 跳过 xAI 登录；auto-update 关闭；交互路径不装 otel。家目录 `PI_HOME` / `~/.pi-python`。斜杠菜单只有 `/new` `/resume` `/model` `/exit`（别名 `/quit`）与本地命令（`/help` `/theme` `/settings` `/multiline` `/home`）；`/resume` 走标准 `session/list` + `session/load`，`/model` 走 ACP Session Config Options（`session/set_config_option`）。`pi -p` 转发到同一个 agent 命令的 `-p`，不复用 grok headless。
 
 ### 8.4 权限与配置
 

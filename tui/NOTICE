@@ -29,9 +29,9 @@ The product
 -----------
 
 The product binary is `zypi` (Cargo package `pi-pager-bin`). It is a terminal
-UI. It starts the Python agent (`python -m pi_agent_cli`) and talks to it over
-standard ACP on stdio. Override the command with `PI_AGENT_COMMAND` or
-`PI_PYTHON`. The home directory is `PI_HOME` (`GROK_HOME` is still read when
+UI. It starts the agent (`zycode-agent`, or `python -m pi_agent_cli` when
+`PI_PYTHON` is set) and talks to it over standard ACP on stdio. Override the
+command with `PI_AGENT_COMMAND` or `PI_PYTHON`. The home directory is `PI_HOME` (`GROK_HOME` is still read when
 `PI_HOME` is not set), or `~/.pi-python`.
 
 Modifications relative to upstream

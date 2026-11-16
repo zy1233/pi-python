@@ -3,6 +3,14 @@ import type { Level, PackageId, WhereId } from '~/i18n/types';
 /** The GitHub repository. Every link to the source starts here. */
 export const repo = 'https://github.com/zy1233/pi-python';
 
+/**
+ * The release that the install text names. Change it with each release.
+ * README.md and docs/TUI-AND-CODE-AGENT.md name the same release in their download commands.
+ * The download commands name a tag, not "latest", because the file name holds the version:
+ * after the next release, "latest" would point to a release that has no file of that name.
+ */
+export const release = { version: '1.0.0', tag: 'v1.0.0' } as const;
+
 /** Links that do not change with the language. */
 export const links = {
   repo,

@@ -50,17 +50,19 @@ You can use the coding agent in two ways:
 
 ### 1. Standalone bundle (recommended — no Python required)
 
-Download the complete bundle `zycode-<target>-<version>.tar.gz` from [GitHub Releases](https://github.com/zy1233/pi-python/releases):
+Download the complete bundle `zycode-<target>-<version>.tar.gz` from [GitHub Releases](https://github.com/zy1233/pi-python/releases). The file name holds the version, so use the URL of that release (`releases/download/v<version>/...`). Do not use `releases/latest/download/...`: after the next release, "latest" points to a release that has no file of that name.
 
 ```bash
 # Linux x86_64
-curl -L -o zycode.tar.gz https://github.com/zy1233/pi-python/releases/latest/download/zycode-linux-x86_64-1.0.0.tar.gz
+curl -L -o zycode.tar.gz https://github.com/zy1233/pi-python/releases/download/v1.0.0/zycode-linux-x86_64-1.0.0.tar.gz
 tar -xzf zycode.tar.gz
 sudo mv zypi zycode-agent /usr/local/bin/
 
 # Initial setup in terminal
 zypi --setup
 ```
+
+The targets are `linux-x86_64`, `linux-aarch64` and `darwin-aarch64` (macOS with Apple silicon). The bundle holds two files: `zypi` and `zycode-agent`. `zypi` starts the agent that is next to it. The `Release` workflow builds `zypi`, and then the `Agent binaries` workflow packs the bundles. The bundles appear on the release page when the `Agent binaries` workflow has finished, which is after the release itself.
 
 ### 2. Python packages (optional / dev)
 
@@ -73,6 +75,14 @@ pip install -e ".[dev]" -e "./packages/pi-agent-harness" -e "./packages/pi-agent
 ```
 
 ### 3. TUI binary (`zypi`) alone
+
+`zypi` alone has no agent. It looks for `zycode-agent` next to its own file (a symlink is followed), and then on `PATH`. The Python package (`pip install pi-agent-cli-lc`) has no `zycode-agent` command. If you use the Python package, tell `zypi` which Python has it:
+
+```bash
+export PI_PYTHON=python3   # a Python that has pi-agent-cli-lc installed
+```
+
+`zypi` starts `python -m pi_agent_cli` only when `PI_PYTHON` is set and not empty. Before 1.0.0, it did this when you set nothing. You can also set `PI_AGENT_COMMAND`, or `[agent].command` (see [Configuration](#configuration)).
 
 #### Option A: Download prebuilt binary (Linux x86_64, Linux aarch64, macOS arm64)
 

@@ -1,7 +1,7 @@
 # Omarchy Linux: Add zycode (`zypi`) Coding Agent to Agent Menu
 
 > Date: 2026-11-15  
-> Status: **Ready for Submission**  
+> Status: **Draft. Do not submit yet.** Two defects are known and not fixed. (1) The mise declaration in section 3 makes `latest` resolve to the oldest release: the GitHub list of releases starts with the newest one, and mise takes the last item. (2) The agent id `zycode` is not the name of a command: the command is `zypi`. A review found both in the draft PR `zy1233/omarchy#1`.  
 > Upstream target: `omacom/omarchy` (`quattro` branch)  
 > Component: Omarchy desktop coding agent menu & launcher  
 

@@ -133,22 +133,29 @@ pip install -e "./packages/pi-mcp"   # optional: MCP servers that the editor pas
 
 ### TUI binary (`zypi`)
 
-Download the prebuilt binary or the complete standalone archive for Linux (x86_64 or aarch64) or macOS arm64 from [GitHub Releases](https://github.com/zy1233/pi-python/releases):
+Download the complete standalone archive (it has `zypi` and `zycode-agent`) or the prebuilt `zypi` binary for Linux (x86_64 or aarch64) or macOS arm64 from [GitHub Releases](https://github.com/zy1233/pi-python/releases):
 
 ```bash
 # Option 1: Standalone bundle (contains both zypi and zycode-agent; no Python required)
-curl -L -o zycode.tar.gz https://github.com/zy1233/pi-python/releases/latest/download/zycode-linux-x86_64-1.0.0.tar.gz
+# Linux x86_64 shown. The other files are zycode-linux-aarch64-1.0.0.tar.gz and zycode-darwin-aarch64-1.0.0.tar.gz.
+curl -L -o zycode.tar.gz https://github.com/zy1233/pi-python/releases/download/v1.0.0/zycode-linux-x86_64-1.0.0.tar.gz
 tar -xzf zycode.tar.gz
 sudo mv zypi zycode-agent /usr/local/bin/
 
-# Option 2: Standalone zypi (spawns zycode-agent next to it, on PATH, or via PI_AGENT_COMMAND / PI_PYTHON)
+# Option 2: zypi alone. It has no agent: it starts zycode-agent (next to it, or on PATH),
+# or the agent that PI_AGENT_COMMAND or PI_PYTHON names.
 curl -L -o zypi https://github.com/zy1233/pi-python/releases/latest/download/zypi-linux-x86_64
 chmod +x zypi
 sudo mv zypi /usr/local/bin/
+# The pip package pi-agent-cli-lc has no zycode-agent command. With it, set PI_PYTHON
+# (zypi starts `python -m pi_agent_cli` only when PI_PYTHON is set):
+export PI_PYTHON=python3
 
 # Set up model and API key directly in terminal:
 zypi --setup
 ```
+
+The bundle file name holds the version, so the URL names the tag (`v1.0.0`), not `latest`.
 
 Or build from source (requires Rust toolchain):
 ```bash

@@ -1,4 +1,4 @@
-import { links, snippets } from '~/data/site';
+import { links, release, snippets } from '~/data/site';
 import type { Messages } from './types';
 
 export const zh: Messages = {
@@ -36,7 +36,7 @@ export const zh: Messages = {
     newTab: '在新标签页打开',
   },
   hero: {
-    badge: '测试中',
+    badge: `${release.version} 稳定版`,
     badgeNote: '开源 · MIT 与 Apache-2.0',
     titleBefore: '一个',
     titleEm: '可审计',
@@ -51,7 +51,7 @@ export const zh: Messages = {
   terminal: {
     label: 'zypi 会话的示意图。智能体读了三个文件，改了一个文件，并运行了测试。',
     title: 'zypi',
-    tag: '测试版',
+    tag: '稳定版',
     prompt: '结账测试在舍入处失败。找出原因并修复。',
     tagFree: '只读 · 不询问',
     tagAsked: '已询问 · 你已允许',
@@ -201,26 +201,28 @@ export const zh: Messages = {
   install: {
     eyebrow: '安装',
     title: '装好，然后选一个模型。',
-    lead: '先安装 Python 智能体，再添加终端界面，或连接你的编辑器。VS Code 扩展是例外：智能体已包含在内。',
+    lead: '终端安装包和 VS Code 扩展都已内置智能体；其余方式使用 Python 包。',
     tabListLabel: '安装方式',
     tabs: {
       tui: {
         label: '终端界面',
         heading: '终端界面（zypi）',
         codeLabel: 'bash',
-        code: `# 1. 安装智能体，然后选择提供方、模型和密钥
-pip install pi-agent-cli-lc
-python -m pi_agent_cli --setup
+        code: `# 1. 下载安装包：终端界面和智能体在同一个压缩包里（Linux x86_64，无需 Python）
+curl -L -o zycode.tar.gz ${links.repo}/releases/download/${release.tag}/zycode-linux-x86_64-${release.version}.tar.gz
+tar -xzf zycode.tar.gz
+sudo mv zypi zycode-agent /usr/local/bin/
 
-# 2. 安装终端界面（Linux x86_64）
-curl -L -o zypi https://github.com/zy1233/pi-python/releases/latest/download/zypi-linux-x86_64
-chmod +x zypi && sudo mv zypi /usr/local/bin/
+# 2. 选择提供方、模型和密钥
+zypi --setup
 
 # 3. 在你的项目目录里启动
 zypi`,
         notes: [
+          '安装包里有两个程序：`zypi` 和 `zycode-agent`。`zypi` 会启动放在它旁边（或在 `PATH` 里）的智能体。',
+          `ARM 上的 Linux 使用文件 \`zycode-linux-aarch64-${release.version}.tar.gz\`。Apple 芯片的 macOS 使用 \`zycode-darwin-aarch64-${release.version}.tar.gz\`。macOS 的文件由 CI 构建，还没有人实际运行过，也没有签名。`,
           'Linux 二进制需要 glibc 2.39 或更高版本（Ubuntu 24.04 或更新）。',
-          '在 Apple 芯片的 macOS 上，使用文件 `zypi-macos-arm64`。它由 CI 构建，还没有人实际运行过，也没有签名。',
+          '已经用 pip 装了智能体（`pip install pi-agent-cli-lc`）？那就只下载 `zypi`（文件 `zypi-linux-x86_64`），并在启动前运行 `export PI_PYTHON=python3`。只有设置了 `PI_PYTHON`，`zypi` 才会去启动 `python -m pi_agent_cli`。',
           '在 Windows 上，请从源码构建 `zypi` 并在 WSL2 中运行。Python 智能体可以直接在 Windows 上运行。',
         ],
       },

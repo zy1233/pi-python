@@ -59,8 +59,8 @@ Priority:
 
 1. `PI_AGENT_COMMAND` — full command string, e.g. `D:\work\pi-python\.venv\Scripts\python.exe -m pi_agent_cli`
 2. `[agent].command` in `agent.toml`
-3. `PI_PYTHON` + default args `-m pi_agent_cli`
-4. `python` on Windows / `python3` elsewhere
+3. `PI_PYTHON` (only when it is set and not empty) + default args `-m pi_agent_cli`
+4. `zycode-agent` (`zycode-agent.exe` on Windows): next to the `zypi` file, then on `PATH`. There is no fall-back to `python`.
 
 On Windows, **prefer pointing at your venv** — the Store `python` stub is unreliable.
 
