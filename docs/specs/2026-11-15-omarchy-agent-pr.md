@@ -76,10 +76,10 @@ Key configuration points:
 
 ```patch
 diff --git a/bin/omarchy-agent b/bin/omarchy-agent
-index 529ef0dc7..5b587ede4 100755
+index a249529..85cfa8e 100755
 --- a/bin/omarchy-agent
 +++ b/bin/omarchy-agent
-@@ -270,6 +270,10 @@ commandcode)
+@@ -277,6 +277,10 @@ commandcode)
    command=(commandcode --yolo)
    [[ -n ${prompt:-} ]] && command+=(-- "$prompt")
    ;;
@@ -91,7 +91,7 @@ index 529ef0dc7..5b587ede4 100755
    echo "Unsupported default agent: $agent" >&2
    exit 1
 diff --git a/bin/omarchy-agent-instructions b/bin/omarchy-agent-instructions
-index 21f769d01..19353069c 100755
+index 21f769d..1935306 100755
 --- a/bin/omarchy-agent-instructions
 +++ b/bin/omarchy-agent-instructions
 @@ -51,6 +51,7 @@ declare -A links=(
@@ -103,7 +103,7 @@ index 21f769d01..19353069c 100755
  
  backups=()
 diff --git a/bin/omarchy-default-agent b/bin/omarchy-default-agent
-index cee381040..ffadd59cb 100755
+index cee3810..ffadd59 100755
 --- a/bin/omarchy-default-agent
 +++ b/bin/omarchy-default-agent
 @@ -1,7 +1,7 @@
@@ -132,21 +132,21 @@ index cee381040..ffadd59cb 100755
    ;;
  esac
 diff --git a/default/i18n/en/menu.json b/default/i18n/en/menu.json
-index 1103b8f18..00942351e 100644
+index 1221efa..522b296 100644
 --- a/default/i18n/en/menu.json
 +++ b/default/i18n/en/menu.json
-@@ -571,6 +571,9 @@
+@@ -575,6 +575,9 @@
    "agent.harness.qwen": {
      "label": "Qwen Code"
    },
 +  "agent.harness.zycode": {
 +    "label": "zycode"
-   },
++  },
    "setup.default.browser": {
      "label": "Browser",
      "title": "Default Browser"
 diff --git a/default/omarchy/omarchy-menu.jsonc b/default/omarchy/omarchy-menu.jsonc
-index 741e01377..08d80803a 100644
+index cbf2662..49a4be0 100644
 --- a/default/omarchy/omarchy-menu.jsonc
 +++ b/default/omarchy/omarchy-menu.jsonc
 @@ -63,6 +63,7 @@
@@ -158,7 +158,7 @@ index 741e01377..08d80803a 100644
  
    // System
 diff --git a/etc/mise/conf.d/omarchy-tools.toml b/etc/mise/conf.d/omarchy-tools.toml
-index b784d7198..06ebd5b89 100644
+index b784d71..06ebd5b 100644
 --- a/etc/mise/conf.d/omarchy-tools.toml
 +++ b/etc/mise/conf.d/omarchy-tools.toml
 @@ -23,6 +23,7 @@ grok = { version = "latest", lazy = true, auto_update = "4h", minimum_release_ag
@@ -170,7 +170,7 @@ index b784d7198..06ebd5b89 100644
  muse = { version = "latest", lazy = true, auto_update = "4h", minimum_release_age = "0s" }
  node = { version = "latest", lazy = true, minimum_release_age = "0s" }
 diff --git a/test/shell.d/default-agent-test.sh b/test/shell.d/default-agent-test.sh
-index 57b877f82..c94efc330 100644
+index 57b877f..c94efc3 100644
 --- a/test/shell.d/default-agent-test.sh
 +++ b/test/shell.d/default-agent-test.sh
 @@ -168,6 +168,8 @@ amp_package="amp"
