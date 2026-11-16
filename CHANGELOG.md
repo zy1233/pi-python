@@ -9,7 +9,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [1.0.0] - 2026-11-16
 
-This is the 1.0.0 (Production/Stable) release of zycode. All components across the monorepo are promoted to 1.0.0 Stable.
+This is 1.0.0, the first stable release of zycode. All seven Python packages and the TUI go to 1.0.0.
 
 One change can break a set-up that works today: `zypi` no longer starts `python -m pi_agent_cli` when you set nothing. It starts `zycode-agent`. **Changed** has the details and the one-line fix. **Added** has the standalone bundle (`zypi` and `zycode-agent` in one archive), `zypi --setup`, a `zypi` binary for Linux aarch64, and four changes in the agent: `usage_update`, the `max` thinking level, `auto_compact` and the stop reason `max_turn_requests`. **Known issues** says what nobody tried yet.
 
@@ -27,7 +27,7 @@ One change can break a set-up that works today: `zypi` no longer starts `python 
 ### Changed
 
 - **Behaviour change: `zypi` starts `zycode-agent`, and no longer falls back to `python -m pi_agent_cli` (TUI)**: `zypi` looks for `zycode-agent` (`zycode-agent.exe` on Windows) next to its own executable (a symlink is followed), and then on `PATH`. The order is: `PI_AGENT_COMMAND`, then `[agent].command` (in `agent.toml` or `config.toml`), then `PI_PYTHON` (only when it is set and not empty; it runs `python -m pi_agent_cli`), then `zycode-agent`. Before, `zypi` ran `python -m pi_agent_cli` when you set nothing. If you installed the agent with `pip install pi-agent-cli-lc` and you run a standalone `zypi`, set `PI_PYTHON` to the Python that has `pi-agent-cli-lc`, or set `PI_AGENT_COMMAND`, or use the bundle (see **Added**), which has both programs.
-- **Version 1.0.0 Stable promotion**: All Python packages (`pi-agent-core-lc`, `pi-agent-harness-lc`, `pi-agent-cli-lc`, `pi-web-access-py`, `pi-goal-x-py`, `pi-dynamic-workflows-py`, `pi-mcp-py`), Rust TUI (`pi-pager-bin`, `pi-version`), and documentation/web are promoted to `1.0.0` with `Development Status :: 5 - Production/Stable`.
+- **Version 1.0.0 for every package**: all seven Python packages (`pi-agent-core-lc`, `pi-agent-harness-lc`, `pi-agent-cli-lc`, `pi-web-access-py`, `pi-goal-x-py`, `pi-dynamic-workflows-py`, `pi-mcp-py`) and the TUI crates (`pi-pager-bin`, `pi-version`) go to `1.0.0`. The first three change their classifier from `Development Status :: 4 - Beta` to `Development Status :: 5 - Production/Stable`. The four extension packages never had a `Development Status` classifier, and they still have none. The README, the docs and the site name 1.0.0 as the current release.
 - **A `thinking_level` that is not a level is still `off`, and a note says so (`pi-agent-cli`)**: it was `off` with no word, so a typo looked like `off`. The note comes at the start of the session (#131).
 - **`agent.example.toml` has new example values (`pi-agent-cli`)**: `max_turns = 200` (it was 50) and `context_window = 1000000` (it was 128000). The default of `max_turns` in the code is still `None` (no limit) (#131).
 - Refusal message for `zypi --oauth` updated to direct users to `zypi --setup`.
