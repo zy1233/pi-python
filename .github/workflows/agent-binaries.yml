@@ -202,7 +202,7 @@ jobs:
           pattern: agent-*
           path: archives
           merge-multiple: true
-      - name: Create the release if it is not there, download zypi binaries, build bundles, and upload
+      - name: Create the release if it is not there, attach the agent archives, build and attach the bundles
         run: |
           ls -l archives
           if ! gh release view "$TAG" >/dev/null 2>&1; then
@@ -211,18 +211,37 @@ jobs:
               || gh release view "$TAG" >/dev/null
           fi
 
-          mkdir -p tui-downloads
-          for asset in zypi-linux-x86_64 zypi-linux-aarch64 zypi-macos-arm64; do
-            gh release download "$TAG" -p "$asset" -D tui-downloads 2>/dev/null || true
-          done
+          # The agent archives go first: the VS Code extension and the ACP registry entry use them,
+          # and a bundle that fails below must not hold them back.
+          gh release upload "$TAG" archives/zycode-agent-* --clobber
 
-          # Pairs of (zypi_asset_name, target)
-          for pair in "zypi-linux-x86_64:linux-x86_64" "zypi-linux-aarch64:linux-aarch64" "zypi-macos-arm64:darwin-aarch64"; do
-            asset="${pair%%:*}"
-            target="${pair##*:}"
-            tui_bin="tui-downloads/$asset"
-            agent_archive="archives/zycode-agent-$target-$VERSION.tar.gz"
-            if [ -f "$tui_bin" ] && [ -f "$agent_archive" ]; then
+          # A bundle is the zypi file of the release and the agent archive of the same platform.
+          # The build.py of a tag from before the bundles has no --bundle-from-archive. That tag
+          # gets no bundle, because this step is also the way to repair the release of an old tag.
+          help_text="$(python3 packaging/agent/build.py --help)"
+          case "$help_text" in
+            *--bundle-from-archive*) bundles=yes ;;
+            *)
+              bundles=no
+              echo "::notice::build.py of $TAG has no --bundle-from-archive, so this tag gets no bundles."
+              ;;
+          esac
+
+          if [ "$bundles" = yes ]; then
+            mkdir -p tui-downloads
+            made=()
+            # Each of the three must work. A missing input or a failed download stops the step.
+            # Without a bundle, the download links in the README and on the web site give a 404,
+            # and the run would still be green.
+            for pair in "zypi-linux-x86_64:linux-x86_64" "zypi-linux-aarch64:linux-aarch64" "zypi-macos-arm64:darwin-aarch64"; do
+              asset="${pair%%:*}"
+              target="${pair##*:}"
+              tui_bin="tui-downloads/$asset"
+              agent_archive="archives/zycode-agent-$target-$VERSION.tar.gz"
+              bundle="archives/zycode-$target-$VERSION.tar.gz"
+              gh release download "$TAG" -p "$asset" -D tui-downloads
+              [ -f "$tui_bin" ] || { echo "::error::The release $TAG has no file $asset."; exit 1; }
+              [ -f "$agent_archive" ] || { echo "::error::There is no agent archive $agent_archive."; exit 1; }
               chmod +x "$tui_bin"
               python3 packaging/agent/build.py \
                 --bundle-from-archive "$agent_archive" \
@@ -230,8 +249,17 @@ jobs:
                 --target "$target" \
                 --version "$VERSION" \
                 --out archives
-            fi
-          done
+              [ -f "$bundle" ] || { echo "::error::build.py did not make $bundle."; exit 1; }
+              made+=("$bundle")
+            done
+            gh release upload "$TAG" "${made[@]}" --clobber
 
-          gh release upload "$TAG" archives/* --clobber
+            # The release must now hold all three bundles.
+            assets="$(gh release view "$TAG" --json assets --jq '.assets[].name')"
+            for target in linux-x86_64 linux-aarch64 darwin-aarch64; do
+              printf '%s\n' "$assets" | grep -Fxq "zycode-$target-$VERSION.tar.gz" \
+                || { echo "::error::The release $TAG has no bundle for $target."; exit 1; }
+            done
+          fi
+
           gh release view "$TAG" --json assets --jq '.assets[] | "\(.name) \(.size) \(.digest)"'

@@ -34,6 +34,8 @@ ROOT = Path(__file__).resolve().parents[2]
 HERE = Path(__file__).resolve().parent
 CHILD_SCRIPT = ROOT / "packages/pi-dynamic-workflows/pi_dynamic_workflows/sandbox/child.py"
 PROGRAM = "zycode-agent"
+# The name of the program inside an agent archive (``pack`` writes the second one on Windows).
+PROGRAM_FILES = (PROGRAM, PROGRAM + ".exe")
 
 
 def target_name() -> str:
@@ -144,19 +146,22 @@ def bundle_from_agent_archive(
         if tarfile.is_tarfile(agent_archive):
             with tarfile.open(agent_archive, "r:*") as tf:
                 for member in tf.getmembers():
-                    if member.name in ("zycode-agent", "zycode-agent.exe"):
-                        with (
-                            tf.extractfile(member) as src,
-                            (tmp_path / member.name).open("wb") as dst,
-                        ):
-                            if src is not None:
-                                shutil.copyfileobj(src, dst)
-                        extracted_agent = tmp_path / member.name
-                        break
+                    # Only a regular file is the program. A directory of that name has no content
+                    # (``extractfile`` gives None for it): skip it, and the error below says that
+                    # the program is not in the archive.
+                    if member.name not in PROGRAM_FILES or not member.isfile():
+                        continue
+                    with (
+                        tf.extractfile(member) as src,
+                        (tmp_path / member.name).open("wb") as dst,
+                    ):
+                        shutil.copyfileobj(src, dst)
+                    extracted_agent = tmp_path / member.name
+                    break
         elif zipfile.is_zipfile(agent_archive):
             with zipfile.ZipFile(agent_archive, "r") as zf:
                 for name in zf.namelist():
-                    if name in ("zycode-agent", "zycode-agent.exe"):
+                    if name in PROGRAM_FILES:
                         zf.extract(name, tmp_path)
                         extracted_agent = tmp_path / name
                         break
