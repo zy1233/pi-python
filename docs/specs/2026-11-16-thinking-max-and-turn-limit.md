@@ -1,6 +1,6 @@
 # The `max` thinking level and the turn limit: investigation record
 
-Date: 2026-11-16. Status: built in the branch of PR #131, as separate commits (the agent, then the extension). Not released.
+Date: 2026-11-16. Status: built in the branch of PR #131, as separate commits (the agent, then the extension). The agent is released in 1.0.0 (2026-11-16). The extension release 1.4.0 moves the pin to that agent.
 
 ## 1. Question
 
@@ -54,9 +54,9 @@ Tests: `test_thinking.py`, `test_deepseek_thinking.py`, `test_deepseek_replay.py
 
 ## 5. Risks and side effects
 
-- **A declared window turns compaction on.** A user who has `context_window` and no `max_turns` did not compact before. This is on purpose: the agent knows when the context is full. `auto_compact = false` turns it off. `context_window` is not released yet (PR #131), so nobody depends on the old behaviour.
+- **A declared window turns compaction on.** A user who has `context_window` and no `max_turns` did not compact before. This is on purpose: the agent knows when the context is full. `auto_compact = false` turns it off. `context_window` was not in any release before agent 1.0.0 (PR #131), so nobody depended on the old behaviour.
 - **`max` is open for every model.** A model that does not take it answers with an error, and nothing is lowered. Plan B would lower it.
-- **Old agents.** An agent that does not know `max` takes `thinking_level = "max"` as `off`, and it gives no note. The extension of this PR does not offer `max` to such an agent (section 4). But `MAX_LEVEL_SINCE` is a statement about a release that is not made yet (1.0.0): it must be the first release that has `max`, or a later one. A number that is too low shows `max` to an agent that reads it as `off`. A number that is too high only hides `max`. If PR #130 releases 1.0.0 without this PR, change the number before the extension release that bundles that agent.
+- **Old agents.** An agent that does not know `max` takes `thinking_level = "max"` as `off`, and it gives no note. The extension of this PR does not offer `max` to such an agent (section 4). But `MAX_LEVEL_SINCE` is a statement about a release that is not made yet (1.0.0): it must be the first release that has `max`, or a later one. A number that is too low shows `max` to an agent that reads it as `off`. A number that is too high only hides `max`. If PR #130 releases 1.0.0 without this PR, change the number before the extension release that bundles that agent. **Checked on 2026-11-16:** PR #131 was in `main` before PR #130 was merged, and 1.0.0 was released from that commit, so 1.0.0 is the first release that has `max`. The number is right.
 - **The extension 1.0.0 and `max` in the file.** The extension reads `thinking_level` itself (`vscode/src/core/thinking.ts`) and has six levels. For a user who writes `max` by hand, its menu shows `off`, and a note says that the agent does not know `max` (`chat-controller.ts`). For the new agent that note is wrong: the agent uses `max`. Nothing breaks. The note goes away when the extension knows `max`.
 - **A client sees `max_turn_requests`, not `end_turn`.** The extension shows a line of notice. `zypi` takes it as "done". Another client may show it as a failure: not checked.
 
@@ -70,7 +70,7 @@ Tests: `test_thinking.py`, `test_deepseek_thinking.py`, `test_deepseek_replay.py
 
 ## 7. Open
 
-1. The extension release: move the pin (`vscode/PACKAGING.md`), check `MAX_LEVEL_SINCE`, and change the sentences that say the menu has six levels (`vscode/README.md`, `vscode/CHANGELOG.md`). They stay as they are until then, because they are true for the agent 0.9.1 that the extension bundles today.
+1. The extension release: move the pin (`vscode/PACKAGING.md`), check `MAX_LEVEL_SINCE`, and change the sentences that say the menu has six levels (`vscode/README.md`, `vscode/CHANGELOG.md`). They stayed as they were until then, because they were true for the agent 0.9.1 that the extension bundled. **Done** in extension 1.4.0 (2026-11-16): the pin is agent 1.0.0, `MAX_LEVEL_SINCE` is 1.0.0 (the first release that has `max`), and the README and the CHANGELOG say that the menu has `max` for an agent of 1.0.0 or later.
 2. Anthropic: adaptive thinking with `effort` for new models, and a higher floor for `langchain-anthropic`. A separate change.
 3. Plan B: a table of levels per model, as in `pi`, so that a level that a model does not take is lowered, and a menu can hide it.
 4. A compaction threshold of its own. With a window of 1M, compaction starts above 983,616 tokens, which can be late (cost, quality). Not investigated.

@@ -1,5 +1,18 @@
 # Changelog
 
+## 1.4.0 (2026-11-16)
+
+Stable release. It follows 1.2.0 and bundles agent 1.0.0 (1.2.0 had 0.9.1). A user of 1.2.0 gets it as an update.
+
+### New
+
+- The **Thinking** menu has a new level, `max`, above `xhigh`. The menu offers `max` only for an agent of version 1.0.0 or later, because an older agent reads `max` as `off` and says nothing. The bundled agent is 1.0.0, so its menu has `max`. An older agent that you choose with `zycode.agentPath` keeps the six levels. The extension does not know which model takes `max`. A model that does not take it answers with an error. Then choose a lower level.
+- The **Context** row now shows with the bundled agent. Agent 1.0.0 sends the standard ACP message `usage_update` when the model has `context_window` in `agent.toml` (a whole number of tokens). The row has a bar, the percent and the tokens, and the VS Code status bar shows `· context 42%`. A model with no `context_window` gets no row. The agent sends no cost, so there is no **Cost** line (the agent has no price table). Part of the count is an estimate: the tool results of a turn, and the whole count after a compaction. The next model call gives an exact number.
+
+### Changed
+
+- Bundles `zycode-agent` 1.0.0 for `linux-x64`, `linux-arm64`, `darwin-arm64`, `darwin-x64` and `win32-x64`. Version 1.2.0 had 0.9.1. Two more changes of the agent reach you with it. When the model has a `context_window`, the agent compacts a long chat by itself (`auto_compact = false` at the top of `agent.toml` turns this off). When an answer ends because the agent reached `max_turns`, the stop reason is `max_turn_requests` (it was `end_turn`), and the chat shows "The turn ended: max_turn_requests." The list of all changes of agent 1.0.0 is in the [CHANGELOG of the repository](https://github.com/zy1233/pi-python/blob/main/CHANGELOG.md).
+
 ## 1.2.0 (2026-11-13)
 
 Stable release. It follows 1.0.0 and has the same bundled agent (0.9.1). A user of 1.0.0 gets it as an update.
