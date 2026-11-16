@@ -362,6 +362,17 @@ describe.skipIf(!chrome || !built)("webview: modes, first run and notices", () =
     });
   });
 
+  it("shows max when the host lists it, and sends it", () => {
+    const withMax = `[{ id: "max", name: "max", description: "Maximum reasoning" }, ${levels.slice(1)}`;
+    const out = run(`${state}
+      state({ mode: { current: "ask", options: ${modes} }, thinking: { current: "low", levels: ${withMax} } });
+      const select = document.querySelector(".thinking select");
+      const options = [...select.options].map((o) => o.value);
+      select.value = "max"; select.dispatchEvent(new Event("change"));
+      window.__result = { options, posted: window.__posted.filter((m) => m.type === "setThinking") };`);
+    expect(out).toMatchObject({ ok: true, options: ["max", "xhigh", "high", "low", "off"], posted: [{ type: "setThinking", value: "max" }] });
+  });
+
   it("disables the picker and gives the reason for a model that does not think", () => {
     const reason = "agent.toml sets reasoning = false for the model.";
     const out = run(`${state}
