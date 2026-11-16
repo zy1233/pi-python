@@ -112,6 +112,46 @@ jobs:
           name: tui-binary
           path: zypi-linux-x86_64
 
+  build-tui-linux-arm:
+    name: Build TUI binary (Linux aarch64)
+    needs: test
+    runs-on: ubuntu-24.04-arm
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Cache Cargo registry and build
+        uses: actions/cache@v5
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            tui/target
+          key: tui-release-${{ runner.os }}-arm64-${{ hashFiles('tui/Cargo.lock') }}
+          restore-keys: tui-release-${{ runner.os }}-arm64-
+
+      - name: Install protoc
+        uses: arduino/setup-protoc@v3
+        with:
+          version: "28.x"
+          repo-token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Build zypi (release-dist)
+        working-directory: tui
+        run: cargo build --profile release-dist -p pi-pager-bin
+
+      - name: Prepare binary artifact
+        run: |
+          cp tui/target/release-dist/zypi zypi-linux-aarch64
+          chmod +x zypi-linux-aarch64
+
+      - uses: actions/upload-artifact@v6
+        with:
+          name: tui-binary-linux-aarch64
+          path: zypi-linux-aarch64
+
   build-tui-macos-arm:
     name: Build TUI binary (macOS arm64)
     needs: test
@@ -173,7 +213,7 @@ jobs:
 
   github-release:
     name: GitHub Release
-    needs: [build, build-tui, build-tui-macos-arm]
+    needs: [build, build-tui, build-tui-linux-arm, build-tui-macos-arm]
     # Same rule as publish-pypi.
     if: github.event_name == 'push' && startsWith(github.ref, 'refs/tags/v')
     runs-on: ubuntu-latest
@@ -190,6 +230,11 @@ jobs:
       - uses: actions/download-artifact@v7
         with:
           name: tui-binary
+          path: tui-bin/
+
+      - uses: actions/download-artifact@v7
+        with:
+          name: tui-binary-linux-aarch64
           path: tui-bin/
 
       - uses: actions/download-artifact@v7

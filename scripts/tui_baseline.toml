@@ -242,7 +242,9 @@ targets = [
 # only that one: 5,519 (derived from 5,518; the r45 run was on macOS: `--lib` 5,243 passed, 12
 # ignored, and the five integration targets 272 passed, with `PI_E2E_PYTHON` set and
 # `PI_E2E_REQUIRED=1`, so the 15 cases of `python_agent_e2e` ran and were not skipped).
-reference_passed = 5519
+# Then +4 for Omarchy & 1.0.0 standalone agent resolution and --setup (3 in `spawn.rs`, 1 in `cli.rs`):
+# 5,519 + 4 = 5523.
+reference_passed = 5523
 min_passed = 5301
 
 # Lib tests only; they were outside the manifest until r8 (plan section 10.10: 1,092 passed,

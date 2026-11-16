@@ -81,8 +81,10 @@ The command palette lists every key and every command. Press `Ctrl+P` when you d
 
 1. The `PI_AGENT_COMMAND` environment variable.
 2. `[agent].command` in `agent.toml`.
-3. The `PI_PYTHON` environment variable. `zypi` adds `-m pi_agent_cli` to it.
-4. `python -m pi_agent_cli` (`python3` on Linux and macOS).
+3. The `PI_PYTHON` environment variable, only when it is set and not empty. `zypi` adds `-m pi_agent_cli` to it.
+4. `zycode-agent` (`zycode-agent.exe` on Windows): next to the `zypi` file (a symlink is followed), and then on `PATH`.
+
+There is no fall-back to `python`. If you installed the agent with `pip` and you use a `zypi` that is not in the bundle, set `PI_PYTHON` to the Python that has `pi-agent-cli-lc`.
 
 The agent writes its error output to `~/.pi-python/logs/agent.stderr.log`. Read this file when the agent stops or does not answer.
 

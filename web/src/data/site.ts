@@ -3,6 +3,14 @@ import type { Level, PackageId, WhereId } from '~/i18n/types';
 /** The GitHub repository. Every link to the source starts here. */
 export const repo = 'https://github.com/zy1233/pi-python';
 
+/**
+ * The release that the install text names. Change it with each release.
+ * README.md and docs/TUI-AND-CODE-AGENT.md name the same release in their download commands.
+ * The download commands name a tag, not "latest", because the file name holds the version:
+ * after the next release, "latest" would point to a release that has no file of that name.
+ */
+export const release = { version: '1.0.0', tag: 'v1.0.0' } as const;
+
 /** Links that do not change with the language. */
 export const links = {
   repo,
@@ -42,21 +50,21 @@ export interface PackageInfo {
 export const packages: PackageInfo[] = [
   { id: 'core', name: 'pi-agent-core-lc', level: 'stable', sources: [{ where: 'pypi', href: 'https://pypi.org/project/pi-agent-core-lc/' }] },
   { id: 'harness', name: 'pi-agent-harness-lc', level: 'stable', sources: [{ where: 'pypi', href: 'https://pypi.org/project/pi-agent-harness-lc/' }] },
-  { id: 'cli', name: 'pi-agent-cli-lc', level: 'beta', sources: [{ where: 'pypi', href: 'https://pypi.org/project/pi-agent-cli-lc/' }] },
-  { id: 'zypi', name: 'zypi', level: 'beta', sources: [{ where: 'releases', href: links.releases }] },
+  { id: 'cli', name: 'pi-agent-cli-lc', level: 'stable', sources: [{ where: 'pypi', href: 'https://pypi.org/project/pi-agent-cli-lc/' }] },
+  { id: 'zypi', name: 'zypi', level: 'stable', sources: [{ where: 'releases', href: links.releases }] },
   {
     id: 'vscode',
     name: 'zycode.zycode',
-    level: 'beta',
+    level: 'stable',
     sources: [
       { where: 'marketplace', href: links.vscodeMarketplace },
       { where: 'openVsx', href: links.openVsx },
     ],
   },
-  { id: 'webAccess', name: 'pi-web-access-py', level: 'beta', sources: [{ where: 'pypi', href: 'https://pypi.org/project/pi-web-access-py/' }] },
-  { id: 'goalX', name: 'pi-goal-x-py', level: 'beta', sources: [{ where: 'pypi', href: 'https://pypi.org/project/pi-goal-x-py/' }] },
-  { id: 'workflows', name: 'pi-dynamic-workflows-py', level: 'beta', sources: [{ where: 'pypi', href: 'https://pypi.org/project/pi-dynamic-workflows-py/' }] },
-  { id: 'mcp', name: 'pi-mcp-py', level: 'alpha', sources: [{ where: 'pypi', href: 'https://pypi.org/project/pi-mcp-py/' }] },
+  { id: 'webAccess', name: 'pi-web-access-py', level: 'stable', sources: [{ where: 'pypi', href: 'https://pypi.org/project/pi-web-access-py/' }] },
+  { id: 'goalX', name: 'pi-goal-x-py', level: 'stable', sources: [{ where: 'pypi', href: 'https://pypi.org/project/pi-goal-x-py/' }] },
+  { id: 'workflows', name: 'pi-dynamic-workflows-py', level: 'stable', sources: [{ where: 'pypi', href: 'https://pypi.org/project/pi-dynamic-workflows-py/' }] },
+  { id: 'mcp', name: 'pi-mcp-py', level: 'stable', sources: [{ where: 'pypi', href: 'https://pypi.org/project/pi-mcp-py/' }] },
 ];
 
 /** Code that is the same in every language. */

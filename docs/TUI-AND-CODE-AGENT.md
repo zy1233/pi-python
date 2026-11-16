@@ -1,6 +1,6 @@
 # TUI & Code-Agent Guide
 
-> **Status: Beta** — The TUI (`zypi`) and coding agent (`pi_agent_cli`) are functional but under active development. APIs, configuration, and binary distribution may change between releases.
+> **Status: Stable (1.0.0)** — The TUI (`zypi`) and coding agent (`pi_agent_cli` / `zycode-agent`) are production ready.
 
 This document covers how to install, configure, and use the pi-python coding agent — both the headless Python CLI and the full-screen Rust TUI.
 
@@ -17,7 +17,7 @@ This document covers how to install, configure, and use the pi-python coding age
              │ ACP (Agent Client Protocol) over stdio
              ▼
 ┌─────────────────────────────────────┐
-│     pi_agent_cli (Python ACP)       │   Standard ACP agent
+│  zycode-agent / pi_agent_cli (ACP)  │   Standard ACP agent
 │  System prompt engine, tool         │   MIT license
 │  contributions, context files       │
 └────────────┬────────────────────────┘
@@ -37,7 +37,7 @@ This document covers how to install, configure, and use the pi-python coding age
 └─────────────────────────────────────┘
 ```
 
-The TUI (`zypi`) is the interactive frontend. It communicates with the Python coding agent (`pi_agent_cli`) over the [Agent Client Protocol (ACP)](https://agentclientprotocol.com) via stdio. The Python agent handles all LLM calls, tool execution, and session management through the core engine. `zypi` has no model client, no tool runner and no MCP client. A process-level audit of a real turn (`docs/PLAN/archive/PLAN-RUST-AGENT-RUNTIME-REMOVAL-EXECUTION-LOG.md`, section 10.14) found no connection from `zypi` to any address outside the machine.
+The TUI (`zypi`) is the interactive frontend. It communicates with the ACP coding agent (`zycode-agent` binary or `pi_agent_cli` Python module) over the [Agent Client Protocol (ACP)](https://agentclientprotocol.com) via stdio. The agent handles all LLM calls, tool execution, and session management through the core engine. `zypi` has no model client, no tool runner and no MCP client. A process-level audit of a real turn (`docs/PLAN/archive/PLAN-RUST-AGENT-RUNTIME-REMOVAL-EXECUTION-LOG.md`, section 10.14) found no connection from `zypi` to any address outside the machine.
 
 You can use the coding agent in two ways:
 
@@ -48,7 +48,23 @@ You can use the coding agent in two ways:
 
 ## Installation
 
-### 1. Python packages (required)
+### 1. Standalone bundle (recommended — no Python required)
+
+Download the complete bundle `zycode-<target>-<version>.tar.gz` from [GitHub Releases](https://github.com/zy1233/pi-python/releases). The file name holds the version, so use the URL of that release (`releases/download/v<version>/...`). Do not use `releases/latest/download/...`: after the next release, "latest" points to a release that has no file of that name.
+
+```bash
+# Linux x86_64
+curl -L -o zycode.tar.gz https://github.com/zy1233/pi-python/releases/download/v1.0.0/zycode-linux-x86_64-1.0.0.tar.gz
+tar -xzf zycode.tar.gz
+sudo mv zypi zycode-agent /usr/local/bin/
+
+# Initial setup in terminal
+zypi --setup
+```
+
+The targets are `linux-x86_64`, `linux-aarch64` and `darwin-aarch64` (macOS with Apple silicon). The bundle holds two files: `zypi` and `zycode-agent`. `zypi` starts the agent that is next to it. The `Release` workflow builds `zypi`, and then the `Agent binaries` workflow packs the bundles. The bundles appear on the release page when the `Agent binaries` workflow has finished, which is after the release itself.
+
+### 2. Python packages (optional / dev)
 
 ```bash
 # Using pip
@@ -58,15 +74,28 @@ pip install pi-agent-cli-lc
 pip install -e ".[dev]" -e "./packages/pi-agent-harness" -e "./packages/pi-agent-cli"
 ```
 
-### 2. TUI binary (`zypi`)
+### 3. TUI binary (`zypi`) alone
 
-#### Option A: Download prebuilt binary (Linux x86_64, macOS arm64)
+`zypi` alone has no agent. It looks for `zycode-agent` next to its own file (a symlink is followed), and then on `PATH`. The Python package (`pip install pi-agent-cli-lc`) has no `zycode-agent` command. If you use the Python package, tell `zypi` which Python has it:
 
-Prebuilt binaries are attached to [GitHub Releases](https://github.com/zy1233/pi-python/releases). The Linux x86_64 binary has been there since v0.3.0. The macOS arm64 binary (Apple silicon) starts with v0.5.0.
+```bash
+export PI_PYTHON=python3   # a Python that has pi-agent-cli-lc installed
+```
+
+`zypi` starts `python -m pi_agent_cli` only when `PI_PYTHON` is set and not empty. Before 1.0.0, it did this when you set nothing. You can also set `PI_AGENT_COMMAND`, or `[agent].command` (see [Configuration](#configuration)).
+
+#### Option A: Download prebuilt binary (Linux x86_64, Linux aarch64, macOS arm64)
+
+Prebuilt binaries are attached to [GitHub Releases](https://github.com/zy1233/pi-python/releases).
 
 ```bash
 # Linux x86_64
 curl -L -o zypi https://github.com/zy1233/pi-python/releases/latest/download/zypi-linux-x86_64
+chmod +x zypi
+sudo mv zypi /usr/local/bin/
+
+# Linux aarch64
+curl -L -o zypi https://github.com/zy1233/pi-python/releases/latest/download/zypi-linux-aarch64
 chmod +x zypi
 sudo mv zypi /usr/local/bin/
 
@@ -124,8 +153,10 @@ context_window = 128000                            # tokens; the agent then tell
 paths = ["~/.pi-python/skills", ".pi/skills"]
 
 [agent]
-# Override how the TUI spawns the Python agent (optional)
-command = "python -m pi_agent_cli"
+# Override how the TUI spawns the ACP agent (optional).
+# By default, zypi searches for `zycode-agent` next to itself (or following symlinks)
+# or on PATH. Set this or PI_AGENT_COMMAND or PI_PYTHON to override.
+command = "zycode-agent"
 
 [extensions]
 # Projects that may use their own <project>/.pi-python/extensions (arbitrary Python),

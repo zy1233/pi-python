@@ -1,4 +1,4 @@
-import { links, snippets } from '~/data/site';
+import { links, release, snippets } from '~/data/site';
 import type { Messages } from './types';
 
 export const en: Messages = {
@@ -36,7 +36,7 @@ export const en: Messages = {
     newTab: 'opens in a new tab',
   },
   hero: {
-    badge: 'In beta',
+    badge: `${release.version} stable`,
     badgeNote: 'Open source · MIT and Apache-2.0',
     titleBefore: 'A coding agent you can\u00a0',
     titleEm: 'audit',
@@ -51,7 +51,7 @@ export const en: Messages = {
   terminal: {
     label: 'An illustration of a zypi session. The agent reads three files, edits one, and runs the tests.',
     title: 'zypi',
-    tag: 'beta',
+    tag: 'stable',
     prompt: 'The checkout test fails on rounding. Find the cause and fix it.',
     tagFree: 'read-only · no prompt',
     tagAsked: 'asked · you allowed',
@@ -201,26 +201,28 @@ export const en: Messages = {
   install: {
     eyebrow: 'Install',
     title: 'Install it, then pick a model.',
-    lead: 'Install the Python agent first. Then add the terminal UI, or connect your editor. The VS Code extension is the exception: it has the agent inside.',
+    lead: 'The terminal bundle and the VS Code extension have the agent inside. The other ways use the Python package.',
     tabListLabel: 'Ways to install',
     tabs: {
       tui: {
         label: 'Terminal UI',
         heading: 'Terminal UI (zypi)',
         codeLabel: 'bash',
-        code: `# 1. Install the agent, then choose a provider, a model and a key
-pip install pi-agent-cli-lc
-python -m pi_agent_cli --setup
+        code: `# 1. Download the bundle: the terminal UI and the agent in one archive (Linux x86_64, no Python needed)
+curl -L -o zycode.tar.gz ${links.repo}/releases/download/${release.tag}/zycode-linux-x86_64-${release.version}.tar.gz
+tar -xzf zycode.tar.gz
+sudo mv zypi zycode-agent /usr/local/bin/
 
-# 2. Install the terminal UI (Linux x86_64)
-curl -L -o zypi https://github.com/zy1233/pi-python/releases/latest/download/zypi-linux-x86_64
-chmod +x zypi && sudo mv zypi /usr/local/bin/
+# 2. Choose a provider, a model and a key
+zypi --setup
 
 # 3. Start it in your project
 zypi`,
         notes: [
+          'The bundle holds two programs: `zypi` and `zycode-agent`. `zypi` starts the agent that is next to it, or on your `PATH`.',
+          `For Linux on ARM, use the file \`zycode-linux-aarch64-${release.version}.tar.gz\`. For macOS with Apple silicon, use \`zycode-darwin-aarch64-${release.version}.tar.gz\`. CI builds the macOS file. A person has not run it yet. It is not signed.`,
           'The Linux binary needs glibc 2.39 or newer (Ubuntu 24.04 or later).',
-          'On macOS with Apple silicon, use the file `zypi-macos-arm64`. CI builds it. A person has not run it yet. It is not signed.',
+          'Do you already have the agent from pip (`pip install pi-agent-cli-lc`)? Then download only `zypi` (the file `zypi-linux-x86_64`), and run `export PI_PYTHON=python3` before you start it. `zypi` starts `python -m pi_agent_cli` only when you set `PI_PYTHON`.',
           'On Windows, build `zypi` from source and run it in WSL2. The Python agent runs on Windows.',
         ],
       },
@@ -280,7 +282,7 @@ PI_USE_MOCK=1 python -m pi_agent_cli -p "hello" --cwd .`,
   status: {
     eyebrow: 'Status',
     title: 'The status, as it is.',
-    lead: 'zycode is in beta. This table shows what is stable and what is not.',
+    lead: 'zycode 1.0.0 is stable. This table shows the status of every component.',
     columns: { component: 'Component', level: 'Status', role: 'What it does', source: 'Get it from' },
     levels: { stable: 'Stable', beta: 'Beta', alpha: 'Alpha' },
     where: { pypi: 'PyPI', releases: 'GitHub Releases', marketplace: 'VS Code Marketplace', openVsx: 'Open VSX' },
@@ -288,8 +290,8 @@ PI_USE_MOCK=1 python -m pi_agent_cli -p "hello" --cwd .`,
       core: 'Agent loop, events, tools, LangChain adapter',
       harness: 'Sessions, compaction, skills, execution environment',
       cli: 'ACP agent and headless mode',
-      zypi: 'Terminal UI (prebuilt for Linux x86_64)',
-      vscode: 'VS Code extension. It is published on both registries for five platforms. The bundled agent is Beta. The project owner tested the install of 1.0.0 and the update from 0.1.0 to 1.0.0 on Windows (2026-11-12). The rest of the Windows flow, macOS and Linux are not verified.',
+      zypi: 'Terminal UI (prebuilt for Linux x86_64, Linux aarch64, and macOS arm64)',
+      vscode: 'VS Code extension. It is published on both registries for five platforms. The project owner tested the install of 1.0.0 and the update from 0.1.0 to 1.0.0 on Windows (2026-11-12). The rest of the Windows flow, macOS and Linux are not verified.',
       webAccess: 'Web search and fetch',
       goalX: 'Goal planning',
       workflows: 'Workflows',

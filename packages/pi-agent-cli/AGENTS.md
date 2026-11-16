@@ -124,11 +124,18 @@ The question to the user holds the reason as one fixed sentence (`auto_reasons.s
 
 ## TUI spawn
 
-The Rust TUI (`zypi`) spawns the Python agent via (priority order):
+The Rust TUI (`zypi`) spawns the ACP agent via (priority order):
 
 1. `PI_AGENT_COMMAND` env var
 2. `[agent].command` in `agent.toml`, then in `config.toml`
-3. `PI_PYTHON` env var (appends `-m pi_agent_cli`)
+3. `PI_PYTHON` env var: ONLY when `PI_PYTHON` is explicitly set in the environment and non-empty (appends `["-m", "pi_agent_cli"]`)
+4. Default (when none of the above is set): `zycode-agent` (`zycode-agent.exe` on Windows) with empty args:
+   - Sibling binary next to the current `zypi` executable
+   - Sibling binary next to the canonicalized target (following symlinks, e.g. for `~/.local/bin/zypi` symlinks)
+   - Fall back to searching `PATH` for `zycode-agent`
+   - Notice: `zypi` does NOT fall back to bare `python` or `python3` when `PI_PYTHON` is unset.
+
+`zypi --setup` runs the setup command (`--setup`) directly on the resolved agent program, allowing users to configure their provider, model, and API key immediately in the terminal.
 
 **The agent's stderr.** The TUI owns the screen, and its own fd 2 is `/dev/null` (`pi_tty_utils::redirect_native_stderr`), so the agent's stderr goes to `<home>/logs/agent.stderr.log` instead (`acp/spawn.rs`, `agent_stderr`): appended across runs, one `--- agent started <time> (zypi pid N) ---` line per spawn, mode 0600 on Unix (a traceback can quote prompts, paths and keys), and a log longer than 1 MiB is moved to `agent.stderr.log.1` at the next spawn. A log that cannot be opened is skipped, not fatal. This is where a Python traceback or a warning from the agent ends up; the agent should still write diagnostics to stderr, not stdout (stdout is the ACP channel). `-p` runs are not redirected: there the agent's stderr is the user's terminal.
 
