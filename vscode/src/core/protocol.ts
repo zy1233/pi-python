@@ -33,8 +33,11 @@ export interface ModeState {
   options: { id: string; name: string }[];
 }
 
-/** The levels of `thinking_level` in agent.toml. */
-export type ThinkingLevel = "off" | "minimal" | "low" | "medium" | "high" | "xhigh";
+/**
+ * The levels of `thinking_level` in agent.toml. An agent knows `max` only from `MAX_LEVEL_SINCE` on
+ * (`thinking.ts`): the menu gets the list for the agent that runs, and this type has all of them.
+ */
+export type ThinkingLevel = "off" | "minimal" | "low" | "medium" | "high" | "xhigh" | "max";
 
 export interface ThinkingLevelOption {
   id: ThinkingLevel;
@@ -232,7 +235,8 @@ export function parseWebviewMessage(value: unknown): WebviewMessage | undefined 
         value.value !== "low" &&
         value.value !== "medium" &&
         value.value !== "high" &&
-        value.value !== "xhigh"
+        value.value !== "xhigh" &&
+        value.value !== "max"
       ) {
         return undefined;
       }

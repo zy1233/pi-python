@@ -216,7 +216,7 @@ function renderHeader(): void {
     select.disabled = thinking.disabled !== undefined;
     select.addEventListener("change", () => {
       const value = select.value;
-      if (value === "off" || value === "minimal" || value === "low" || value === "medium" || value === "high" || value === "xhigh") {
+      if (value === "off" || value === "minimal" || value === "low" || value === "medium" || value === "high" || value === "xhigh" || value === "max") {
         send({ type: "setThinking", value });
       }
     });

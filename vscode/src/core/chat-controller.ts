@@ -50,10 +50,10 @@ import {
 } from "./session-list.js";
 import { readUsageUpdate, sameUsage } from "./status-row.js";
 import {
-  THINKING_LEVELS,
   isThinkingLevel,
   noThinkingReason,
   readThinking,
+  thinkingLevelsFor,
   writeThinkingLevel,
   type ThinkingRead,
 } from "./thinking.js";
@@ -103,6 +103,9 @@ interface TerminalAuthMethod {
   env: Record<string, string>;
 }
 
+/** What was read from `agent.toml` before the agent started: its text, or why there is none. */
+type ThinkingText = { ok: true; text: string } | { ok: false; reason: string };
+
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value);
 }
@@ -151,6 +154,9 @@ export class ChatController {
   private deleteSupported = true;
   private refreshing: Promise<void> | undefined;
   private refreshAgain = false;
+  /** `agent.toml` as it was just before the agent started (the agent reads it at its start). */
+  private thinkingText: ThinkingText | undefined;
+  /** What that text says for the agent that runs. It is set after `initialize`: it needs the version. */
   private thinkingFile: ThinkingRead | undefined;
   private reopenId: string | undefined;
   private changingThinking = false;
@@ -241,7 +247,7 @@ export class ChatController {
     const file = this.thinkingFile;
     if (!file) return undefined;
     if (this.status !== "ready" && this.status !== "busy" && this.status !== "cancelling") return undefined;
-    const levels = [...THINKING_LEVELS];
+    const levels = [...this.thinkingLevels()];
     if (!file.ok) return { levels, disabled: file.reason };
     const state: ThinkingState = { current: file.value.level, levels };
     if (file.value.invalidLevel !== undefined) {
@@ -254,10 +260,22 @@ export class ChatController {
     return state;
   }
 
-  private readThinkingFile(): ThinkingRead {
+  /** The levels that the running agent knows. Its version comes from `initialize`; before that, the levels of every agent. */
+  private thinkingLevels() {
+    return thinkingLevelsFor(this.initResult?.agentInfo?.version);
+  }
+
+  /** What the text read before the start says, for the agent that runs. It needs the version of the agent, so it runs after `initialize`. */
+  private parseThinkingText(): ThinkingRead | undefined {
+    const read = this.thinkingText;
+    if (!read) return undefined;
+    return read.ok ? readThinking(read.text, this.thinkingLevels()) : read;
+  }
+
+  private readThinkingText(): ThinkingText {
     const file = this.host.agentConfigPath();
     try {
-      return readThinking(readFileSync(file, "utf8"));
+      return { ok: true, text: readFileSync(file, "utf8") };
     } catch (error) {
       if ((error as NodeJS.ErrnoException).code === "ENOENT") {
         return { ok: false, reason: "agent.toml does not exist yet, so there is no thinking level to set. Run the setup first." };
@@ -274,7 +292,8 @@ export class ChatController {
   async applyThinkingLevel(level: ThinkingLevel): Promise<void> {
     if (this.changingThinking) return;
     const state = this.thinkingState();
-    if (!state || !isThinkingLevel(level)) return;
+    // Only a level that the running agent knows: the page cannot tell which these are.
+    if (!state || !isThinkingLevel(level, this.thinkingLevels())) return;
     if (state.disabled !== undefined) {
       this.pushNotice("info", `The thinking level cannot be changed now: ${state.disabled}`, [{ id: "openAgentConfig", label: "Open agent.toml" }]);
       this.emit(this.stateMessage());
@@ -414,7 +433,8 @@ export class ChatController {
       return;
     }
     this.command = resolved.command;
-    this.thinkingFile = this.readThinkingFile();
+    this.thinkingText = this.readThinkingText();
+    this.thinkingFile = undefined;
     this.setStatus("starting");
     const generation = ++this.generation;
     try {
@@ -437,6 +457,7 @@ export class ChatController {
       const init = await this.withTimeout(conn.initialize(this.host.extensionVersion), proc);
       if (generation !== this.generation) return;
       this.initResult = init;
+      this.thinkingFile = this.parseThinkingText();
       const verdict = checkAgentIdentity({
         protocolVersion: init.protocolVersion,
         agentName: init.agentInfo?.name,

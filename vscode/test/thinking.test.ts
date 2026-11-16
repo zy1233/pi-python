@@ -4,7 +4,16 @@ import { afterEach, describe, expect, it } from "vitest";
 
 import type { ChatController } from "../src/core/chat-controller.js";
 import { parseWebviewMessage, type HostMessage } from "../src/core/protocol.js";
-import { THINKING_LEVELS, noThinkingReason, readThinking, setThinkingLevelInText, writeThinkingLevel } from "../src/core/thinking.js";
+import {
+  MAX_LEVEL_SINCE,
+  THINKING_LEVELS,
+  noThinkingReason,
+  readThinking,
+  setThinkingLevelInText,
+  thinkingLevelsFor,
+  writeThinkingLevel,
+} from "../src/core/thinking.js";
+import { agentVersionAtLeast } from "../src/core/version.js";
 import { TestHost, newController, ofType, readLog, tempDir, waitFor } from "./helpers.js";
 
 const MODEL = '[model]\nprovider = "openai"\nid = "m"\n';
@@ -16,8 +25,27 @@ function edited(text: string, level: Parameters<typeof setThinkingLevelInText>[1
 }
 
 describe("reading thinking from agent.toml", () => {
-  it("lists the levels of the agent, strongest first, as the pager does", () => {
-    expect(THINKING_LEVELS.map((level) => level.id)).toEqual(["xhigh", "high", "medium", "low", "minimal", "off"]);
+  it("lists every level that an agent can know, strongest first, as the pager does", () => {
+    expect(THINKING_LEVELS.map((level) => level.id)).toEqual(["max", "xhigh", "high", "medium", "low", "minimal", "off"]);
+  });
+
+  it("offers max only to an agent that knows it", () => {
+    const ids = (version: string | undefined) => thinkingLevelsFor(version).map((level) => level.id);
+    const six = ["xhigh", "high", "medium", "low", "minimal", "off"];
+    expect(ids("0.9.1")).toEqual(six);
+    expect(ids(MAX_LEVEL_SINCE)).toEqual(["max", ...six]);
+    expect(ids("99.0.0")).toEqual(["max", ...six]);
+    // A version that is missing or cannot be read gets the six levels that every agent knows.
+    expect(ids(undefined)).toEqual(six);
+    expect(ids("unknown")).toEqual(six);
+    expect(ids("0.0.0+unknown")).toEqual(six);
+  });
+
+  it("keeps the number that max starts at above the agents that were released without max", () => {
+    // 0.9.1 is the agent that the extension bundles today. It does not know max (it reads it as off).
+    expect(agentVersionAtLeast("0.9.1", MAX_LEVEL_SINCE)).toBe(false);
+    // A plain release number: a pre-release text here would make every comparison false.
+    expect(MAX_LEVEL_SINCE).toMatch(/^\d+\.\d+\.\d+$/);
   });
 
   it("reads the level and says off when it is missing, as the agent does", () => {
@@ -28,6 +56,14 @@ describe("reading thinking from agent.toml", () => {
   it("reports a level that the agent does not know, which the agent reads as off", () => {
     expect(readThinking('thinking_level = "ultra"\n')).toEqual({ ok: true, value: { level: "off", reasoning: undefined, invalidLevel: "ultra" } });
     expect(readThinking("thinking_level = 3\n")).toEqual({ ok: true, value: { level: "off", reasoning: undefined, invalidLevel: "number" } });
+  });
+
+  it("reads max for an agent that knows it, and reports it for an agent that does not, which reads it as off", () => {
+    const text = `thinking_level = "max"\n${MODEL}`;
+    expect(readThinking(text, thinkingLevelsFor(MAX_LEVEL_SINCE))).toEqual({ ok: true, value: { level: "max", reasoning: undefined } });
+    expect(readThinking(text, thinkingLevelsFor("0.9.1"))).toEqual({ ok: true, value: { level: "off", reasoning: undefined, invalidLevel: "max" } });
+    // With no levels given, the answer is the one for an agent that does not know max.
+    expect(readThinking(text)).toMatchObject({ ok: true, value: { level: "off", invalidLevel: "max" } });
   });
 
   it("reads reasoning from [model] first, then from the top level, like CliConfig", () => {
@@ -65,6 +101,11 @@ describe("the edit of thinking_level", () => {
   it("adds the key to a file that has no table, and to an empty file", () => {
     expect(edited("max_turns = 5\n", "low")).toBe('max_turns = 5\nthinking_level = "low"\n');
     expect(edited("", "high")).toBe('thinking_level = "high"\n');
+  });
+
+  it("writes max like any other level", () => {
+    expect(edited(`thinking_level = "high"\n${MODEL}`, "max")).toBe(`thinking_level = "max"\n${MODEL}`);
+    expect(edited(MODEL, "max")).toBe(`thinking_level = "max"\n\n${MODEL}`);
   });
 
   it("keeps Windows line ends", () => {
@@ -140,11 +181,15 @@ describe("writing the file", () => {
 });
 
 describe("the message of the page", () => {
-  it("takes the six levels and nothing else", () => {
-    for (const value of ["off", "minimal", "low", "medium", "high", "xhigh"]) {
+  it("takes the seven levels and nothing else (the controller checks the level against the agent)", () => {
+    for (const value of ["off", "minimal", "low", "medium", "high", "xhigh", "max"]) {
       expect(parseWebviewMessage({ type: "setThinking", value })).toEqual({ type: "setThinking", value });
     }
-    expect(parseWebviewMessage({ type: "setThinking", value: "max" })).toBeUndefined();
+    // The page takes every level that the menu can list.
+    for (const level of THINKING_LEVELS) {
+      expect(parseWebviewMessage({ type: "setThinking", value: level.id })).toEqual({ type: "setThinking", value: level.id });
+    }
+    expect(parseWebviewMessage({ type: "setThinking", value: "ultra" })).toBeUndefined();
     expect(parseWebviewMessage({ type: "setThinking" })).toBeUndefined();
   });
 });
@@ -221,6 +266,50 @@ describe("the thinking picker in the controller", () => {
     expect(thinkingOf(controller)).toMatchObject({ current: "low" });
     expect(thinkingOf(controller)?.levels.map((l) => l.id)).toEqual(["xhigh", "high", "medium", "low", "minimal", "off"]);
     expect(thinkingOf(controller)?.disabled).toBeUndefined();
+  });
+
+  it("offers no max to an agent that is older than MAX_LEVEL_SINCE, and does not write it", async () => {
+    // 0.9.1 reads max as off and says nothing, so a menu with max would lie.
+    const { controller, host, toml } = rig({ env: { FAKE_AGENT_VERSION: "0.9.1" } });
+    await controller.start();
+    expect(thinkingOf(controller)?.levels.map((l) => l.id)).toEqual(["xhigh", "high", "medium", "low", "minimal", "off"]);
+    // The page cannot tell which levels the agent knows: a message for max is dropped here.
+    await controller.applyThinkingLevel("max");
+    expect(host.confirmations).toHaveLength(0);
+    expect(readFileSync(toml, "utf8")).toContain('thinking_level = "low"');
+  });
+
+  it("offers max, first in the list, to an agent that knows it, and sets it", async () => {
+    const { controller, host, toml, log, messages } = rig({ env: { FAKE_AGENT_VERSION: MAX_LEVEL_SINCE } });
+    await controller.start();
+    expect(thinkingOf(controller)?.levels.map((l) => l.id)).toEqual(["max", "xhigh", "high", "medium", "low", "minimal", "off"]);
+
+    await controller.applyThinkingLevel("max");
+
+    expect(host.confirmations).toHaveLength(1);
+    expect(host.confirmations[0]?.detail).toContain('thinking_level = "max"');
+    expect(readFileSync(toml, "utf8")).toBe(`thinking_level = "max"\n${MODEL}`);
+    expect(starts(log)).toEqual(["start thinking_level=low", "start thinking_level=max"]);
+    expect(thinkingOf(controller)).toMatchObject({ current: "max" });
+    expect(thinkingOf(controller)?.note).toBeUndefined();
+    expect(notices(messages).at(-1)).toMatch(/Thinking level: max\./);
+    await say(controller, "level");
+    expect(agentText(controller)).toContain("level:max");
+  });
+
+  it("shows max from the file for an agent that knows it", async () => {
+    // The file is read before the agent starts, and the version comes with `initialize`: the two meet here.
+    const { controller } = rig({ toml: 'thinking_level = "max"\n', env: { FAKE_AGENT_VERSION: MAX_LEVEL_SINCE } });
+    await controller.start();
+    expect(thinkingOf(controller)).toMatchObject({ current: "max" });
+    expect(thinkingOf(controller)?.note).toBeUndefined();
+  });
+
+  it("says that an agent older than MAX_LEVEL_SINCE does not know the max in the file, and shows off", async () => {
+    const { controller } = rig({ toml: 'thinking_level = "max"\n', env: { FAKE_AGENT_VERSION: "0.9.1" } });
+    await controller.start();
+    expect(thinkingOf(controller)).toMatchObject({ current: "off" });
+    expect(thinkingOf(controller)?.note).toBe('thinking_level in agent.toml is "max", which the agent does not know. It uses off.');
   });
 
   it("is disabled, with the reason, for a model that has reasoning = false", async () => {

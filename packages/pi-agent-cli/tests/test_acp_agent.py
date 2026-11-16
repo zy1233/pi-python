@@ -416,6 +416,40 @@ async def _bash_once_stream(model, context, options=None):
     return stream
 
 
+async def _read_forever_stream(model, context, options=None):
+    """A model that asks for one more `read` after every result: the loop never ends by itself."""
+    stream = AssistantMessageEventStream()
+    tc: ToolCallContent = {
+        "type": "toolCall",
+        "id": f"call_read_{len(context.messages)}",
+        "name": "read",
+        "arguments": {"path": "missing.txt"},
+    }
+    partial = _base_partial(model, [tc])
+    partial.stopReason = "toolUse"
+    stream.push(StartEvent(partial=partial.model_copy(deep=True)))
+    stream.push(DoneEvent(partial=partial.model_copy(deep=True), reason="toolUse"))
+    stream.set_final_message(partial)
+    stream.end()
+    return stream
+
+
+@pytest.mark.asyncio
+async def test_a_prompt_that_reaches_max_turns_ends_with_max_turn_requests(tmp_path):
+    """The client got "end_turn" and one line of error text. ACP has a stop reason for this."""
+    agent = PiAcpAgent(
+        stream_fn=_read_forever_stream,
+        home=tmp_path,
+        config=CliConfig(permission="ask", provider="mock", model_id="mock", max_turns=2),
+    )
+    agent.on_connect(FakeClient(allow=False))  # `read` declares itself harmless: nothing is asked
+    session = await agent.new_session(cwd=str(tmp_path))
+
+    response = await agent.prompt(session_id=session.session_id, prompt=[text_block("go on")])
+
+    assert response.stop_reason == "max_turn_requests"
+
+
 @pytest.mark.asyncio
 async def test_permission_ask_denies_bash(tmp_path):
     agent = _agent(tmp_path, stream_fn=_bash_once_stream, permission="ask")
@@ -532,6 +566,21 @@ def test_stop_reason_mapping():
             AssistantMessage(content=[], stopReason="error", errorMessage="Content policy refusal")
         )
         == "refusal"
+    )
+    # The loop's own limit is the one error that ACP names. Any other error stays "end_turn".
+    assert (
+        _stop_reason(
+            AssistantMessage(
+                content=[], stopReason="error", errorMessage="Agent loop exceeded max_turns=200"
+            )
+        )
+        == "max_turn_requests"
+    )
+    assert (
+        _stop_reason(
+            AssistantMessage(content=[], stopReason="error", errorMessage="429 rate limit")
+        )
+        == "end_turn"
     )
 
 

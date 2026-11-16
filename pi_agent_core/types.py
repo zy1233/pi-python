@@ -22,7 +22,7 @@ from pi_agent_core.messages import (
     UsageCost,
 )
 
-ThinkingLevel = Literal["off", "minimal", "low", "medium", "high", "xhigh"]
+ThinkingLevel = Literal["off", "minimal", "low", "medium", "high", "xhigh", "max"]
 ToolExecutionMode = Literal["sequential", "parallel"]
 QueueMode = Literal["all", "one-at-a-time"]
 
@@ -35,6 +35,12 @@ class MaxTurnsExceededError(RuntimeError):
     Agent wrapper converts it into an error-stop assistant message and sets
     `Agent.error_message`.
     """
+
+
+# The text of MaxTurnsExceededError, up to the number. The wrapper keeps only the text of an error
+# (`errorMessage`), so a caller that must know that the limit was the reason (the ACP agent, for
+# the stop reason `max_turn_requests`) finds it by this text.
+MAX_TURNS_MESSAGE = "Agent loop exceeded max_turns="
 
 
 # Extensible custom messages — apps can subclass or use TypedDict merging patterns

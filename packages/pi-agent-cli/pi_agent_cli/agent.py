@@ -81,6 +81,12 @@ from pi_agent_cli.config import (
     load_local_env,
     pi_home,
 )
+from pi_agent_cli.context_usage import (
+    estimated_context_tokens,
+    stored_context_tokens,
+    turn_context_tokens,
+    usage_update,
+)
 from pi_agent_cli.events import project_event, project_message_replay
 from pi_agent_cli.extension_notices import failed_extensions_notice
 from pi_agent_cli.extension_trust import (
@@ -95,6 +101,8 @@ from pi_agent_cli.extension_trust import (
 )
 from pi_agent_cli.factory import (
     api_key_for_choice,
+    auto_compact_enabled,
+    compaction_settings,
     create_session_harness,
     default_stream_fn,
     load_session_resources,
@@ -130,7 +138,7 @@ from pi_agent_cli.trust_prompt import (
 from pi_agent_cli.trust_store import TrustStore
 from pi_agent_core.coding_tools.path_utils import normalize_host_path
 from pi_agent_core.messages import ImageContent
-from pi_agent_core.types import StreamFn
+from pi_agent_core.types import MAX_TURNS_MESSAGE, StreamFn
 from pi_agent_harness import (
     AgentHarness,
     AgentHarnessError,
@@ -221,6 +229,10 @@ class PiAcpAgent(Agent):
         self._abort_tasks: set[asyncio.Task[Any]] = set()
         self._session_cwds: dict[str, str] = {}
         self._session_models: dict[str, ModelChoice] = {}
+        # The tokens in the context of each open session, at the last point where the agent
+        # knew the number (``_report_context_use``). It is kept so that a change of model can
+        # send it again with the window of the new model.
+        self._context_used: dict[str, int] = {}
         self._client_capabilities: ClientCapabilities | None = None
         self._client_info: Implementation | None = None
         self._extensions: list[Any] = extensions or []
@@ -444,6 +456,7 @@ class PiAcpAgent(Agent):
     def _release_session(self, session_id: str) -> AgentHarness | None:
         """Forget the in-memory state of *session_id* and return its harness, if any."""
         self._session_models.pop(session_id, None)
+        self._context_used.pop(session_id, None)
         self._session_cwds.pop(session_id, None)
         self._reserved_ids.discard(session_id)
         harness = self._harnesses.pop(session_id, None)
@@ -563,8 +576,16 @@ class PiAcpAgent(Agent):
                 {"configId": config_id, "value": value, "reason": "unknown model"}
             )
         await harness.set_model(model_for_choice(choice, reasoning=self._config.model_reasoning))
+        # Whether the agent compacts by itself, and the limits of compaction, depend on the
+        # window of the model (``auto_compact_enabled``, ``compaction_settings``).
+        harness.compaction = compaction_settings(
+            choice, auto_compact=auto_compact_enabled(self._config, choice)
+        )
         harness.get_api_key = api_key_for_choice(choice)
         self._session_models[session_id] = choice
+        # The count stays true, but it is now a part of another window. When the new model has
+        # no window, nothing is sent (the client keeps what it shows).
+        await self._send_context_use(session_id)
         return SetSessionConfigOptionResponse(config_options=self._config_options(session_id))
 
     async def set_session_mode(
@@ -958,6 +979,7 @@ class PiAcpAgent(Agent):
 
         async def on_event(event: Any, signal: Any | None = None) -> None:
             await self._emit_updates(session_id, event)
+            await self._report_context_use(session_id, event)
 
         harness.subscribe(on_event)
         self._drop_trust(session_id)  # binding again: a question still open is for the old one
@@ -972,6 +994,7 @@ class PiAcpAgent(Agent):
         self._session_modes[session_id] = mode
         self._harnesses[session_id] = harness
         self._session_cwds[session_id] = cwd
+        self._context_used.pop(session_id, None)  # the number of an earlier harness is gone
         self._trust[session_id] = state
         if replaced is not None and replaced is not harness:
             await self._end_replaced_harness(session_id, replaced)
@@ -1024,6 +1047,8 @@ class PiAcpAgent(Agent):
         to the client is no different.
         """
         await asyncio.sleep(0)
+        # Before the question about the project: that one can wait for the user for a long time.
+        await self._report_stored_context_use(session_id)
         await self._settle_project_trust(session_id)
         await self._advertise_commands(session_id)
         # The client has taken an update for the session, so it knows the session: the lines
@@ -1351,6 +1376,84 @@ class PiAcpAgent(Agent):
         for update in project_event(event, cwd=cwd):
             await self._conn.session_update(session_id=session_id, update=update)
 
+    async def _report_context_use(self, session_id: str, event: Any) -> None:
+        """Tell the client how full the context is, when an event changes the number.
+
+        The number changes at the end of a turn (the provider counted the context) and after a
+        compaction (the count falls). This never raises: the harness turns the error of a
+        subscriber into an error of the turn, and the count is only an aid for the user.
+        See ``context_usage`` for what is counted and when nothing is sent.
+        """
+        kind = getattr(event, "type", None)
+        if self._conn is None or kind not in ("turn_end", "session_compact"):
+            return
+        try:
+            if kind == "turn_end":
+                used = turn_context_tokens(event.message, event.tool_results)
+            else:
+                used = await self._context_after_compaction(session_id)
+            if used is None:
+                return
+            self._context_used[session_id] = used
+            await self._send_context_use(session_id)
+        except Exception:
+            logger.warning(
+                "Could not report the context use of session %s", session_id, exc_info=True
+            )
+
+    async def _context_after_compaction(self, session_id: str) -> int | None:
+        """The count after a compaction: an estimate for the messages that remain.
+
+        Only a session that has a count has something to correct. A session with none shows
+        no number, and an estimate alone is not sent (``context_usage``).
+        """
+        harness = self._harnesses.get(session_id)
+        if harness is None or session_id not in self._context_used:
+            return None
+        context = await harness.session.build_context()
+        return estimated_context_tokens(context.messages)
+
+    async def _report_stored_context_use(self, session_id: str) -> None:
+        """After ``session/load`` and ``session/resume``: the count of the saved history.
+
+        Nothing is sent for a model with no window, and nothing for a history with no number
+        that is still true (``context_usage.stored_context_tokens``). Never raises.
+        """
+        harness = self._harnesses.get(session_id)
+        if (
+            self._conn is None
+            or harness is None
+            or self._current_choice(session_id).context_window is None
+        ):
+            return
+        try:
+            used = stored_context_tokens(await harness.session.get_branch())
+        except Exception:
+            logger.warning(
+                "Could not read the context use of session %s", session_id, exc_info=True
+            )
+            return
+        if used is not None:
+            self._context_used[session_id] = used
+            await self._send_context_use(session_id)
+
+    async def _send_context_use(self, session_id: str) -> None:
+        """Send ``usage_update`` for a session, when it has a count and its model has a window.
+
+        A model with no ``context_window`` in ``agent.toml`` gets none: the default of the core
+        (128,000) is a placeholder, and the agent does not guess a size. Never raises.
+        """
+        used = self._context_used.get(session_id)
+        size = self._current_choice(session_id).context_window
+        if self._conn is None or used is None or size is None:
+            return
+        try:
+            await self._conn.session_update(session_id=session_id, update=usage_update(used, size))
+        except Exception:
+            logger.warning(
+                "Could not send the context use of session %s", session_id, exc_info=True
+            )
+
     async def _handle_tool_call(self, session_id: str, event: Any) -> dict[str, Any] | None:
         name = event.toolName
         mode = self._session_mode(session_id)
@@ -1478,6 +1581,10 @@ def _stop_reason(message: Any) -> str:
 
     ACP stopReason enum: 'end_turn' | 'max_tokens' | 'max_turn_requests' | 'refusal' | 'cancelled'.
     Internal stopReason values: 'stop' | 'length' | 'toolUse' | 'error' | 'aborted'.
+
+    An 'error' is 'max_turn_requests' when the loop hit its ``max_turns`` limit (the one error
+    that ACP has a word for), 'refusal' when the text says the provider refused, and 'end_turn'
+    for any other error: the client shows the text of the error as a message of the agent.
     """
     reason = getattr(message, "stopReason", None) or "stop"
     if reason == "aborted":
@@ -1486,6 +1593,8 @@ def _stop_reason(message: Any) -> str:
         return "max_tokens"
     if reason == "error":
         err = str(getattr(message, "errorMessage", "") or "")
+        if MAX_TURNS_MESSAGE in err:
+            return "max_turn_requests"
         if any(w in err.lower() for w in ("refus", "policy", "filter", "safety")):
             return "refusal"
         return "end_turn"

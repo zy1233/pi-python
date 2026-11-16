@@ -46,4 +46,5 @@ Check before you upload a file made on your machine: `sha256sum -c out/SHA256SUM
 
 1. Publish the agent Release first (`agent-binaries.yml`).
 2. Change `zycodeAgentVersion` in `package.json`, and `agent-assets.json` (version, tag, `pythonPackages`, and for each target `size` and `sha256` of the asset). `test/packaging.test.ts` fails when these disagree.
-3. Make the files again.
+3. Check `MAX_LEVEL_SINCE` in `src/core/thinking.ts`. It must be the first agent release that has the thinking level `max` (`ThinkingLevel` in `pi_agent_core/types.py`), or a later one. The Thinking menu offers `max` to every agent of that version or later. A number that is too low shows `max` to an agent that reads it as `off` and says nothing.
+4. Make the files again.

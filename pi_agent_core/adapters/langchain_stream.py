@@ -46,6 +46,8 @@ from pi_agent_core.types import (
 
 logger = logging.getLogger("pi_agent_core.langchain_stream")
 
+# Each table must name every ThinkingLevel (a test checks it). A level that a table lacks sends no
+# parameter, and the model then thinks at the default of the provider, or not at all.
 _ANTHROPIC_BUDGET: dict[ThinkingLevel, int | None] = {
     "off": None,
     "minimal": 1024,
@@ -53,6 +55,8 @@ _ANTHROPIC_BUDGET: dict[ThinkingLevel, int | None] = {
     "medium": 10000,
     "high": 20000,
     "xhigh": 40000,
+    # A budget has no step above xhigh, so max is the budget of xhigh.
+    "max": 40000,
 }
 
 _OPENAI_EFFORT: dict[ThinkingLevel, str | None] = {
@@ -62,11 +66,14 @@ _OPENAI_EFFORT: dict[ThinkingLevel, str | None] = {
     "medium": "medium",
     "high": "high",
     "xhigh": "high",
+    # Sent as it is. A model that does not take it (an older OpenAI model, for example) answers
+    # with an error, and nothing is lowered here: the user asked for max.
+    "max": "max",
 }
 
 # DeepSeek's own mapping for pi ("reasoningEffortMap" in
 # https://api-docs.deepseek.com/quick_start/agent_integrations/pi_mono): every level below
-# xhigh is "high", xhigh is "max".
+# xhigh is "high", xhigh is "max". The level max is "max" too.
 _DEEPSEEK_EFFORT: dict[ThinkingLevel, str | None] = {
     "off": None,
     "minimal": "high",
@@ -74,6 +81,7 @@ _DEEPSEEK_EFFORT: dict[ThinkingLevel, str | None] = {
     "medium": "high",
     "high": "high",
     "xhigh": "max",
+    "max": "max",
 }
 
 # Anthropic requires max_tokens to exceed the thinking budget; reserve room for

@@ -258,7 +258,7 @@ class TestWhatTheChatModelSends:
 
         assert second["content"] == "done"
 
-    @pytest.mark.parametrize("level", ["minimal", "low", "medium", "high", "xhigh"])
+    @pytest.mark.parametrize("level", ["minimal", "low", "medium", "high", "xhigh", "max"])
     def test_every_thinking_level_sends_it(self, level: str):
         first, _ = self.assistants(deepseek(), level)
 
