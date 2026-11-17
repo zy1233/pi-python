@@ -4,6 +4,15 @@ This file is the checklist for a release. How the files are made is in `PACKAGIN
 
 ## Release record
 
+### 1.4.0 (2026-11-16)
+
+- The pull request is #132 (merge commit `9c24066`). It moved the pin to agent 1.0.0 (the Release `v1.0.0`) and made the version 1.4.0. 1.4.0 follows 1.2.0.
+- Before the publish: the checks of the pull request were green (the workflow of this file, and `ci.yml` with Ruff and pytest on Python 3.11, 3.12 and 3.13). A dry run of this workflow on the branch (run `43895374999`, `publish` off) built the five VSIX files and passed the start test of the linux-x64 agent. Each build downloads the pinned agent file and compares the size and the sha256 with `agent-assets.json`. So the five pins are proven against the real files of the Release.
+- Published by the workflow: run `43896837977` on `main`, commit `9c24066`. The run finished green at 15:37Z. The user `zy1233` approved it in the environment `vscode-publish` (the API shows `approved`), and the Publish job started at 15:35:04Z.
+- Open VSX took the five VSIX files by Trusted Publishing (OIDC). It shows the files from 15:35:56Z to 15:36:12Z (the time of each target). Then the Marketplace took them with `vsce publish --oidc`. It shows them from 15:42Z to 15:43Z (`lastUpdated` of each target). Both registries accepted the first try with no token.
+- Checked with the public APIs: five targets at 1.4.0 on both registries. `preRelease` is false on Open VSX. The Marketplace has no PreRelease property for 1.4.0 (1.2.0 has none, and 0.1.0 has it). The engine of 1.4.0 is `^1.90.0`.
+- Not verified: the install of 1.4.0 and the update from 1.2.0 in a real VS Code window, on any system. The **Thinking** menu with `max` and the **Context** row against agent 1.0.0 with a real model. `max` against a real provider.
+
 ### 1.0.0 (2026-11-12)
 
 - Published by the workflow `.github/workflows/vscode-extension.yml`: run `43181052994` on `main`, commit `8b0e50c`. The run finished green at 08:20Z.
