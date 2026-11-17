@@ -64,7 +64,7 @@ Tests: `test_thinking.py`, `test_deepseek_thinking.py`, `test_deepseek_replay.py
 
 - A live gateway or provider that gets `reasoning_effort = "max"` (a gateway for DeepSeek V4, and api.openai.com).
 - The Anthropic path (no `langchain_anthropic` in `.venv`), and the claim about Claude 4.7 and later (it comes from the documentation).
-- The VS Code extension in a real VS Code window, with a real agent that has `max`. The tests use a fake agent that reports a version.
+- The VS Code extension in a real VS Code window, with a real agent that has `max`. The tests use a fake agent that reports a version. **Tried on 2026-11-17:** the project owner ran extension 1.4.0 with agent 1.0.0 in a real VS Code on Windows, and said that `max` is usable (record: `vscode/RELEASING.md`). macOS and Linux are not verified. What a gateway does with `max` is the first item of this list.
 - The behaviour of the extension 1.0.0 with `max` in the file (section 5) is read from its source (`thinking.ts`, `chat-controller.ts`). It was not run.
 - What happens when a session with compaction off reaches the limit of the model.
 

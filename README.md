@@ -41,7 +41,7 @@ This repository is a monorepo containing:
 | `pi-dynamic-workflows-py` | **Stable** | [PyPI](https://pypi.org/project/pi-dynamic-workflows-py/) |
 | `pi-mcp-py` | **Stable** | [PyPI](https://pypi.org/project/pi-mcp-py/) (from 0.6.0) |
 | `zypi` (Rust TUI) | **Stable** | [GitHub Releases](https://github.com/zy1233/pi-python/releases) (Linux x86_64 and aarch64, macOS arm64) |
-| `zycode.zycode` (VS Code extension) | **Stable** | [VS Code Marketplace](https://marketplace.visualstudio.com/items?itemName=zycode.zycode) and [Open VSX](https://open-vsx.org/extension/zycode/zycode) (five platforms; the project owner tested the install of 1.0.0 and the update from 0.1.0 to 1.0.0 on Windows on 2026-11-12; the rest of the Windows flow, macOS and Linux in a real VS Code are not verified) |
+| `zycode.zycode` (VS Code extension) | **Stable** | [VS Code Marketplace](https://marketplace.visualstudio.com/items?itemName=zycode.zycode) and [Open VSX](https://open-vsx.org/extension/zycode/zycode) (five platforms; the project owner tested the install of 1.0.0 and the update from 0.1.0 to 1.0.0 on Windows on 2026-11-12, and 1.4.0 with a real model on Windows on 2026-11-17 (the `max` level and the Context row); the rest of the Windows flow, macOS and Linux in a real VS Code are not verified) |
 
 ## Features
 
@@ -174,7 +174,7 @@ The extension `zycode.zycode` ([`vscode`](vscode/README.md)) puts the zycode age
 - **Platforms:** the extension is published on both registries for five platforms: `linux-x64`, `linux-arm64`, `darwin-arm64`, `darwin-x64` and `win32-x64`. Each one has the agent program inside.
 - **What it has:** a chat view with a question card for each tool call that is not read-only; a **Show diff** button for `write` and `edit`; a getting-started guide and help for the first start (the setup runs in a VS Code terminal); a **Past chats** view; a mode menu (**Ask**, **Auto** and **Always approve**); and a **Thinking** menu.
 - **Auto is not a sandbox.** It guards what a call writes or runs. It does not guard what a call reads or sends. Use a container or a virtual machine if you need a boundary. See the [extension README](vscode/README.md) for the three modes.
-- **Limits:** the bundled agent is not code-signed, and it has only the OpenAI-format provider. The project owner tested the install of 1.0.0 and the update from 0.1.0 to 1.0.0 on Windows (2026-11-12). The rest of the Windows flow (the first-run setup in a terminal, a chat with a model, the unsigned agent on other machines or under an antivirus), all macOS flows, and Linux in a real VS Code are not verified. The release record is in [`RELEASING.md`](vscode/RELEASING.md).
+- **Limits:** the bundled agent is not code-signed, and it has only the OpenAI-format provider. The project owner tested the install of 1.0.0 and the update from 0.1.0 to 1.0.0 on Windows (2026-11-12). On 2026-11-17 he ran 1.4.0 on Windows with agent 1.0.0 and a real model: the `max` level is usable, and the Context row shows after `context_window` is set in `agent.toml`. The rest of the Windows flow (the first-run setup in a terminal, the unsigned agent on other machines or under an antivirus), all macOS flows, and Linux in a real VS Code are not verified. The release record is in [`RELEASING.md`](vscode/RELEASING.md).
 
 ### In Zed (custom agent)
 
