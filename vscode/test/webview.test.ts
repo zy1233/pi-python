@@ -3,7 +3,7 @@
 import { spawnSync } from "node:child_process";
 import { existsSync, writeFileSync } from "node:fs";
 import path from "node:path";
-import { fileURLToPath } from "node:url";
+import { fileURLToPath, pathToFileURL } from "node:url";
 import { describe, expect, it } from "vitest";
 
 import { buildHarness } from "../scripts/webview-harness.mjs";
@@ -13,10 +13,17 @@ const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const built = existsSync(path.join(root, "dist", "webview.js"));
 
 function findChrome(): string | undefined {
-  const candidates = [process.env.ZYCODE_CHROME, "google-chrome-stable", "chromium", "chromium-browser", "google-chrome"].filter(
-    (c): c is string => Boolean(c),
-  );
+  const candidates = [
+    process.env.ZYCODE_CHROME,
+    "google-chrome-stable",
+    "chromium",
+    "chromium-browser",
+    "google-chrome",
+    "C:\\Program Files\\Google\\Chrome\\Application\\chrome.exe",
+    "C:\\Program Files (x86)\\Google\\Chrome\\Application\\chrome.exe",
+  ].filter((c): c is string => Boolean(c));
   for (const candidate of candidates) {
+    if (path.isAbsolute(candidate) && !existsSync(candidate)) continue;
     const probe = spawnSync(candidate, ["--version"], { encoding: "utf8" });
     if (probe.status === 0) return candidate;
   }
@@ -38,7 +45,7 @@ function run(script: string): Record<string, unknown> {
   );
   const result = spawnSync(
     chrome!,
-    ["--headless=new", "--no-sandbox", "--disable-gpu", "--disable-dev-shm-usage", `--user-data-dir=${path.join(dir, "profile")}`, "--allow-file-access-from-files", "--virtual-time-budget=3000", "--dump-dom", `file://${file}`],
+    ["--headless=new", "--no-sandbox", "--disable-gpu", "--disable-dev-shm-usage", `--user-data-dir=${path.join(dir, "profile")}`, "--allow-file-access-from-files", "--virtual-time-budget=3000", "--dump-dom", pathToFileURL(file).href],
     { encoding: "utf8", timeout: 20_000 },
   );
   const match = /<pre id="result">([\s\S]*?)<\/pre>/.exec(result.stdout);
@@ -519,6 +526,192 @@ describe.skipIf(!chrome || !built)("webview: modes, first run and notices", () =
         ended: { text: "last turn 8.4 s", tip: "How long the last turn took" },
         none: true,
       });
+    });
+  });
+});
+
+const mockClipboard = `Object.defineProperty(navigator, "clipboard", { value: { writeText: (t) => { window.__clipboardText = t; return Promise.resolve(); } }, configurable: true });`;
+
+describe.skipIf(!chrome || !built)("webview: code blocks, copy interactions, and IME guard", () => {
+  it("renders code block headers, whole-block copy, single-height lines, and preserves code textContent", () => {
+    const out = run(`${mockClipboard}
+      ${state}
+      state({});
+      host({ type: "agentText", messageId: "a", text: ${lit("```ts\nconst a = 1;\nconst b = 2;\n```\n\n```\nplain\n```")} });
+      const langs = [...document.querySelectorAll(".code-lang")].map((n) => n.dataset.lang);
+      const codes = [...document.querySelectorAll("pre.code code")].map((n) => n.textContent);
+      const lineRects = [...document.querySelectorAll(".code-block:first-of-type .code-line")].map((n) => n.getBoundingClientRect().height);
+      const codeHeight = document.querySelector(".code-block:first-of-type pre.code code").getBoundingClientRect().height;
+      const btn = document.querySelector(".code-copy");
+      btn.click();
+      setTimeout(() => {
+        document.getElementById("result").textContent = JSON.stringify({
+          ok: true,
+          langs,
+          codes,
+          lineRects,
+          codeHeight,
+          copied: window.__copied,
+          clipboardText: window.__clipboardText,
+          hasCopiedAttr: btn.hasAttribute("data-copied"),
+          btnLabel: btn.dataset.label,
+          btnText: btn.textContent,
+        });
+      }, 50);`);
+    expect(out).toMatchObject({
+      ok: true,
+      langs: ["ts", "code"],
+      codes: ["const a = 1;\nconst b = 2;", "plain"],
+      copied: "const a = 1;\nconst b = 2;",
+      clipboardText: "const a = 1;\nconst b = 2;",
+      hasCopiedAttr: true,
+      btnLabel: "Copied",
+      btnText: "",
+    });
+    const lineRects = out.lineRects as number[];
+    expect(lineRects).toHaveLength(2);
+    // Ensure the bare "\n" text node between .code-line items does not add extra vertical height.
+    expect(out.codeHeight as number).toBeCloseTo(lineRects[0]! + lineRects[1]!, 0);
+  });
+
+  it("copies individual code lines and strips shell prompts in shell blocks", () => {
+    const out = run(`${mockClipboard}
+      ${state}
+      state({});
+      host({ type: "agentText", messageId: "a", text: ${lit("```bash\n$ npm install\n\n  $ npm test  \n```")} });
+      const lineButtons = [...document.querySelectorAll(".line-copy")];
+      lineButtons[0].click();
+      const first = window.__copied;
+      lineButtons[1].click();
+      const second = window.__copied;
+      setTimeout(() => {
+        document.getElementById("result").textContent = JSON.stringify({
+          ok: true,
+          count: lineButtons.length,
+          first,
+          second,
+          codeText: document.querySelector("pre.code code").textContent,
+          secondLabel: lineButtons[1].dataset.label,
+        });
+      }, 50);`);
+    expect(out).toMatchObject({
+      ok: true,
+      count: 2,
+      first: "npm install",
+      second: "npm test",
+      codeText: "$ npm install\n\n  $ npm test  ",
+      secondLabel: "Copied",
+    });
+  });
+
+  it("copies inline code on click without hijacking inline code inside links", () => {
+    const out = run(`${mockClipboard}
+      ${state}
+      state({});
+      host({ type: "agentText", messageId: "a", text: ${lit("run `git status` or see [`docs`](https://zycode.dev/docs)")} });
+      const codes = [...document.querySelectorAll("code.inline-code")];
+      codes[0].click();
+      const afterInline = window.__copied;
+      codes[1].click();
+      setTimeout(() => {
+        document.getElementById("result").textContent = JSON.stringify({
+          ok: true,
+          afterInline,
+          afterLink: window.__copied,
+          copiedAttr: codes[0].hasAttribute("data-copied"),
+          linkCopiedAttr: codes[1].hasAttribute("data-copied"),
+          links: window.__posted.filter((m) => m.type === "openLink"),
+        });
+      }, 50);`);
+    expect(out).toMatchObject({
+      ok: true,
+      afterInline: "git status",
+      afterLink: "git status",
+      copiedAttr: true,
+      linkCopiedAttr: false,
+      links: [{ type: "openLink", url: "https://zycode.dev/docs" }],
+    });
+  });
+
+  it("copies tool call command/title, tool output, permission summary, and whole messages", () => {
+    const out = run(`${mockClipboard}
+      ${state}
+      state({});
+      host({ type: "userMessage", id: "u1", text: "check status" });
+      host({ type: "agentText", messageId: "a1", text: "Here is the **result**." });
+      host({ type: "toolCall", toolCall: { id: "t1", title: "run ls", kind: "execute", status: "completed", rawInput: { command: "ls -la" }, terminal: { output: ${lit("a.txt\n")}, exitCode: 0 } } });
+      host({ type: "permission", requestId: "p1", kind: "tool", toolCallId: "t2", title: "bash", summary: "rm -rf /tmp/x", canDiff: false, options: [{ id: "allow-once", name: "Allow once", kind: "allow_once" }] });
+      const permButtons = document.querySelectorAll(".permission button").length;
+      document.querySelector(".msg.user .msg-copy").click();
+      const userCopied = window.__copied;
+      document.querySelector(".msg.agent .msg-copy").click();
+      const agentCopied = window.__copied;
+      document.querySelector(".tool-copy").click();
+      const toolCopied = window.__copied;
+      document.querySelector(".output-copy").click();
+      const outputCopied = window.__copied;
+      document.querySelector(".perm-summary").click();
+      const permCopied = window.__copied;
+      setTimeout(() => {
+        document.getElementById("result").textContent = JSON.stringify({
+          ok: true,
+          permButtons,
+          userCopied,
+          agentCopied,
+          toolCopied,
+          outputCopied,
+          permCopied,
+          permLabel: document.querySelector(".perm-summary").dataset.label,
+          toolStatus: document.querySelector(".tool").dataset.status,
+        });
+      }, 50);`);
+    expect(out).toMatchObject({
+      ok: true,
+      permButtons: 1,
+      userCopied: "check status",
+      agentCopied: "Here is the **result**.",
+      toolCopied: "ls -la",
+      outputCopied: "a.txt\n",
+      permCopied: "rm -rf /tmp/x",
+      permLabel: "Copied",
+      toolStatus: "completed",
+    });
+  });
+
+  it("reports failure state cleanly when clipboard access is denied", () => {
+    const out = run(`${state}
+      state({});
+      host({ type: "agentText", messageId: "a", text: ${lit("```sh\necho hi\n```")} });
+      const btn = document.querySelector(".code-copy");
+      btn.click();
+      setTimeout(() => {
+        document.getElementById("result").textContent = JSON.stringify({
+          ok: true,
+          hasFailed: btn.hasAttribute("data-failed"),
+          label: btn.dataset.label,
+        });
+      }, 50);`);
+    expect(out).toMatchObject({ ok: true, hasFailed: true, label: "Copy failed" });
+  });
+
+  it("blocks Enter submit during IME composition including Safari keyCode 229 fallback", () => {
+    const out = run(`${state}
+      state({});
+      const input = document.querySelector("textarea");
+      input.value = "你好";
+      input.dispatchEvent(new KeyboardEvent("keydown", { key: "Enter", isComposing: true, bubbles: true }));
+      const afterComposing = window.__posted.filter((m) => m.type === "send").length;
+      const ev229 = new KeyboardEvent("keydown", { key: "Enter", bubbles: true });
+      Object.defineProperty(ev229, "keyCode", { get: () => 229 });
+      input.dispatchEvent(ev229);
+      const after229 = window.__posted.filter((m) => m.type === "send").length;
+      input.dispatchEvent(new KeyboardEvent("keydown", { key: "Enter", bubbles: true }));
+      window.__result = { afterComposing, after229, sends: window.__posted.filter((m) => m.type === "send") };`);
+    expect(out).toMatchObject({
+      ok: true,
+      afterComposing: 0,
+      after229: 0,
+      sends: [{ type: "send", text: "你好" }],
     });
   });
 });

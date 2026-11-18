@@ -1,3 +1,4 @@
+import { toolCopyText } from "../core/copy.js";
 import { parseMarkdown } from "../core/markdown.js";
 import type {
   HostMessage,
@@ -10,7 +11,7 @@ import type {
 } from "../core/protocol.js";
 import { describeContext, folderName, formatCost, formatDuration } from "../core/status-row.js";
 import { throttle, type Scheduler, type Throttled } from "../core/throttle.js";
-import { el, renderBlocks } from "./dom.js";
+import { copyButton, el, renderBlocks } from "./dom.js";
 
 declare function acquireVsCodeApi(): { postMessage(message: WebviewMessage): void };
 
@@ -34,12 +35,21 @@ const root = document.getElementById("root") as HTMLElement;
 const header = el("header", { class: "header" });
 const banner = el("section", { class: "banner" });
 const transcript = el("main", { class: "transcript", dataset: { testid: "transcript" } });
+const copyStatus = el("span", { class: "sr-only", role: "status" });
 const input = el("textarea", { class: "input" });
 input.placeholder = "Ask zycode (Enter to send, Shift+Enter for a new line)";
 input.rows = 3;
 const sendButton = el("button", { class: "primary", text: "Send", type: "button" });
 const stopButton = el("button", { class: "secondary", text: "Stop", type: "button" });
-const composer = el("footer", { class: "composer" }, input, el("div", { class: "actions" }, stopButton, sendButton));
+const jumpBottomButton = el("button", {
+  class: "jump-bottom secondary",
+  type: "button",
+  ariaLabel: "Jump to latest",
+  title: "Jump to latest",
+  dataset: { label: "↓ Latest" },
+});
+jumpBottomButton.hidden = true;
+const composer = el("footer", { class: "composer" }, jumpBottomButton, input, el("div", { class: "actions" }, stopButton, sendButton));
 root.append(header, banner, transcript, composer);
 
 /**
@@ -58,6 +68,7 @@ type MessageEntry = {
   root: HTMLElement;
   text: HTMLElement;
   thought: HTMLElement;
+  copyBtn: HTMLButtonElement;
   raw: { text: string; thought: string };
   /** The text that `text` shows now. */
   drawn: string;
@@ -74,10 +85,77 @@ let followTail = true;
 
 transcript.addEventListener("scroll", () => {
   followTail = transcript.scrollHeight - transcript.scrollTop - transcript.clientHeight < 40;
+  jumpBottomButton.hidden = followTail;
 });
 
 function scrollToEnd(): void {
   if (followTail) transcript.scrollTop = transcript.scrollHeight;
+}
+
+jumpBottomButton.addEventListener("click", () => {
+  followTail = true;
+  jumpBottomButton.hidden = true;
+  transcript.scrollTop = transcript.scrollHeight;
+});
+
+const copyTimers = new WeakMap<HTMLElement, number>();
+let lastCopyAnnouncement = "";
+
+function legacyCopy(text: string): boolean {
+  const field = el("textarea");
+  field.value = text;
+  field.setAttribute("readonly", "");
+  field.style.cssText = "position:fixed;inset-block-start:0;opacity:0";
+  document.body.append(field);
+  field.select();
+  try {
+    return document.execCommand("copy");
+  } catch {
+    return false;
+  } finally {
+    field.remove();
+  }
+}
+
+async function writeClipboard(text: string): Promise<boolean> {
+  (window as unknown as { __copied?: string }).__copied = text;
+  try {
+    await navigator.clipboard.writeText(text);
+    return true;
+  } catch {
+    return legacyCopy(text);
+  }
+}
+
+function reportCopy(target: HTMLElement, ok: boolean): void {
+  const prev = copyTimers.get(target);
+  if (prev !== undefined) window.clearTimeout(prev);
+  target.removeAttribute("data-copied");
+  target.removeAttribute("data-failed");
+  void target.offsetWidth;
+  target.setAttribute(ok ? "data-copied" : "data-failed", "");
+  if (target.dataset.label !== undefined && (target.dataset.label !== "" || target.classList.contains("line-copy"))) {
+    target.dataset.origLabel ??= target.dataset.label;
+    target.dataset.label = ok ? "Copied" : "Copy failed";
+  }
+  let message = ok ? "Copied" : "Copy failed";
+  if (message === lastCopyAnnouncement) message += "\u00A0";
+  lastCopyAnnouncement = message;
+  copyStatus.textContent = "";
+  window.requestAnimationFrame(() => {
+    copyStatus.textContent = message;
+  });
+  const timer = window.setTimeout(() => {
+    target.removeAttribute("data-copied");
+    target.removeAttribute("data-failed");
+    if (target.dataset.origLabel !== undefined) {
+      target.dataset.label = target.dataset.origLabel;
+      delete target.dataset.origLabel;
+    }
+    copyStatus.textContent = "";
+    copyTimers.delete(target);
+  }, 2000);
+  copyTimers.set(target, timer);
 }
 
 function button(label: string, onClick: () => void, className = "secondary"): HTMLButtonElement {
@@ -230,7 +308,7 @@ function renderHeader(): void {
   header.append(title, meta);
   const usageRow = renderUsage();
   if (usageRow) header.append(usageRow);
-  header.append(controls);
+  header.append(controls, copyStatus);
 }
 
 function renderBanner(): void {
@@ -280,7 +358,9 @@ function renderComposer(): void {
 function applyState(next: StateMessage): void {
   state = next;
   for (const entry of messageEls.values()) {
-    (entry.thought.parentElement as HTMLElement).hidden = entry.raw.thought === "" || state.showThinking === false;
+    const details = entry.thought.parentElement as HTMLElement;
+    details.hidden = entry.raw.thought === "" || state.showThinking === false;
+    details.classList.toggle("streaming", state.status === "busy" && entry.raw.text === "" && entry.raw.thought !== "");
   }
   renderHeader();
   renderBanner();
@@ -292,7 +372,8 @@ function fill(node: HTMLElement, text: string): void {
 }
 
 function addUser(id: string, text: string): void {
-  transcript.append(el("article", { class: "msg user" }, el("div", { class: "who", text: "You" }), el("div", { class: "body", text })));
+  const head = el("div", { class: "msg-head" }, el("div", { class: "who", text: "You" }), copyButton(text, "Copy message", "msg-copy", "Copy"));
+  transcript.append(el("article", { class: "msg user" }, head, el("div", { class: "body", text })));
   messageEls.delete(id);
 }
 
@@ -312,12 +393,16 @@ function agentMessage(id: string): MessageEntry {
     thought.append(thoughtBody);
     thought.hidden = true;
     const text = el("div", { class: "body" });
-    const rootEl = el("article", { class: "msg agent" }, el("div", { class: "who", text: "zycode" }), thought, text);
+    const copyBtn = copyButton("", "Copy message", "msg-copy", "Copy");
+    copyBtn.hidden = true;
+    const head = el("div", { class: "msg-head" }, el("div", { class: "who", text: "zycode" }), copyBtn);
+    const rootEl = el("article", { class: "msg agent" }, head, thought, text);
     transcript.append(rootEl);
     const created: MessageEntry = {
       root: rootEl,
       text,
       thought: thoughtBody,
+      copyBtn,
       raw: { text: "", thought: "" },
       drawn: "",
       draw: throttle(() => drawText(created), DRAW_INTERVAL_MS, scheduler),
@@ -332,9 +417,12 @@ function setAgentText(id: string, text: string, thought: string): void {
   const entry = agentMessage(id);
   entry.raw.text = text;
   entry.raw.thought = thought;
+  entry.copyBtn.dataset.copy = text;
+  entry.copyBtn.hidden = text === "";
   entry.draw.request();
   const details = entry.thought.parentElement as HTMLElement;
   details.hidden = thought === "" || state.showThinking === false;
+  details.classList.toggle("streaming", state.status === "busy" && text === "" && thought !== "");
   entry.thought.textContent = thought;
 }
 
@@ -343,11 +431,25 @@ function terminalText(call: ToolCallView): string {
 }
 
 function upsertTool(call: ToolCallView): void {
-  const headerLine = el("div", { class: "tool-head" }, el("span", { class: `badge ${call.status}`, text: call.status.replace("_", " ") }), el("span", { class: "tool-title", text: call.title }));
+  const copyInfo = toolCopyText(call);
+  const headerLine = el(
+    "div",
+    { class: "tool-head" },
+    el("span", { class: `badge ${call.status}`, text: call.status.replace("_", " ") }),
+    el("span", { class: "tool-title", text: call.title }),
+    copyInfo.text !== "" ? copyButton(copyInfo.text, copyInfo.label, "tool-copy", "Copy") : null,
+  );
   const body = terminalText(call);
   const parts: (Node | null)[] = [headerLine];
   if (body !== "" || call.terminal?.exitCode !== undefined) {
-    const output = el("details", { class: "tool-output" }, el("summary", { text: call.terminal?.exitCode !== undefined ? `Output (exit code ${call.terminal.exitCode})` : "Output" }), el("pre", { text: body }));
+    const outputBody = el("div", { class: "tool-output-body" }, el("pre", { text: body }));
+    if (body !== "") outputBody.append(copyButton(body, "Copy output", "output-copy", "Copy"));
+    const output = el(
+      "details",
+      { class: "tool-output" },
+      el("summary", { text: call.terminal?.exitCode !== undefined ? `Output (exit code ${call.terminal.exitCode})` : "Output" }),
+      outputBody,
+    );
     if (call.status === "failed" || body.length < 400) output.setAttribute("open", "");
     parts.push(output);
   }
@@ -360,6 +462,8 @@ function upsertTool(call: ToolCallView): void {
     toolEls.set(call.id, node);
     transcript.append(node);
   }
+  node.dataset.status = call.status;
+  node.dataset.kind = call.kind;
   node.replaceChildren(...parts.filter((p): p is Node => p !== null));
 }
 
@@ -379,7 +483,16 @@ function renderPermission(request: PermissionRequestView, done?: { outcome: stri
   card.className = `permission ${request.kind}`;
   const parts: Node[] = [el("div", { class: "perm-title", text: request.kind === "trust" ? `Project trust: ${request.title}` : `Allow: ${request.title}` })];
   if (request.kind === "trust") parts.push(el("p", { class: "perm-note", text: request.summary }));
-  else if (request.summary !== "") parts.push(el("pre", { class: "perm-summary", text: request.summary }));
+  else if (request.summary !== "") {
+    parts.push(
+      el("pre", {
+        class: "perm-summary",
+        text: request.summary,
+        title: "Click to copy",
+        dataset: { copy: request.summary, label: "Click to copy" },
+      }),
+    );
+  }
   if (request.canDiff && request.toolCallId !== undefined) {
     const toolCallId = request.toolCallId;
     parts.push(el("div", { class: "actions left" }, button("Show diff", () => send({ type: "showDiff", toolCallId }))));
@@ -448,6 +561,7 @@ function resetTranscript(items: TranscriptItem[]): void {
   permissionEls.clear();
   permissionViews.clear();
   followTail = true;
+  jumpBottomButton.hidden = true;
   for (const item of items) renderItem(item);
   scrollToEnd();
 }
@@ -497,6 +611,8 @@ function onHostMessage(message: HostMessage): void {
 function submit(): void {
   const text = input.value;
   if (text.trim() === "" || state.status !== "ready") return;
+  followTail = true;
+  jumpBottomButton.hidden = true;
   send({ type: "send", text });
   input.value = "";
 }
@@ -504,18 +620,31 @@ function submit(): void {
 sendButton.addEventListener("click", submit);
 stopButton.addEventListener("click", () => send({ type: "cancel" }));
 input.addEventListener("keydown", (event) => {
-  if (event.key === "Enter" && !event.shiftKey && !event.isComposing) {
+  if (event.key === "Enter" && !event.shiftKey) {
+    if (event.isComposing || event.keyCode === 229) return;
     event.preventDefault();
     submit();
   }
 });
 transcript.addEventListener("click", (event) => {
   const target = event.target;
-  if (!(target instanceof HTMLElement)) return;
+  if (!(target instanceof Element)) return;
   const link = target.closest("a[data-url]");
   if (link instanceof HTMLElement && link.dataset.url) {
     event.preventDefault();
     send({ type: "openLink", url: link.dataset.url });
+    return;
+  }
+  const copyTarget = target.closest<HTMLElement>("[data-copy]");
+  if (copyTarget && copyTarget.dataset.copy !== undefined) {
+    if (
+      (copyTarget.classList.contains("inline-code") || copyTarget.classList.contains("perm-summary")) &&
+      (window.getSelection()?.toString() ?? "") !== ""
+    ) {
+      return;
+    }
+    event.preventDefault();
+    void writeClipboard(copyTarget.dataset.copy).then((ok) => reportCopy(copyTarget, ok));
   }
 });
 
