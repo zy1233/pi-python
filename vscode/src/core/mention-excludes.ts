@@ -8,10 +8,6 @@ export const DEFAULT_MENTION_EXCLUDES: readonly string[] = [
   "**/.vsix-cache/**",
   "**/.next/**",
   "**/.nuxt/**",
-  "**/dist/**",
-  "**/build/**",
-  "**/out/**",
-  "**/coverage/**",
   "**/.cache/**",
   "**/.pytest_cache/**",
   "**/.mypy_cache/**",
@@ -21,7 +17,21 @@ export const DEFAULT_MENTION_EXCLUDES: readonly string[] = [
   "**/.svelte-kit/**",
 ];
 
+export interface GitignoreRule {
+  negated: boolean;
+  patterns: string[];
+}
+
+export interface ParsedGitignore {
+  excludes: string[];
+  negations: string[];
+  rules: GitignoreRule[];
+}
+
 const MAX_BRACE_EXPANSIONS = 32;
+const MAX_GITIGNORE_RULES = 500;
+const MAX_FILTER_PATTERNS = 1000;
+const REGEX_CHUNK_SIZE = 50;
 
 /**
  * Expands a single-level brace alternation (e.g. `**\/*.{pyc,pyo}`) into plain glob patterns.
@@ -93,15 +103,18 @@ function trimTrailingUnescapedSpaces(line: string): string {
 }
 
 /**
- * Parses root `.gitignore` lines into normalized workspace-relative glob patterns and `!` negations.
+ * Parses root `.gitignore` lines into normalized workspace-relative globs, negations, and ordered rules.
  */
-export function parseGitignorePatterns(content: string): { excludes: string[]; negations: string[] } {
+export function parseGitignorePatterns(content: string): ParsedGitignore {
   const excludes: string[] = [];
   const negations: string[] = [];
+  const rules: GitignoreRule[] = [];
   const seenExcludes = new Set<string>();
   const seenNegations = new Set<string>();
 
   for (const rawLine of content.split(/\r?\n/)) {
+    if (rules.length >= MAX_GITIGNORE_RULES) break;
+
     let line = trimTrailingUnescapedSpaces(rawLine);
     if (line === "" || line.startsWith("#")) continue;
 
@@ -129,17 +142,28 @@ export function parseGitignorePatterns(content: string): { excludes: string[]; n
 
     const target = negated ? negations : excludes;
     const seen = negated ? seenNegations : seenExcludes;
+    const rulePatterns: string[] = [];
+    const seenInRule = new Set<string>();
+
     for (const candidate of candidates) {
       for (const expanded of expandExcludePattern(candidate)) {
+        if (!seenInRule.has(expanded)) {
+          seenInRule.add(expanded);
+          rulePatterns.push(expanded);
+        }
         if (!seen.has(expanded)) {
           seen.add(expanded);
           target.push(expanded);
         }
       }
     }
+
+    if (rulePatterns.length > 0) {
+      rules.push({ negated, patterns: rulePatterns });
+    }
   }
 
-  return { excludes, negations };
+  return { excludes, negations, rules };
 }
 
 /** Builds a single glob string for `vscode.workspace.findFiles` `exclude`. */
@@ -158,11 +182,58 @@ export function buildFindFilesExcludeGlob(patterns: Iterable<string>): string {
   return out.length === 1 ? (out[0] ?? "") : `{${out.join(",")}}`;
 }
 
-function globToRegExp(glob: string): RegExp | undefined {
-  const clean = glob.replace(/\\/g, "/").replace(/^\.\//, "").replace(/^\/+/, "");
+function parseGlobCharacterClass(
+  glob: string,
+  startIndex: number,
+): { fragment: string; nextIndex: number } | undefined {
+  let cursor = startIndex + 1;
+  if (cursor >= glob.length) return undefined;
+
+  let negated = false;
+  if (glob[cursor] === "!" || glob[cursor] === "^") {
+    negated = true;
+    cursor++;
+  }
+
+  let body = "";
+  let closed = false;
+  while (cursor < glob.length) {
+    const ch = glob[cursor] ?? "";
+    if (ch === "/") {
+      return undefined;
+    }
+    if (ch === "]" && body.length > 0) {
+      closed = true;
+      cursor++;
+      break;
+    }
+    if (ch === "\\" && cursor + 1 < glob.length) {
+      const nextCh = glob[cursor + 1] ?? "";
+      if (nextCh === "/") return undefined;
+      body += nextCh === "\\" || nextCh === "]" || nextCh === "[" ? `\\${nextCh}` : nextCh;
+      cursor += 2;
+      continue;
+    }
+    body += ch === "[" || ch === "^" ? `\\${ch}` : ch;
+    cursor++;
+  }
+
+  if (!closed || body === "") return undefined;
+  return {
+    fragment: negated ? `(?!/)[^{body}]`.replace("{body}", body) : `[${body}]`,
+    nextIndex: cursor,
+  };
+}
+
+function globToRegExpSource(glob: string): string | undefined {
+  const clean = glob
+    .replace(/\\/g, "/")
+    .replace(/^\.\//, "")
+    .replace(/^\/+/, "")
+    .replace(/\*{3,}/g, "**");
   if (clean === "") return undefined;
 
-  let regex = "^";
+  let regex = "";
   let i = 0;
   while (i < clean.length) {
     if (clean.startsWith("**/", i)) {
@@ -186,34 +257,90 @@ function globToRegExp(glob: string): RegExp | undefined {
       continue;
     }
     const ch = clean[i] ?? "";
-    if (ch === "*") {
+    if (ch === "[") {
+      const charClass = parseGlobCharacterClass(clean, i);
+      if (charClass) {
+        regex += charClass.fragment;
+        i = charClass.nextIndex;
+        continue;
+      }
+      regex += "\\[";
+    } else if (ch === "*") {
       regex += "[^/]*";
     } else if (ch === "?") {
       regex += "[^/]";
-    } else if (/[.+^$()[\]{}|\\]/.test(ch)) {
+    } else if (/[.+^$(){}|\\\]/]/.test(ch)) {
       regex += `\\${ch}`;
     } else {
       regex += ch;
     }
     i++;
   }
-  regex += "$";
   try {
-    return new RegExp(regex);
+    new RegExp(`^(?:${regex})$`);
+    return regex;
   } catch {
     return undefined;
   }
 }
 
-function compilePatterns(patterns: readonly string[]): RegExp[] {
-  const out: RegExp[] = [];
+function globToRegExp(glob: string): RegExp | undefined {
+  const src = globToRegExpSource(glob);
+  if (src === undefined) return undefined;
+  try {
+    return new RegExp(`^${src}$`);
+  } catch {
+    return undefined;
+  }
+}
+
+function compilePatterns(patterns: readonly string[], remaining?: { left: number }): RegExp[] {
+  const sources: string[] = [];
+  const seen = new Set<string>();
   for (const raw of patterns) {
+    if (remaining && remaining.left <= 0) break;
     for (const expanded of expandExcludePattern(raw)) {
-      const compiled = globToRegExp(expanded);
-      if (compiled) out.push(compiled);
+      if (remaining && remaining.left <= 0) break;
+      const src = globToRegExpSource(expanded);
+      if (src !== undefined && !seen.has(src)) {
+        seen.add(src);
+        sources.push(src);
+        if (remaining) remaining.left--;
+      }
+    }
+  }
+
+  const out: RegExp[] = [];
+  for (let i = 0; i < sources.length; i += REGEX_CHUNK_SIZE) {
+    const chunk = sources.slice(i, i + REGEX_CHUNK_SIZE);
+    try {
+      out.push(new RegExp(`^(?:${chunk.join("|")})$`));
+    } catch {
+      for (const src of chunk) {
+        try {
+          out.push(new RegExp(`^${src}$`));
+        } catch {
+          // Skip invalid source fragments individually if chunk combination failed.
+        }
+      }
     }
   }
   return out;
+}
+
+function normalizeFilterTarget(relPath: string): string {
+  return relPath
+    .replace(/\\/g, "/")
+    .replace(/^\.\//, "")
+    .replace(/^\/+/, "")
+    .replace(/\/+$/, "");
+}
+
+function matchesAny(matchers: readonly RegExp[], target: string): boolean {
+  for (const re of matchers) {
+    if (re.test(target)) return true;
+  }
+  return false;
 }
 
 /**
@@ -223,18 +350,139 @@ export function createPathFilter(
   patterns: readonly string[],
   negations: readonly string[] = [],
 ): (relPath: string) => boolean {
-  const excludeMatchers = compilePatterns(patterns);
-  const negationMatchers = compilePatterns(negations);
+  const budget = { left: MAX_FILTER_PATTERNS };
+  const excludeMatchers = compilePatterns(patterns, budget);
+  const negationMatchers = compilePatterns(negations, { left: MAX_FILTER_PATTERNS });
   return (relPath: string): boolean => {
-    const clean = relPath
-      .replace(/\\/g, "/")
-      .replace(/^\.\//, "")
-      .replace(/^\/+/, "")
-      .replace(/\/+$/, "");
+    const clean = normalizeFilterTarget(relPath);
     if (clean === "") return false;
-    if (negationMatchers.some((re) => re.test(clean))) return false;
-    return excludeMatchers.some((re) => re.test(clean));
+    if (matchesAny(negationMatchers, clean)) return false;
+    return matchesAny(excludeMatchers, clean);
   };
+}
+
+/**
+ * Compiles `baseExcludes` (always excluded) plus ordered `.gitignore` rules (last-match-wins).
+ */
+export function createGitignorePathFilter(
+  baseExcludes: readonly string[],
+  gitignore: Pick<ParsedGitignore, "rules">,
+): (relPath: string) => boolean {
+  const baseMatchers = compilePatterns(baseExcludes, { left: MAX_FILTER_PATTERNS });
+  const segments: { negated: boolean; matchers: RegExp[] }[] = [];
+  const budget = { left: MAX_FILTER_PATTERNS };
+
+  let currentNegated: boolean | undefined;
+  let currentPatterns: string[] = [];
+
+  const flushSegment = () => {
+    if (currentNegated === undefined || currentPatterns.length === 0) return;
+    const matchers = compilePatterns(currentPatterns, budget);
+    if (matchers.length > 0) {
+      segments.push({ negated: currentNegated, matchers });
+    }
+    currentPatterns = [];
+  };
+
+  for (const rule of gitignore.rules) {
+    if (budget.left <= 0) break;
+    if (currentNegated !== undefined && rule.negated !== currentNegated) {
+      flushSegment();
+    }
+    currentNegated = rule.negated;
+    currentPatterns.push(...rule.patterns);
+  }
+  flushSegment();
+
+  return (relPath: string): boolean => {
+    const clean = normalizeFilterTarget(relPath);
+    if (clean === "") return false;
+    if (matchesAny(baseMatchers, clean)) return true;
+    for (let i = segments.length - 1; i >= 0; i--) {
+      const seg = segments[i]!;
+      if (matchesAny(seg.matchers, clean)) {
+        return !seg.negated;
+      }
+    }
+    return false;
+  };
+}
+
+function concreteNegatedBase(pattern: string): string | undefined {
+  const base = pattern.endsWith("/**") ? pattern.slice(0, -3) : pattern;
+  if (base === "" || base.startsWith("**/") || /[*?[\]{}]/.test(base)) {
+    return undefined;
+  }
+  return base;
+}
+
+function collectProbePaths(basePath: string): string[] {
+  const parts = basePath.split("/").filter(Boolean);
+  const paths: string[] = [];
+  let acc = "";
+  for (const part of parts) {
+    acc = acc === "" ? part : `${acc}/${part}`;
+    paths.push(acc);
+  }
+  if (acc !== "") {
+    paths.push(`${acc}/__probe__`);
+  }
+  return paths;
+}
+
+/**
+ * Selects `.gitignore` exclude patterns safe to hand directly to `vscode.workspace.findFiles`
+ * without hiding files re-included by later `!` negation rules.
+ */
+export function selectSafeFindFilesGitignoreExcludes(
+  gitignore: Pick<ParsedGitignore, "rules">,
+  maxPatterns = 128,
+): string[] {
+  const rules = gitignore.rules;
+  const out: string[] = [];
+  const seen = new Set<string>();
+
+  for (let i = 0; i < rules.length && out.length < maxPatterns; i++) {
+    const rule = rules[i]!;
+    if (rule.negated) continue;
+
+    let hasWildcardNegationAfter = false;
+    const concreteProbeSet = new Set<string>();
+
+    for (let j = i + 1; j < rules.length; j++) {
+      const later = rules[j]!;
+      if (!later.negated) continue;
+      for (const negPattern of later.patterns) {
+        const concrete = concreteNegatedBase(negPattern);
+        if (concrete === undefined) {
+          hasWildcardNegationAfter = true;
+          break;
+        }
+        for (const p of collectProbePaths(concrete)) {
+          concreteProbeSet.add(p);
+        }
+      }
+      if (hasWildcardNegationAfter) break;
+    }
+
+    if (hasWildcardNegationAfter) continue;
+    const probePaths = [...concreteProbeSet];
+
+    for (const pattern of rule.patterns) {
+      if (out.length >= maxPatterns) break;
+      if (seen.has(pattern)) continue;
+      if (probePaths.length > 0) {
+        const re = globToRegExp(pattern);
+        if (!re || probePaths.some((p) => re.test(p))) {
+          continue;
+        }
+      }
+      seen.add(pattern);
+      out.push(pattern);
+    }
+  }
+
+  return out;
 }
 
 export function isExcludedRelativePath(

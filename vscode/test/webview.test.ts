@@ -1300,7 +1300,26 @@ describe.skipIf(!chrome || !built)("webview: P0 state restore, streaming tools, 
     });
   });
 
-  it("allows /log while busy and explains why /new must wait instead of silently ignoring", () => {
+  it("collapses streamed output automatically once it grows to >= 400 chars unless user-toggled, and opens on failure", () => {
+    const out = run(`${state}
+      state({ status: "busy" });
+      host({ type: "toolCall", toolCall: { id: "t1", title: "bash", kind: "execute", status: "in_progress", terminal: { output: "line 1\\n" } } });
+      const detailsEl = document.querySelector(".tool-output");
+      const openInitially = detailsEl.open;
+      host({ type: "toolCallOutput", id: "t1", delta: "y".repeat(420), status: "in_progress" });
+      const openAfterGrowth = detailsEl.open;
+      host({ type: "toolCall", toolCall: { id: "t1", title: "bash", kind: "execute", status: "failed", terminal: { output: "line 1\\n" + "y".repeat(420), exitCode: 1 } } });
+      const openAfterFailure = detailsEl.open;
+      window.__result = { openInitially, openAfterGrowth, openAfterFailure };`);
+    expect(out).toMatchObject({
+      ok: true,
+      openInitially: true,
+      openAfterGrowth: false,
+      openAfterFailure: true,
+    });
+  });
+
+  it("allows /log while busy and explains why /new must wait without wiping the input", () => {
     const out = run(`${state}
       state({ status: "busy" });
       const input = document.querySelector("textarea");
@@ -1313,12 +1332,14 @@ describe.skipIf(!chrome || !built)("webview: P0 state restore, streaming tools, 
       const notices = [...document.querySelectorAll(".notice")].map((n) => n.textContent);
       window.__result = {
         afterLog,
+        afterNewValue: input.value,
         newPosted: window.__posted.some((m) => m.type === "newChat"),
         notices,
       };`);
     expect(out).toMatchObject({
       ok: true,
       afterLog: { value: "", posted: [{ type: "openLog" }] },
+      afterNewValue: "/new",
       newPosted: false,
       notices: ["Wait until the current action finishes before running this command."],
     });

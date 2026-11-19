@@ -2,7 +2,7 @@
 
 > Date: 2026-11-19.
 > Scope: `vscode/` (extension `1.6.0`, post-`51b054c`), with optional future coordination in `packages/pi-agent-cli/` (bundled agent `1.0.0`).
-> Status: **P0 implemented & verified (2026-11-19); P1–P3 recorded as roadmap.**
+> Status: **P0 implemented (unit and headless-Chrome tested; not yet verified in a live VS Code window) (2026-11-19); P1–P3 recorded as roadmap.**
 > Related: `docs/specs/2026-11-04-vscode-extension-design.md`, `docs/specs/2026-11-05-acp-extension-registry.md`, `docs/specs/2026-11-13-agent-context-usage.md`, `docs/specs/2026-11-16-thinking-max-and-turn-limit.md`.
 
 ---
@@ -47,8 +47,8 @@ Every optimization below preserves the core design invariants:
 ### P0-2. Preserve Webview State Across Sidebar Switches
 - **Problem:** `extension.ts` registers `zycode.chat` without `{ webviewOptions: { retainContextWhenHidden: true } }`, and `src/webview/main.ts` does not use `vscode.getState()` / `vscode.setState()`. Switching away to Explorer, Source Control, or Search destroys the webview DOM, losing unsent drafts, attached `@` chips, scroll offset (`followTail`), and manually toggled thinking/tool `<details>` states, while forcing full Markdown re-parses on return.
 - **Solution:**
-  1. Enable `{ webviewOptions: { retainContextWhenHidden: true } }` in `src/extension.ts`.
-  2. Persist `{ draft, attachments, followTail, scrollTop, openDetails }` via `vscode.setState()` / `vscode.getState()` in `src/webview/main.ts` (and validate restored payload strictly before applying).
+  1. Enable `{ webviewOptions: { retainContextWhenHidden: true } }` in `src/extension.ts` so returning from another sidebar view avoids Markdown re-parses and preserves live DOM elements instantly.
+  2. Persist `{ draft, attachments, followTail, scrollTop, openDetails }` via `vscode.setState()` / `vscode.getState()` in `src/webview/main.ts` (strictly validated before applying) so state also survives webview disposal or window reloads. Note: `setState` stores unsent drafts in VS Code's local webview state (similar to editor hot-exit).
   3. Distinguish the initial `reset` emitted when a newly-created webview sends `ready` (which restores draft, chips, `<details>` open state, and scroll offset) from explicit session resets (`newChat` / `openPastSession` / `restart(false)`), which clear transient UI state cleanly.
 
 ### P0-3. Eliminate $O(N^2)$ Tool Output IPC Duplication & Unthrottled DOM Thrashing
@@ -64,12 +64,12 @@ Every optimization below preserves the core design invariants:
   1. **Header Model Picker & Stale Context Usage:** `ChatController` supports `state.models` and `applyModel`, yet `renderHeader()` (`src/webview/main.ts`) displays `state.model` as static text without a `<select>`, and `applyModel()` (`src/core/chat-controller.ts`) retains the previous model's `this.usage` when switching to a model without `context_window` (because `agent.py` sends no `usage_update` in that case). *(Note: `CliConfig.model_reasoning` in `packages/pi-agent-cli/pi_agent_cli/config.py` is global rather than per-`[[models]]` entry, so per-model reasoning capabilities depend on future agent work tracked in P3.)*
   2. **Detached `@` Chips vs Manual Deletion:** Backspacing an `@path` token out of `<textarea>` leaves the stale `MentionAttachment` in `attachments`, causing `formatPromptWithMentions` (`src/core/mentions.ts`) to re-inject `Referenced context: ...` on send.
   3. **`WorkspaceMentions` Cache Thrashing & Exclude Gaps:** `src/ui/workspace-mentions.ts` watches `**/*` without filtering ignored folders (so `.git/` lock/pack updates, `target/`, `node_modules/`, `dist/` invalidate the cache constantly), refreshes unconditionally every 15s (`CACHE_TTL_MS`), skips user `files.exclude` / `search.exclude` entries containing braces (e.g. `**/*.{pyc,pyo}`), and does not read `.gitignore`.
-  4. **Client `/` Commands in Non-`ready` States & Hardcoded `/mode` Hint:** `submit()` (`src/webview/main.ts`) gates all commands behind `state.status === "ready"`, preventing `/log`, `/config`, `/guide`, and `/restart` during `busy` or error/setup states even though the composer allows typing in `busy`. In `src/core/composer.ts`, `/mode` hardcodes `argHint: "ask | auto | always-approve"` even when `always-approve` is unavailable.
+  4. **Client `/` Commands While `busy` & Hardcoded `/mode` Hint:** `submit()` (`src/webview/main.ts`) gates all commands behind `state.status === "ready"`, preventing `/log`, `/config`, `/guide`, and `/restart` while `busy` even though the composer allows typing during `busy` (in `error` and `needs-setup`, the composer input is disabled and banner buttons provide actions instead). In `src/core/composer.ts`, `/mode` hardcodes `argHint: "ask | auto | always-approve"` even when `always-approve` is unavailable.
 - **Solution:**
   1. Render a `<select aria-label="Model">` in `.controls` (after Mode) when `state.models?.options.length > 1`, disabled outside `ready`; clear `this.usage` prior to `setConfigOption("model", ...)` and restore on failure.
-  2. Add boundary-aware `containsMentionToken()` in `src/core/mentions.ts` and sync `attachments` on `input` events in `src/webview/main.ts`.
-  3. Add pure `src/core/mention-excludes.ts` supporting brace expansion (`**/*.{pyc,pyo}`), root `.gitignore` parsing (including `!` negations), expanded default build/cache excludes, and compiled relative-path filtering; use it in `WorkspaceMentions` to ignore noisy watcher events under excluded paths, watch `.gitignore` / config changes explicitly, and extend `CACHE_TTL_MS` to 300s.
-  4. Compute `/mode` `argHint` dynamically from `state.mode.options`, add `canRunClientCommandInStatus()` in `src/core/composer.ts`, and allow safe local client commands (`/log`, `/config`, `/guide`, `/restart`, etc.) to dispatch outside `ready`.
+  2. Add boundary-aware `containsMentionToken()` in `src/core/mentions.ts` (preserving `@path.` / `@path-` followed by whitespace or EOF) and sync `attachments` on `input` events in `src/webview/main.ts`.
+  3. Add pure `src/core/mention-excludes.ts` with tool-specific `DEFAULT_MENTION_EXCLUDES` (delegating generic build dirs such as `dist/` and `build/` to `.gitignore`), brace expansion (`**/*.{pyc,pyo}`), ordered root `.gitignore` rule evaluation (last-match-wins, `[abc]` character classes, chunked combined regexes), and safe `findFiles` exclude selection when `!` negations exist; use it in `WorkspaceMentions` to ignore noisy watcher events under excluded paths, watch `.gitignore` / config changes explicitly, guard stale in-flight cache writes with a version counter, and extend `CACHE_TTL_MS` to 300s.
+  4. Compute `/mode` `argHint` dynamically from `state.mode.options`, add `canRunClientCommandInStatus()` in `src/core/composer.ts`, and allow safe local client commands (`/log`, `/config`, `/guide`, `/restart`) to run while `busy` (preserving the draft on explanatory notices).
 
 ---
 
@@ -108,7 +108,7 @@ Every optimization below preserves the core design invariants:
 3. **Verification, Packaging & Documentation Sync:**
    - Add `@vscode/test-electron` extension host integration tests in CI (covering real Webview messaging, terminal `--setup`, diff editor, and clipboard).
    - Evaluate a universal fallback VSIX (for `win32-arm64` / `alpine`), startup latency (`--onedir` vs `--onefile`), and non-OpenAI provider bundling.
-   - Sync `vscode/README.md` (which still states "No model choice, no `@file` mentions yet" at line 98) and add visual screenshots/GIFs.
+   - Sync `vscode/README.md` (`line 98` updated in PR #139/#140; add visual screenshots/GIFs for Marketplace).
 
 ---
 
@@ -120,6 +120,6 @@ Every optimization below preserves the core design invariants:
   - **P0-3:** Removed duplicate `view.text` storage when `view.terminal` is present and added `ToolCallStore.applyWithDelta` (`src/core/tool-calls.ts`), `toolCallOutput` incremental message (`src/core/protocol.ts`), $O(1)$ `toolItemIndices` lookup and deduplicated `canDiff` finish emissions (`src/core/chat-controller.ts`), and in-place throttled DOM updates for tool outputs and thinking blocks (`src/webview/main.ts`).
   - **P0-4:** Added Model `<select>` in header and cleared stale `usage` on model switch with rollback on failure (`src/webview/main.ts`, `src/core/chat-controller.ts`), added boundary-checked `containsMentionToken` chip sync (`src/core/mentions.ts`, `src/webview/main.ts`), added `src/core/mention-excludes.ts` + `.gitignore` / brace-expansion / excluded-event filtering in `src/ui/workspace-mentions.ts` (300 s cache TTL), made `/mode` `argHint` dynamic, and enabled safe non-`ready` client `/` commands (`src/core/composer.ts`, `src/webview/main.ts`).
 - **Verification (`vscode/`):**
-  - `npm run check`: `tsc --noEmit -p tsconfig.json`, `tsc --noEmit -p src/webview/tsconfig.json`, `eslint .`, and `vitest run` passed (`25` test files / `413` tests passed; `3` opt-in real-agent files / `18` tests skipped, including `1` `locate` platform skip and `1` `thinking` POSIX-symlink skip on Windows).
+  - `npm run check` (`tsc --noEmit -p tsconfig.json`, `tsc --noEmit -p src/webview/tsconfig.json`, `eslint .`, `vitest run` — rerun cleanly with `--pool=forks --poolOptions.forks.maxForks=2` on Windows when heavy Chrome concurrency triggers a Vitest worker RPC timeout): passed (**`25` test files / `419` tests passed**; **`3` opt-in real-agent files / `18` tests skipped**, including `1` `locate` platform skip and `1` `thinking` POSIX-symlink skip on Windows; Linux CI also runs those 2 platform tests).
   - `npm run build` and `node esbuild.mjs --production`: both host (`dist/extension.js`) and webview (`dist/webview.js`) bundled cleanly.
   - **Not verified in a live VS Code host:** `PermissionFallback` (`vscode.window.showWarningMessage`), `StatusBar` rendering, `WorkspaceMentions` live `FileSystemWatcher`, and `retainContextWhenHidden` across real sidebar tab switches (covered by typecheck/lint + pure unit tests).

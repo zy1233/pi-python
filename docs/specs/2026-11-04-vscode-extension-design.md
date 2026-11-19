@@ -207,32 +207,36 @@ All messages are JSON objects with a string `type`. The types live in one file (
 
 | `type` | Fields | Meaning |
 |--------|--------|---------|
-| `state` | `status` (`stopped`, `starting`, `ready`, `busy`, `cancelling`, `needs-setup`, `error`, `no-folder`, `untrusted`, `unavailable`), `detail?` (text), `agent?` (`{version, source}`), `cwd?`, `mode?` (`{current, options[]}`), `model?` (text), `usage?` (`{used, size?, cost?: {amount, currency}}`, section 7d), `turn?` (`{elapsedMs?}` while a turn runs, `{lastMs?}` after it), `thinking?` (`{current?, levels[], disabled?, note?}`), `canRestart` | The full status. Sent at each change and when the view loads. |
+| `state` | `status` (`stopped`, `starting`, `ready`, `busy`, `cancelling`, `needs-setup`, `error`, `no-folder`, `untrusted`, `unavailable`), `detail?` (text), `agent?` (`{version, source}`), `cwd?`, `mode?` (`{current, options[]}`), `model?` (text), `models?` (`{current, options[]}`), `usage?` (`{used, size?, cost?: {amount, currency}}`, section 7d), `turn?` (`{elapsedMs?}` while a turn runs, `{lastMs?}` after it), `thinking?` (`{current?, levels[], disabled?, note?}`), `commands?` (`{name, description, inputHint?}[]`), `pendingPermissions?` (number), `canRestart` | The full status. Sent at each change and when the view loads. |
 | `reset` | `transcript[]` | The view loaded or a new chat started. `transcript` is what the controller holds, so that a hidden view that loads again shows the same chat. |
 | `userMessage` | `id`, `text` | The prompt that was sent. |
 | `agentText` | `messageId`, `text` | Append to the current assistant text. |
 | `agentThought` | `messageId`, `text` | Append to the current thinking block. |
-| `toolCall` | `toolCall` (see below) | New or updated tool call. The view replaces the entry with the same `id`. |
+| `toolCall` | `toolCall` (see below) | New or updated tool call. The view updates or inserts the entry with the same `id` in place. |
+| `toolCallOutput` | `id`, `delta`, `status` | Incremental append to an `in_progress` tool call's terminal output without resending the full `toolCall` snapshot. |
 | `permission` | `requestId`, `kind` (`tool` or `trust`), `toolCallId?`, `title`, `summary`, `options[]` (`{id, name, kind}`), `canDiff` | Show a card. |
 | `permissionDone` | `requestId`, `outcome` (`selected`, `cancelled`), `optionId?` | The card closes, and shows what was chosen. |
 | `notice` | `level` (`info`, `warning`, `error`), `text` | A line that is not part of the model's answer. |
 | `turnEnd` | `stopReason` | The turn is over. |
 | `diffState` | `toolCallId`, `available` | Updates the **Show diff** button. |
+| `mentionResults` | `requestId`, `query`, `items[]` (`{kind, path, range?, label, detail, ...}`) | Filtered workspace file, folder, and selection candidates for an `@` composer query. |
 
-`toolCall` object: `{id, title, kind, status, rawInput?, text?, terminal?: {output, exitCode?}, paths?: string[]}`. `text` is the last text block of the update (the whole output so far for `bash`). It is plain text.
+`toolCall` object: `{id, title, kind, status, rawInput?, text?, terminal?: {output, exitCode?}, paths?, canDiff?, diffNote?}`. `text` holds non-terminal text blocks and is omitted while `terminal` output is active. It is plain text.
 
 ### 6.2 Webview to host
 
 | `type` | Fields | Meaning |
 |--------|--------|---------|
 | `ready` | | The script has loaded. The host sends `state` and `reset`. |
-| `send` | `text` | A prompt. The host drops it if the state is not `ready`, or the text is empty. |
+| `send` | `text`, `mentions?` (`{kind, path, range?}[]`) | A prompt (with optional validated `@` context references). The host drops it if the state is not `ready`, or the text is empty. |
 | `cancel` | | Stop the turn. |
 | `newChat` | | Close the session (if `session/close` is offered) and open a new one. |
 | `permissionAnswer` | `requestId`, `optionId` | The user chose. The host accepts only an `optionId` that the request listed. |
 | `showDiff` | `toolCallId` | Open the diff. |
 | `setMode` | `value` | `ask`, `auto` or `always-approve`. The host sets the mode of the open session only (section 9); it does not write the setting. |
+| `setModel` | `value` | Switch the session model via ACP `session/set_config_option` (`id="model"`). |
 | `setThinking` | `value` | One of `max`, `xhigh`, `high`, `medium`, `low`, `minimal`, `off`. The host drops `max` when the running agent does not know it. The host asks first, then changes `agent.toml` and restarts the agent (section 7c). |
+| `queryMentions` | `requestId`, `query` | Request workspace/editor `@` mention candidates matching `query` (trusted workspace only). |
 | `runSetup` | | Run the first-run setup in a terminal (section 7). |
 | `openGuide` | | Open the getting-started walkthrough (section 7a). |
 | `openAgentConfig` | | Open `agent.toml` of the agent (section 7a). |

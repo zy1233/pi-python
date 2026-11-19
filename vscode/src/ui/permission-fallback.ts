@@ -41,8 +41,15 @@ export class PermissionFallback {
         { modal: true, detail: dialog.detail },
         ...dialog.items,
       );
-      if (!this.active.has(request.requestId)) return;
       const action = resolveFallbackChoice(chosen);
+      if (!this.active.has(request.requestId)) {
+        if (action.kind === "answer") {
+          void vscode.window.showInformationMessage("This question was already answered or cancelled.");
+        } else if (action.kind === "reveal") {
+          await callbacks.reveal();
+        }
+        return;
+      }
       if (action.kind === "answer") {
         callbacks.answer(request.requestId, action.optionId);
       } else if (action.kind === "reveal") {

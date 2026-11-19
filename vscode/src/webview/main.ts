@@ -176,7 +176,6 @@ type ToolEntry = {
   call: ToolCallView;
   drawnOutput: string;
   drawOutput: Throttled;
-  hadOutput: boolean;
   userToggled: boolean;
   expectedOpen: boolean;
 };
@@ -756,7 +755,6 @@ function createToolEntry(call: ToolCallView): ToolEntry {
     call,
     drawnOutput: "",
     drawOutput: throttle(() => drawToolOutput(entry), DRAW_INTERVAL_MS, scheduler),
-    hadOutput: false,
     userToggled: savedOpen !== undefined,
     expectedOpen,
   };
@@ -782,21 +780,14 @@ function syncToolOutputState(entry: ToolEntry, body: string, hasOutput: boolean)
       else entry.root.append(entry.outputDetails);
     }
     if (!entry.userToggled) {
-      let nextOpen: boolean | undefined;
-      if (entry.call.status === "failed") {
-        nextOpen = true;
-      } else if (!entry.hadOutput) {
-        nextOpen = body.length < 400;
-      }
-      if (nextOpen !== undefined && entry.outputDetails.open !== nextOpen) {
+      const nextOpen = entry.call.status === "failed" || body.length < 400;
+      if (entry.outputDetails.open !== nextOpen) {
         entry.expectedOpen = nextOpen;
         entry.outputDetails.open = nextOpen;
       }
     }
-    entry.hadOutput = true;
-  } else {
-    if (entry.outputDetails.isConnected) entry.outputDetails.remove();
-    entry.hadOutput = false;
+  } else if (entry.outputDetails.isConnected) {
+    entry.outputDetails.remove();
   }
 }
 

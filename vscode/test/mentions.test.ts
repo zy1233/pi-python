@@ -183,5 +183,13 @@ describe("mention formatting and prompt assembly", () => {
     expect(containsMentionToken('open @"my docs/note.md" please', spaced)).toBe(true);
     expect(containsMentionToken("see @src/a.ts:L5-L12, please", selection)).toBe(true);
     expect(containsMentionToken("see @src/a.ts:L5-L120", selection)).toBe(false);
+    expect(containsMentionToken("see @src/a.ts.", file)).toBe(true);
+    expect(containsMentionToken("see @src/a.ts. Next sentence", file)).toBe(true);
+    expect(containsMentionToken("see @src/a.ts- explain", file)).toBe(true);
+    expect(containsMentionToken("see @src/a.ts:L5-L12.", selection)).toBe(true);
+    expect(containsMentionToken("see @src/a.ts.bak", file)).toBe(false);
+    expect(containsMentionToken("see @src/a.ts-old", file)).toBe(false);
+    expect(removeMentionToken("see @src/a.ts.", file)).toBe("see.");
+    expect(removeMentionToken("see @src/a.ts. Next", file)).toBe("see. Next");
   });
 });

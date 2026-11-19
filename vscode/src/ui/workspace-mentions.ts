@@ -5,9 +5,11 @@ import * as vscode from "vscode";
 import {
   DEFAULT_MENTION_EXCLUDES,
   buildFindFilesExcludeGlob,
-  createPathFilter,
+  createGitignorePathFilter,
   expandExcludePattern,
   parseGitignorePatterns,
+  selectSafeFindFilesGitignoreExcludes,
+  type ParsedGitignore,
 } from "../core/mention-excludes.js";
 import {
   DEFAULT_MENTION_LIMIT,
@@ -55,13 +57,13 @@ function collectConfigExcludes(folderUri: vscode.Uri, target: Set<string>): void
   }
 }
 
-async function readRootGitignore(folderUri: vscode.Uri): Promise<{ excludes: string[]; negations: string[] }> {
+async function readRootGitignore(folderUri: vscode.Uri): Promise<ParsedGitignore> {
   try {
     const bytes = await vscode.workspace.fs.readFile(vscode.Uri.joinPath(folderUri, ".gitignore"));
-    if (bytes.byteLength > MAX_GITIGNORE_BYTES) return { excludes: [], negations: [] };
+    if (bytes.byteLength > MAX_GITIGNORE_BYTES) return { excludes: [], negations: [], rules: [] };
     return parseGitignorePatterns(new TextDecoder("utf-8").decode(bytes));
   } catch {
-    return { excludes: [], negations: [] };
+    return { excludes: [], negations: [], rules: [] };
   }
 }
 
@@ -227,11 +229,11 @@ export class WorkspaceMentions implements vscode.Disposable {
       collectConfigExcludes(folderUri, baseExcludes);
       const gitignore = await readRootGitignore(folderUri);
       const findFilesExcludes = new Set<string>(baseExcludes);
-      if (gitignore.negations.length === 0) {
-        for (const pattern of gitignore.excludes) findFilesExcludes.add(pattern);
+      for (const pattern of selectSafeFindFilesGitignoreExcludes(gitignore)) {
+        findFilesExcludes.add(pattern);
       }
       const exclude = buildFindFilesExcludeGlob(findFilesExcludes);
-      const pathFilter = createPathFilter([...baseExcludes, ...gitignore.excludes], gitignore.negations);
+      const pathFilter = createGitignorePathFilter([...baseExcludes], gitignore);
       const uris = await vscode.workspace.findFiles(
         new vscode.RelativePattern(folder, "**/*"),
         exclude || undefined,
