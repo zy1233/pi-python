@@ -4,6 +4,16 @@ This file is the checklist for a release. How the files are made is in `PACKAGIN
 
 ## Release record
 
+### 1.6.0 (2026-11-19)
+
+- The pull requests are #135 (merge commit `7dd6ee8`, chat styling and the copy buttons) and #136 (merge commit `25b1e3e`, the version, the CHANGELOG entry, the 1.2.0 release record). 1.6.0 follows 1.4.0 and bundles the same agent (1.0.0). It is a stable release (even minor, no pre-release flag). The owner chose the version.
+- Before the publish: the checks of both pull requests were green (the workflow of this file; `ci.yml` does not run for a change that has no `.py` file). #135 was reviewed in full before the merge. A review found one small defect (the text of a tool output ran under its **Copy** button), and one commit on the branch fixed it (padding of `.tool-output pre`).
+- Published by the workflow: run `44445177041` on `main`, commit `25b1e3e` (inputs: `publish` on, `registries` `both`, the five targets). The run finished green at 02:45:44Z (the Publish job ran from 02:43:20Z to 02:45:44Z). The user `zy1233` approved it in the environment `vscode-publish` (the API shows `approved`).
+- Open VSX took the five VSIX files by Trusted Publishing (OIDC), from 02:44:21Z to 02:44:40Z (`Trusted publishing token issued`, then `Published zycode.zycode v1.6.0@<target>`). Then the Marketplace took them with `vsce publish --oidc`, from 02:44:49Z to 02:45:42Z. Both registries accepted the first try with no token.
+- Time until the version was visible: Open VSX showed all five targets at the first check (02:50Z, 5 minutes after the last upload). The Marketplace listed the five targets from 02:51:56Z to 02:53:22Z (`lastUpdated`), about 7 to 8 minutes after the upload.
+- Checked with the public APIs: five targets at 1.6.0 on both registries. On Open VSX `preRelease` is false, `engines.vscode` is `^1.90.0` and `verified` is true. The Marketplace has no PreRelease property for 1.6.0. The sha256 of the five Open VSX files equals the `sha256sum` line of the Publish log (darwin-arm64 `69b3e7d9…`, darwin-x64 `b557eea7…`, linux-arm64 `9bce6e5f…`, linux-x64 `1206d58f…`, win32-x64 `48224590…`). The Marketplace shows no hash, so it was not compared there.
+- Not verified: the chat in a real VS Code. The review ran the chat in headless Chrome 156 (dark and light theme, 320 px and 800 px wide) with a mock of the VS Code API. It did not use a VS Code window and not the Chromium of the oldest supported VS Code (about 122). In a real VS Code webview, the copy through `navigator.clipboard` (with the `document.execCommand("copy")` fallback), the **Copy failed** path, and the screen-reader announcement were not tried. A VS Code older than Chromium 123 does not know `field-sizing`, so its message box keeps three lines (by design, and not tried). An install or an update to 1.6.0 on a machine was not tried.
+
 ### 1.4.0 (2026-11-16)
 
 - The pull request is #132 (merge commit `9c24066`). It moved the pin to agent 1.0.0 (the Release `v1.0.0`) and made the version 1.4.0. 1.4.0 follows 1.2.0.
