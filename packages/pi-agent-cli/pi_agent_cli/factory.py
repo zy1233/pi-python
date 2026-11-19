@@ -69,6 +69,7 @@ def model_for_choice(choice: ModelChoice, *, reasoning: bool = False) -> Model:
         base_url=choice.base_url,
         supports_images=_detect_vlm_support(provider, choice.id, choice.supports_images),
         reasoning=reasoning,
+        thinking_format=choice.thinking_format,
     )
     if choice.context_window is not None:
         model.context_window = choice.context_window

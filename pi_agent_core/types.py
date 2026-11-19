@@ -23,6 +23,7 @@ from pi_agent_core.messages import (
 )
 
 ThinkingLevel = Literal["off", "minimal", "low", "medium", "high", "xhigh", "max"]
+ThinkingFormat = Literal["openai", "gemini"]
 ToolExecutionMode = Literal["sequential", "parallel"]
 QueueMode = Literal["all", "one-at-a-time"]
 
@@ -59,6 +60,11 @@ class Model:
     # Custom endpoint for OpenAI-compatible providers (mirrors pi's baseUrl),
     # e.g. SiliconFlow/DeepSeek/vLLM gateways.
     base_url: str | None = None
+    # Wire format of thinking requests for OpenAI-compatible providers ("openai" sends
+    # `reasoning_effort`; "gemini" sends Google's nested `extra_body.google.thinking_config`
+    # with `include_thoughts=True`). None uses "gemini" for Google's own OpenAI-compatible
+    # hosts and "openai" elsewhere.
+    thinking_format: ThinkingFormat | None = None
 
     @property
     def id(self) -> str:

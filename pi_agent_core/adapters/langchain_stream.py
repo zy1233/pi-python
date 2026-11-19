@@ -15,7 +15,11 @@ from urllib.parse import urlsplit
 
 from pi_agent_core.adapters.deepseek_replay import replaying_chat_deepseek
 from pi_agent_core.adapters.langchain_convert import agent_tool_to_lc_schema, convert_to_langchain
-from pi_agent_core.adapters.openai_reasoning import reasoning_chat_openai
+from pi_agent_core.adapters.openai_reasoning import (
+    GOOGLE_THOUGHT_FLAG,
+    ThoughtTagSplitter,
+    reasoning_chat_openai,
+)
 from pi_agent_core.event_stream import AssistantMessageEventStream
 from pi_agent_core.frozen import is_frozen
 from pi_agent_core.messages import (
@@ -37,6 +41,7 @@ from pi_agent_core.types import (
     TextStartEvent,
     ThinkingDeltaEvent,
     ThinkingEndEvent,
+    ThinkingFormat,
     ThinkingLevel,
     ThinkingStartEvent,
     ToolCallDeltaEvent,
@@ -83,6 +88,23 @@ _DEEPSEEK_EFFORT: dict[ThinkingLevel, str | None] = {
     "xhigh": "max",
     "max": "max",
 }
+
+# Google's OpenAI-compatible docs list minimal/low/medium/high (lowercase) for Gemini 3+.
+# Google defines no xhigh or max level, so both map to "high".
+_GEMINI_THINKING_LEVEL: dict[ThinkingLevel, str | None] = {
+    "off": None,
+    "minimal": "minimal",
+    "low": "low",
+    "medium": "medium",
+    "high": "high",
+    "xhigh": "high",
+    "max": "high",
+}
+
+_GOOGLE_OPENAI_HOSTS = (
+    "generativelanguage.googleapis.com",
+    "aiplatform.googleapis.com",
+)
 
 # Anthropic requires max_tokens to exceed the thinking budget; reserve room for
 # the visible answer on top of the budget.
@@ -171,10 +193,61 @@ def _apply_reasoning_params(
             kwargs = {**kwargs, "thinking": {"type": "enabled", "budget_tokens": budget}}
             kwargs.setdefault("max_tokens", budget + _THINKING_OUTPUT_HEADROOM)
     elif provider == "openai":
+        if _openai_thinking_format(model) == "gemini":
+            return _apply_gemini_openai_thinking(kwargs, level)
         effort = _OPENAI_EFFORT.get(level)
         if effort is not None:
             kwargs = {**kwargs, "reasoning_effort": effort}
     return kwargs
+
+
+def _is_google_openai_api(base_url: str | None) -> bool:
+    """True for Google's own OpenAI-compatible endpoints (Gemini Developer API / Vertex AI)."""
+    url = (base_url or "").strip()
+    if not url:
+        return False
+    host = (urlsplit(url if "://" in url else f"//{url}").hostname or "").lower()
+    if any(host == domain or host.endswith(f".{domain}") for domain in _GOOGLE_OPENAI_HOSTS):
+        return True
+    return host.endswith("-aiplatform.googleapis.com")
+
+
+def _is_gemini_2_5_model(model_id: str) -> bool:
+    """True for Gemini 2.5 model ids (e.g. 'gemini-2.5-pro', 'models/gemini-2.5-flash')."""
+    leaf = model_id.strip().lower().rsplit("/", 1)[-1]
+    return leaf.startswith("gemini-2.5") or leaf.startswith("gemini-2-5")
+
+
+def _openai_thinking_format(model: Model) -> ThinkingFormat:
+    """Wire format of thinking requests for ``provider == "openai"``."""
+    if model.thinking_format is not None:
+        return model.thinking_format
+    if _is_google_openai_api(model.base_url) and not _is_gemini_2_5_model(model.model_id):
+        return "gemini"
+    return "openai"
+
+
+def _apply_gemini_openai_thinking(kwargs: dict[str, Any], level: ThinkingLevel) -> dict[str, Any]:
+    """Inject Gemini's ``thinking_config`` via nested ``extra_body`` (without ``reasoning_effort``).
+
+    Google's OpenAI-compatible layer expects an outer ``"extra_body"`` key in the JSON body;
+    the OpenAI SDK flattens its ``extra_body`` argument into the request root, so one nesting
+    produces ``{"extra_body": {"google": {"thinking_config": ...}}}`` on the wire. Sending
+    ``reasoning_effort`` alongside ``thinking_config`` causes a 400 error.
+    """
+    gemini_level = _GEMINI_THINKING_LEVEL.get(level)
+    if gemini_level is None:
+        return kwargs
+    outer_extra = dict(kwargs.get("extra_body") or {})
+    inner_extra = dict(outer_extra.get("extra_body") or {})
+    google = dict(inner_extra.get("google") or {})
+    thinking_config = dict(google.get("thinking_config") or {})
+    thinking_config["include_thoughts"] = True
+    thinking_config["thinking_level"] = gemini_level
+    google["thinking_config"] = thinking_config
+    inner_extra["google"] = google
+    outer_extra["extra_body"] = inner_extra
+    return {**kwargs, "extra_body": outer_extra}
 
 
 def _is_deepseek_api(base_url: str | None) -> bool:
@@ -626,6 +699,18 @@ async def langchain_stream(
             text_started = False
             thinking_started = False
             thinking_ended = False
+            if model.provider.lower() == "openai":
+                allow_tag_split = (
+                    _openai_thinking_format(model) == "gemini"
+                    and model.reasoning
+                    and bool(options.reasoning)
+                    and options.reasoning != "off"
+                )
+                thought_splitter: ThoughtTagSplitter | None = ThoughtTagSplitter(
+                    parse_tags=allow_tag_split
+                )
+            else:
+                thought_splitter = None
 
             stream.push(StartEvent(partial=partial.model_copy(deep=True)))
             stream.set_final_message(partial)
@@ -653,9 +738,60 @@ async def langchain_stream(
                         )
                     )
 
+            def emit_thinking(thinking_delta: str) -> None:
+                nonlocal full_thinking, thinking_started
+                if not thinking_delta:
+                    return
+                if not thinking_started:
+                    thinking_started = True
+                    stream.push(
+                        ThinkingStartEvent(partial=partial.model_copy(deep=True), content_index=0)
+                    )
+                full_thinking += thinking_delta
+                partial.content = current_blocks()
+                stream.push(
+                    ThinkingDeltaEvent(
+                        partial=partial.model_copy(deep=True),
+                        delta=thinking_delta,
+                        content_index=0,
+                    )
+                )
+                stream.set_final_message(partial)
+
+            def emit_text(text_delta: str) -> None:
+                nonlocal full_text, text_started
+                if not text_delta:
+                    return
+                if not text_started:
+                    # Thinking streams ahead of text; close it before text opens.
+                    end_thinking_if_open()
+                    text_started = True
+                    stream.push(
+                        TextStartEvent(
+                            partial=partial.model_copy(deep=True),
+                            content_index=text_index,
+                        )
+                    )
+                full_text += text_delta
+                partial.content = current_blocks()
+                stream.push(
+                    TextDeltaEvent(
+                        partial=partial.model_copy(deep=True),
+                        delta=text_delta,
+                        content_index=text_index,
+                    )
+                )
+                stream.set_final_message(partial)
+
+            def flush_thought_splitter() -> None:
+                if thought_splitter is None:
+                    return
+                rem_thinking, rem_text = thought_splitter.flush()
+                emit_thinking(rem_thinking)
+                emit_text(rem_text)
+
             def handle_chunk(chunk: Any) -> None:
-                nonlocal full_text, full_thinking, thinking_signature
-                nonlocal text_started, thinking_started
+                nonlocal thinking_signature
 
                 meta = _get_attr(chunk, "usage_metadata")
                 if meta:
@@ -667,49 +803,27 @@ async def langchain_stream(
                 sig = _extract_thinking_signature(chunk.content)
                 if sig:
                     thinking_signature += sig
-                if thinking_delta:
-                    if not thinking_started:
-                        thinking_started = True
-                        stream.push(
-                            ThinkingStartEvent(
-                                partial=partial.model_copy(deep=True), content_index=0
-                            )
-                        )
-                    full_thinking += thinking_delta
-                    partial.content = current_blocks()
-                    stream.push(
-                        ThinkingDeltaEvent(
-                            partial=partial.model_copy(deep=True),
-                            delta=thinking_delta,
-                            content_index=0,
-                        )
-                    )
-                    stream.set_final_message(partial)
 
                 text_delta = _extract_text_delta(chunk.content)
-                if text_delta:
-                    if not text_started:
-                        # Thinking streams ahead of text; close it before text opens.
-                        end_thinking_if_open()
-                        text_started = True
-                        stream.push(
-                            TextStartEvent(
-                                partial=partial.model_copy(deep=True),
-                                content_index=text_index,
+                if thought_splitter is not None:
+                    ak = getattr(chunk, "additional_kwargs", None) or {}
+                    is_google_thought = ak.get(GOOGLE_THOUGHT_FLAG) is True
+                    if text_delta or is_google_thought:
+                        split_thinking, text_delta = thought_splitter.feed(
+                            text_delta, is_google_thought=is_google_thought
+                        )
+                        if split_thinking:
+                            thinking_delta = (
+                                thinking_delta + split_thinking
+                                if thinking_delta
+                                else split_thinking
                             )
-                        )
-                    full_text += text_delta
-                    partial.content = current_blocks()
-                    stream.push(
-                        TextDeltaEvent(
-                            partial=partial.model_copy(deep=True),
-                            delta=text_delta,
-                            content_index=text_index,
-                        )
-                    )
-                    stream.set_final_message(partial)
+
+                emit_thinking(thinking_delta)
+                emit_text(text_delta)
 
                 if hasattr(chunk, "tool_call_chunks") and chunk.tool_call_chunks:
+                    flush_thought_splitter()
                     for tcc in chunk.tool_call_chunks:
                         idx = tcc.get("index", 0)
                         if idx not in tool_calls_acc:
@@ -797,6 +911,7 @@ async def langchain_stream(
 
             # Close still-open granular segments (thinking-only responses, text
             # that ran to the end of the stream).
+            flush_thought_splitter()
             end_thinking_if_open()
             if text_started:
                 stream.push(

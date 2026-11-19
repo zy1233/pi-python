@@ -52,3 +52,19 @@ async def test_the_harness_model_reasons_as_configured(
 
     assert harness.model.reasoning is reasons
     assert harness.thinking_level == config.thinking_level
+
+
+@pytest.mark.asyncio
+async def test_the_harness_model_keeps_thinking_format(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+):
+    config = CliConfig(
+        provider="openai",
+        model_id="google/models/gemini-4-hydrogen",
+        thinking_level="high",
+        thinking_format="gemini",
+    )
+    harness = await build_model(tmp_path, monkeypatch, config)
+
+    assert harness.model.thinking_format == "gemini"
+    assert harness.model.reasoning is True

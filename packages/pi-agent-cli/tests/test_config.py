@@ -645,3 +645,53 @@ def test_a_thinking_level_that_is_not_known_is_off_and_the_user_is_told(tmp_path
     assert note.startswith("thinking_level in agent.toml must be ")
     assert '"xhigh" or "max"' in note  # every level is named, in the order of the type
     assert note.endswith('The agent uses "off".')
+
+
+# ---------------------------------------------------------------------------------------------
+# ``thinking_format``
+# ---------------------------------------------------------------------------------------------
+
+
+def test_thinking_format_in_model_and_top_level(tmp_path: Path):
+    config = _load(tmp_path, '[model]\nprovider = "openai"\nid = "g"\nthinking_format = "gemini"\n')
+    assert config.thinking_format == "gemini"
+    assert config.default_choice().thinking_format == "gemini"
+    assert config.auto.notes == ()
+
+    top = _load(tmp_path, 'thinking_format = "Gemini"\n[model]\nprovider = "openai"\nid = "g"\n')
+    assert top.thinking_format == "gemini"
+    assert top.auto.notes == ()
+
+
+def test_thinking_format_in_models_list_and_not_inherited(tmp_path: Path):
+    config = _load(
+        tmp_path,
+        """
+[model]
+provider = "openai"
+id = "gemini-main"
+base_url = "http://gw.test/v1"
+thinking_format = "gemini"
+
+[[models]]
+id = "deepseek-other"
+
+[[models]]
+id = "gemini-secondary"
+thinking_format = "gemini"
+""".strip(),
+    )
+    choices = config.model_choices()
+    assert [c.id for c in choices] == ["gemini-main", "deepseek-other", "gemini-secondary"]
+    assert choices[0].thinking_format == "gemini"
+    assert choices[1].thinking_format is None
+    assert choices[2].thinking_format == "gemini"
+    assert config.auto.notes == ()
+
+
+@pytest.mark.parametrize("raw", ['"anthropic"', '""', "123", "true"])
+def test_invalid_thinking_format_is_ignored_with_a_note(tmp_path: Path, raw: str):
+    config = _load(tmp_path, f'[model]\nprovider = "openai"\nid = "g"\nthinking_format = {raw}\n')
+    assert config.thinking_format is None
+    assert config.default_choice().thinking_format is None
+    assert any("thinking_format of [model]" in n for n in config.auto.notes)

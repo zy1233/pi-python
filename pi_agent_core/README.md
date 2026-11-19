@@ -41,7 +41,7 @@ pip install -e ".[dev]"
 
 - Cross-provider message replay (`transform_messages`: tool-call id normalization, thinking downgrade, image stripping)
 - Usage & cost tracking (accumulated across stream chunks, correct for all three real-world reporting shapes) + `CostCalculator`
-- Thinking/reasoning: provider param mapping (`reasoning_effort` / Anthropic `thinking` budgets), streamed `thinking_delta` events, Anthropic signature replay, DeepSeek-style `reasoning_content`
+- Thinking/reasoning: provider param mapping (`reasoning_effort` / Anthropic `thinking` budgets / Gemini `thinking_config` via `Model.thinking_format`), streamed `thinking_delta` events, Anthropic signature replay, DeepSeek-style `reasoning_content`, OpenRouter `reasoning_details`, and `<thought>` extraction
 - Stream-level retries before the first token (exponential backoff + jitter, `Retry-After` aware)
 - Runaway protection: `max_turns` (raises `MaxTurnsExceededError`) and per-tool `tool_timeout`
 - Guardrail hooks: `before_llm_call` (with a `ContextBudget` token signal — the compaction hook point), `after_llm_call` (tripwire on raise), `on_agent_end`
@@ -100,6 +100,8 @@ agent = Agent(initial_state={"model": model}, stream_fn=langchain_stream)
 ```
 
 On DeepSeek's own API (no `base_url`, or one on `deepseek.com`) the thinking switch follows `Model.reasoning` and `thinking_level`, and while thinking is on the earlier assistant messages' `reasoning_content` is sent back with every request, which DeepSeek requires once tools are involved. A gateway gets neither: it is left to its own defaults.
+
+For Gemini models behind an OpenAI-compatible proxy or gateway, set `Model.thinking_format = "gemini"` (`"openai"` is the default for custom endpoints; Google's own `generativelanguage.googleapis.com` and `*-aiplatform.googleapis.com` hosts auto-select `"gemini"` for non-2.5 models and keep `reasoning_effort` for `gemini-2.5*`). When `"gemini"` is selected and thinking is enabled, the request sends `extra_body.google.thinking_config` (`include_thoughts = True` and lowercase `thinking_level` `"minimal"` / `"low"` / `"medium"` / `"high"`, mapping `xhigh` and `max` to `"high"`) instead of `reasoning_effort`, and streamed `<thought>...</thought>` / `extra_content.google.thought` chunks surface as `thinking_delta` events (gateways streaming `delta.reasoning_details` are also extracted).
 
 ### Structured output
 
