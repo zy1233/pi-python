@@ -6,7 +6,7 @@ build-backend = "hatchling.build"
 name = "pi-agent-core-lc"
 version = "1.0.0"
 description = "Python port of pi-agent-core with LangChain LLM adapter"
-readme = "README.md"
+readme = "pi_agent_core/README.md"
 requires-python = ">=3.11"
 license = "MIT"
 authors = [

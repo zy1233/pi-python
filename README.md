@@ -1,184 +1,140 @@
-# pi-python
+# zycode (`pi-python`)
+
+English | [简体中文](README.zh-CN.md)
 
 [![CI](https://github.com/zy1233/pi-python/actions/workflows/ci.yml/badge.svg)](https://github.com/zy1233/pi-python/actions/workflows/ci.yml)
-[![PyPI](https://img.shields.io/pypi/v/pi-agent-core-lc)](https://pypi.org/project/pi-agent-core-lc/)
-[![Python](https://img.shields.io/pypi/pyversions/pi-agent-core-lc)](https://pypi.org/project/pi-agent-core-lc/)
-[![License](https://img.shields.io/pypi/l/pi-agent-core-lc)](https://github.com/zy1233/pi-python/blob/main/LICENSE)
+[![PyPI](https://img.shields.io/pypi/v/pi-agent-cli-lc)](https://pypi.org/project/pi-agent-cli-lc/)
+[![Python](https://img.shields.io/pypi/pyversions/pi-agent-cli-lc)](https://pypi.org/project/pi-agent-cli-lc/)
+[![License](https://img.shields.io/pypi/l/pi-agent-cli-lc)](https://github.com/zy1233/pi-python/blob/main/LICENSE)
 
-**zycode** is an open-source coding agent for your terminal and your editor. It is built from this repository: the ACP agent `pi-agent-cli-lc` and the terminal UI `zypi`. Website: [zycode.dev](https://zycode.dev) ([中文](https://zycode.dev/zh/)).
+**zycode** is an open-source coding agent for your terminal and your editor. It speaks the standard [Agent Client Protocol (ACP)](https://agentclientprotocol.com) over stdio, runs in the terminal (`zypi`), in VS Code (`zycode.zycode`), in Zed, or headlessly (`-p`), and is built on a modular Python agent runtime.
+
+Website: [zycode.dev](https://zycode.dev) ([中文](https://zycode.dev/zh/))
 
 > Unofficial project: this repository is not affiliated with, endorsed by, or maintained by the official [pi](https://github.com/earendil-works/pi) project or its maintainers.
 
-Python port of [pi-agent-core](https://github.com/earendil-works/pi/tree/main/packages/agent) from the [pi](https://github.com/earendil-works/pi) project, with **LangChain** replacing `pi-ai` for LLM calls.
+## Overview
 
-The loop semantics, event protocol, and tool execution are faithful ports of pi; LangChain is only a `StreamFn` boundary adapter — never a replacement for the agent loop.
+```text
+  zypi (Rust TUI)  /  VS Code (zycode.zycode)  /  Zed & other ACP clients
+                                │
+                         ACP over stdio
+                                ▼
+             zycode-agent / pi-agent-cli-lc (ACP & headless CLI)
+                                │
+                                ▼
+             pi-agent-harness-lc (sessions, compaction, skills)
+                                │
+                                ▼
+             pi-agent-core-lc (agent loop, events, coding tools)
+                                │
+                                ▼
+             LangChain StreamFn adapter (OpenAI / Anthropic / DeepSeek / gateways)
+```
 
-This repository is a monorepo containing:
-
-**Python packages** (PyPI):
-
-- `pi-agent-core-lc` / `pi_agent_core`: lightweight core loop, messages, tools, adapters.
-- `pi-agent-harness-lc` / `pi_agent_harness`: harness runtime, sessions, queues, hooks, compaction, skills/templates, and local execution env.
-- `pi-agent-cli-lc` / `pi_agent_cli`: standard ACP coding agent (`python -m pi_agent_cli`, headless `-p`).
-- `pi-web-access-py` / `pi_web_access`: web search and URL fetch extension.
-- `pi-goal-x-py` / `pi_goal_x`: goal-planning extension.
-- `pi-dynamic-workflows-py` / `pi_dynamic_workflows`: workflow orchestration extension.
-- `pi-mcp-py` / `pi_mcp`: optional extension that connects the MCP servers an ACP client (an editor) passes (see [`packages/pi-mcp`](packages/pi-mcp/README.md)).
-
-**Rust TUI** (prebuilt binaries in [GitHub Releases](https://github.com/zy1233/pi-python/releases)):
-
-- `zypi`: full-screen terminal UI for interactive coding-agent sessions. Vendored fork of [grok-build](https://github.com/xai-org/grok-build) (Apache-2.0), with all `x.ai/*` vendor extensions removed. It offers three permission modes (Shift+Tab): Normal (`ask`, the start mode), Auto and Always-Approve. See [TUI & Code-Agent Guide](docs/TUI-AND-CODE-AGENT.md) for details.
+- **Clients**:
+  - `zypi` (`tui/`): full-screen Rust terminal UI — vendored fork of [grok-build](https://github.com/xai-org/grok-build) (Apache-2.0) with all `x.ai/*` vendor extensions removed. `zypi` has no model client, tool runner, or MCP client; it talks to the agent over ACP.
+  - `zycode.zycode` ([`vscode/`](vscode/README.md)): VS Code / Open VSX extension with a chat view and the `zycode-agent` binary bundled inside.
+  - Any ACP editor or client (such as [Zed](#in-zed-custom-agent) or [DeepSeek Harness](docs/DEEPSEEK-HARNESS.md)).
+- **Coding Agent (`pi-agent-cli-lc`)** ([`packages/pi-agent-cli/`](packages/pi-agent-cli/README.md)): standard ACP stdio agent and headless `-p` CLI, also packaged as the standalone `zycode-agent` executable.
+- **Extensions**: optional Python packages for web search/fetch ([`pi-web-access-py`](packages/pi-web-access/README.md)), goal planning ([`pi-goal-x-py`](packages/pi-goal-x/README.md)), subagent workflows ([`pi-dynamic-workflows-py`](packages/pi-dynamic-workflows/README.md)), and client-passed MCP servers ([`pi-mcp-py`](packages/pi-mcp/README.md)).
+- **Underlying Python SDK**: built on a faithful Python port of `pi-agent-core` with LangChain used strictly as a `StreamFn` boundary adapter. Full SDK documentation lives in [`pi_agent_core/README.md`](pi_agent_core/README.md) (agent loop, events, built-in coding tools, LangChain/MCP tool adapter, structured output, guardrails) and [`packages/pi-agent-harness/README.md`](packages/pi-agent-harness/README.md) (`AgentHarness`, session tree storage, compaction, custom messages, skills, `LocalExecutionEnv`).
 
 ## Status
 
 | Component | Status | Distribution |
 |-----------|--------|--------------|
+| `zypi` (Rust TUI) | **Stable** | [GitHub Releases](https://github.com/zy1233/pi-python/releases) (Linux x86_64 and aarch64, macOS arm64) |
+| `zycode.zycode` (VS Code extension) | **Stable** | [VS Code Marketplace](https://marketplace.visualstudio.com/items?itemName=zycode.zycode) and [Open VSX](https://open-vsx.org/extension/zycode/zycode) (five platforms; the project owner tested the install of 1.0.0 and the update from 0.1.0 to 1.0.0 on Windows on 2026-11-12, and 1.4.0 with a real model on Windows on 2026-11-17 (the `max` level and the Context row); the rest of the Windows flow, macOS and Linux in a real VS Code are not verified) |
+| `pi-agent-cli-lc` | **Stable** | [PyPI](https://pypi.org/project/pi-agent-cli-lc/) |
 | `pi-agent-core-lc` | **Stable** | [PyPI](https://pypi.org/project/pi-agent-core-lc/) |
 | `pi-agent-harness-lc` | **Stable** | [PyPI](https://pypi.org/project/pi-agent-harness-lc/) |
-| `pi-agent-cli-lc` | **Stable** | [PyPI](https://pypi.org/project/pi-agent-cli-lc/) |
 | `pi-web-access-py` | **Stable** | [PyPI](https://pypi.org/project/pi-web-access-py/) |
 | `pi-goal-x-py` | **Stable** | [PyPI](https://pypi.org/project/pi-goal-x-py/) |
 | `pi-dynamic-workflows-py` | **Stable** | [PyPI](https://pypi.org/project/pi-dynamic-workflows-py/) |
 | `pi-mcp-py` | **Stable** | [PyPI](https://pypi.org/project/pi-mcp-py/) (from 0.6.0) |
-| `zypi` (Rust TUI) | **Stable** | [GitHub Releases](https://github.com/zy1233/pi-python/releases) (Linux x86_64 and aarch64, macOS arm64) |
-| `zycode.zycode` (VS Code extension) | **Stable** | [VS Code Marketplace](https://marketplace.visualstudio.com/items?itemName=zycode.zycode) and [Open VSX](https://open-vsx.org/extension/zycode/zycode) (five platforms; the project owner tested the install of 1.0.0 and the update from 0.1.0 to 1.0.0 on Windows on 2026-11-12, and 1.4.0 with a real model on Windows on 2026-11-17 (the `max` level and the Context row); the rest of the Windows flow, macOS and Linux in a real VS Code are not verified) |
 
 ## Features
 
-**Core runtime** (Phase 1)
-
-- `Agent` — stateful agent with steering / follow-up queues, abort, `subscribe()` event barrier
-- `agent_loop` — tool execution loop with pi-compatible event protocol (parallel/sequential tools, `terminate` semantics, `should_stop_after_turn`, `prepare_next_turn`)
-- LangChain `StreamFn` adapter (`langchain_stream`) for OpenAI / Anthropic / DeepSeek-style / any `init_chat_model` provider
-- Mock stream for tests — the whole suite runs without API keys
-
-**Production hardening** (Phase 2 / 2.5)
-
-- Cross-provider message replay (`transform_messages`: tool-call id normalization, thinking downgrade, image stripping)
-- Usage & cost tracking (accumulated across stream chunks, correct for all three real-world reporting shapes) + `CostCalculator`
-- Thinking/reasoning: provider param mapping (`reasoning_effort` / Anthropic `thinking` budgets), streamed `thinking_delta` events, Anthropic signature replay, DeepSeek-style `reasoning_content`
-- Stream-level retries before the first token (exponential backoff + jitter, `Retry-After` aware)
-- Runaway protection: `max_turns` (raises `MaxTurnsExceededError`) and per-tool `tool_timeout`
-- Guardrail hooks: `before_llm_call` (with a `ContextBudget` token signal — the compaction hook point), `after_llm_call` (tripwire on raise), `on_agent_end`
-- Observability: `on_payload` / `on_response` hooks; every event carries `run_id` / `turn_id`
-- Granular stream events: `text_start/end`, `thinking_start/end`, `toolcall_start/end` (plus deltas)
-- Structured output: `response_schema` (pydantic model or JSON schema) → parsed `AssistantMessage.structured_output`
-- Tool-result images: Anthropic native blocks, user-message fallback elsewhere, stripped when `supports_images=False`
-- OpenAI-compatible gateways via `Model.base_url` (SiliconFlow, vLLM, DeepSeek, ...)
-
-**Tool ecosystem** (Phase 3.5)
-
-- Built-in coding tools (`pi_agent_core.coding_tools`): read / bash / edit / write / grep / find / ls with pi-faithful truncation notices and `details` payloads
-- LangChain `BaseTool` → `AgentTool` adapter (`from_langchain_tool`) — MCP tools via `langchain-mcp-adapters` work out of the box
-- The CLI itself has no MCP client. The optional `pi-mcp-py` extension connects the MCP servers that an ACP client passes in `session/new` (stdio, Streamable HTTP, SSE) and shows their tools as `mcp__<server>__<tool>`; without it, the agent says that their tools are not available in the session
-
-**Coding Agent CLI** (Phase 4)
-
-- `pi_agent_cli`: standard ACP coding agent over `AgentHarness` — no `x.ai/*` vendor extensions
-- Headless mode: `python -m pi_agent_cli -p "prompt"` for scripting and CI
-- `/new`, `/resume`, `/quit` session commands; `@` local directory listing
-- pi-aligned system prompt engine with tool contributions, `AGENTS.md` context files, `<available_skills>` format
-- Project trust: a project's own extensions (`<project>/.pi-python/extensions`, which run code when a session opens), saved workflows (`<project>/.pi-python/workflows`, which become slash commands), `.pi/SYSTEM.md`, `.pi/APPEND_SYSTEM.md`, project-relative skills and the `<git_status>` snapshot (it runs `git` in the project) load only for trusted projects; the `workflow` tool's `isolation` (it makes a git worktree, and git runs the project's hooks) is refused in a project that is not trusted. An ACP client (the TUI) is asked once per directory; "Trust and remember" is saved in `~/.pi-python/agent/trust.json` with a fingerprint of those files, so a `git pull` that changes one of them asks again. Without being asked: list the project under `[extensions] trusted_projects` in `~/.pi-python/agent.toml`, set `default_project_trust` (`ask` by default, `never`, `always`), or run with `--trust-project-extensions` / `PI_TRUST_PROJECT_EXTENSIONS=1`. Headless `-p` runs never ask but honour an earlier answer. Installed extension packages, your own saved workflows in `~/.pi-python/workflows`, `AGENTS.md`, and absolute or `~` skills paths are unaffected
-- `workflow` on macOS: the script process has no kernel limit on memory or on the number of processes (measured in CI on `macos-15` and `macos-15-intel`), so a script can start child processes and only the audit hook stands in the way; Linux and Windows have those limits and their tests check them. The default permission mode `ask` asks before every `workflow` call, and so does `auto`; `always-approve` does not. Details and what you can do: [`packages/pi-dynamic-workflows`](packages/pi-dynamic-workflows/README.md#macos-weaker-limits)
-- Extensions that fail to load (import error, bad entry point, `activate()` raising, invalid tool name) are skipped, and the agent says so at session start (ACP agent message; headless stderr) instead of just not having them. `PI_HOME` moves the whole home: config, `extensions/`, saved workflows and workflow journals
-- Git workspace context (`<git_status>`) is a session-start snapshot in the system prompt (kept stable for the provider prompt cache; the block tells the model to run `git status` for live state); `--no-git-context` or `[git] enabled = false` turns it off. The snapshot is taken only for a trusted project (see project trust below): `git status` runs the program that a repository's own `.git/config` names in `core.fsmonitor`, so an untrusted project, which includes the default case of a project that ships no extensions or prompt files, gets no `<git_status>` block (to get it back: `[extensions]` `trusted_projects = ["~/work"]` in `~/.pi-python/agent.toml`, or `default_project_trust = "always"`). The block (branch name and the paths of changed and untracked files) goes to the model provider with the rest of the system prompt, so turn it off if such names are sensitive
-
-**TUI — `zypi`** (Phase 4)
-
-- Full-screen Rust terminal UI for interactive coding-agent sessions
-- Spawns `zycode-agent` next to it or on `PATH` by default, or the Python ACP agent when configured (`PI_AGENT_COMMAND`, `[agent].command`, or `PI_PYTHON`)
-- Session management, markdown rendering, Mermaid diagrams, MCP support
-- Prebuilt binaries for Linux (x86_64, aarch64) and macOS (arm64) in [GitHub Releases](https://github.com/zy1233/pi-python/releases); standalone tarballs (`zycode-<target>-<version>.tar.gz`) bundle `zypi` and `zycode-agent` together with zero Python dependencies required
-- See [TUI & Code-Agent Guide](docs/TUI-AND-CODE-AGENT.md) for setup and usage
-
-**FrontierHarness Evaluation** (30-task benchmark)
-
-- 21 Terminal-Bench + 9 DeepSWE industrial tasks; Windows local + WSL2 Docker sandbox runtimes
-- Side-by-side comparison with official Pi; full report: [FRONTIER-HARNESS-30-EVAL-REPORT.md](docs/benchmarks/FRONTIER-HARNESS-30-EVAL-REPORT.md)
+- **Standard ACP coding agent & headless CLI (`pi-agent-cli-lc`)**
+  - Runs as a stdio ACP server for `zypi`, VS Code, Zed, and other ACP clients — no vendor-specific RPCs.
+  - Headless one-shot mode (`python -m pi_agent_cli -p "prompt"`) for scripting and CI; exits with status 1 and prints `error: <reason>` to stderr when a model call fails.
+  - First-run interactive setup (`--setup` or `zypi --setup`) writes model settings to `~/.pi-python/agent.toml` and stores API keys in `~/.pi-python/local.env` (never in TOML). `PI_HOME` relocates the whole home directory.
+  - Session commands (`/new`, `/resume`, `/quit`), `@` directory listing, context compaction, and model switching (`/model`).
+  - pi-aligned system prompt engine with tool contributions, `AGENTS.md` / `CLAUDE.md` context files, `<available_skills>`, and optional `<git_status>` snapshot (trusted projects only; `--no-git-context` or `[git] enabled = false` turns it off).
+- **Full-screen Terminal UI (`zypi`)**
+  - Interactive Rust TUI with session history, markdown rendering, Mermaid diagrams, and Shift+Tab permission-mode switching.
+  - Standalone release bundles (`zycode-<target>-<version>.tar.gz`) ship `zypi` and `zycode-agent` together with zero Python dependencies required.
+  - See [TUI & Code-Agent Guide](docs/TUI-AND-CODE-AGENT.md) for full setup and usage.
+- **VS Code extension (`zycode.zycode`)**
+  - Chat view with tool approval cards, **Show diff** for `write`/`edit`, **Past chats** view, getting-started walkthrough, mode menu (**Ask**, **Auto**, **Always approve**), **Thinking** menu, and **Context** usage row (when `context_window` is set in `agent.toml`).
+  - Bundles `zycode-agent` for five platforms; see [`vscode/README.md`](vscode/README.md).
+- **Built-in coding tools & Python extensions**
+  - Seven built-in coding tools: `read`, `edit`, `write`, `bash`, `grep`, `find`, and `ls`, with pi-faithful truncation limits and paging notices (see [`pi_agent_core/README.md`](pi_agent_core/README.md#built-in-coding-tools)).
+  - Optional extensions: web search/fetch (`pi-web-access-py`), goal planning (`pi-goal-x-py`), sandboxed subagent workflows (`pi-dynamic-workflows-py`), and MCP server bridge (`pi-mcp-py`, connects `stdio`/`http`/`sse` servers passed by an ACP client as `mcp__<server>__<tool>`).
+  - Extensions that fail to load are skipped and reported at session start rather than failing silently.
+  - **`workflow` on macOS:** the script process has no kernel limit on memory or process count (measured in CI on `macos-15` and `macos-15-intel`), so only the audit hook stands in the way; Linux and Windows enforce kernel limits. Keep `ask` (or `auto`, which also asks before every `workflow` call) on macOS. Details: [`packages/pi-dynamic-workflows/README.md#macos-weaker-limits`](packages/pi-dynamic-workflows/README.md#macos-weaker-limits).
+- **Three permission modes (`ask`, `auto`, `always-approve`)**
+  - **`ask` (default):** asks before any tool call unless the tool declares itself harmless (`ToolAnnotations`: `readOnlyHint`, or neither destructive nor open-world). Undeclared tools always ask.
+  - **`auto`:** runs read-only and clearly in-scope calls by rules and checks undecided `bash` calls with a model step (fails closed to `ask`; `[auto] classifier = "rules"` disables the model step).
+  - **`always-approve`:** runs tool calls without prompting (also used by headless `-p` runs).
+  - **Auto is not a sandbox.** Auto guards what a call writes or runs; it does not guard what a call reads or sends (`read`, `grep`, `find`, `ls`, `fetch_url`, `web_search`, and recursive reads in `bash` run without asking). Use a sandbox (`zypi --sandbox`, a container, or a VM) if you need an isolation boundary.
+- **Project trust**
+  - Project-supplied extensions (`<project>/.pi-python/extensions`), saved workflows (`<project>/.pi-python/workflows`), `.pi/SYSTEM.md`, `.pi/APPEND_SYSTEM.md`, project-relative skills, the `<git_status>` snapshot (which runs `git` in the repository), and `workflow` `isolation` worktrees load only for trusted projects.
+  - Interactive ACP clients prompt once per directory and store a SHA-256 fingerprint of gated files in `~/.pi-python/agent/trust.json`, asking again if any gated file changes. Configure statically via `[extensions] trusted_projects` or `default_project_trust` (`ask` / `never` / `always`) in `~/.pi-python/agent.toml`, or `--trust-project-extensions` / `PI_TRUST_PROJECT_EXTENSIONS=1`. Headless `-p` runs never ask but honour saved trust.
 
 ## Install
 
-### Python packages (PyPI)
+### Terminal UI (`zypi`)
+
+Download the standalone bundle (contains both `zypi` and `zycode-agent`; no Python required) or the standalone `zypi` binary for Linux (`x86_64`, `aarch64`) or macOS (`arm64`) from [GitHub Releases](https://github.com/zy1233/pi-python/releases):
 
 ```bash
-pip install pi-agent-core-lc
-pip install pi-agent-harness-lc    # optional: session/harness runtime
-pip install pi-agent-cli-lc        # optional: ACP stdio / headless agent
-pip install pi-web-access-py       # optional: web search / fetch extension
-pip install pi-goal-x-py           # optional: goal planning extension
-pip install pi-dynamic-workflows-py  # optional: workflow extension
-pip install pi-mcp-py              # optional: MCP servers that the editor passes
-
-# Optional LLM providers:
-pip install pi-agent-core-lc[openai]      # ChatOpenAI
-pip install pi-agent-core-lc[anthropic]   # ChatAnthropic
-pip install pi-agent-core-lc[deepseek]    # ChatDeepSeek / OpenAI-compatible gateways
-pip install pi-agent-core-lc[all]         # all providers + harness + cli
-```
-
-<details>
-<summary>Development install (editable)</summary>
-
-```bash
-pip install -e ".[dev]"
-pip install -e "./packages/pi-agent-harness"
-pip install -e "./packages/pi-agent-cli"
-pip install -e "./packages/pi-web-access"
-pip install -e "./packages/pi-goal-x"
-pip install -e "./packages/pi-dynamic-workflows"
-pip install -e "./packages/pi-mcp"   # optional: MCP servers that the editor passes
-```
-
-</details>
-
-### TUI binary (`zypi`)
-
-Download the complete standalone archive (it has `zypi` and `zycode-agent`) or the prebuilt `zypi` binary for Linux (x86_64 or aarch64) or macOS arm64 from [GitHub Releases](https://github.com/zy1233/pi-python/releases):
-
-```bash
-# Option 1: Standalone bundle (contains both zypi and zycode-agent; no Python required)
-# Linux x86_64 shown. The other files are zycode-linux-aarch64-1.0.0.tar.gz and zycode-darwin-aarch64-1.0.0.tar.gz.
+# Option 1: Standalone bundle (zypi + zycode-agent; no Python required)
+# Linux x86_64 shown. Other targets: zycode-linux-aarch64-1.0.0.tar.gz, zycode-darwin-aarch64-1.0.0.tar.gz.
 curl -L -o zycode.tar.gz https://github.com/zy1233/pi-python/releases/download/v1.0.0/zycode-linux-x86_64-1.0.0.tar.gz
 tar -xzf zycode.tar.gz
 sudo mv zypi zycode-agent /usr/local/bin/
 
-# Option 2: zypi alone. It has no agent: it starts zycode-agent (next to it, or on PATH),
-# or the agent that PI_AGENT_COMMAND or PI_PYTHON names.
-curl -L -o zypi https://github.com/zy1233/pi-python/releases/latest/download/zypi-linux-x86_64
-chmod +x zypi
-sudo mv zypi /usr/local/bin/
-# The pip package pi-agent-cli-lc has no zycode-agent command. With it, set PI_PYTHON
-# (zypi starts `python -m pi_agent_cli` only when PI_PYTHON is set):
-export PI_PYTHON=python3
-
-# Set up model and API key directly in terminal:
+# Set up model and API key in your terminal, then start:
 zypi --setup
+zypi
 ```
 
 The bundle file name holds the version, so the URL names the tag (`v1.0.0`), not `latest`.
 
-Or build from source (requires Rust toolchain):
+```bash
+# Option 2: zypi binary alone with the Python pip package
+curl -L -o zypi https://github.com/zy1233/pi-python/releases/latest/download/zypi-linux-x86_64
+chmod +x zypi
+sudo mv zypi /usr/local/bin/
+
+# Tell zypi which Python has pi-agent-cli-lc installed:
+export PI_PYTHON=python3
+zypi --setup
+```
+
+Or build `zypi` from source (requires Rust toolchain; on Windows, build and run in WSL2):
+
 ```bash
 cd tui && cargo build --profile release-dist -p pi-pager-bin
 # binary at target/release-dist/zypi
 ```
 
-After installing, set up config and start the TUI — see [TUI & Code-Agent Guide](docs/TUI-AND-CODE-AGENT.md).
+See [TUI & Code-Agent Guide](docs/TUI-AND-CODE-AGENT.md) and [Windows notes](docs/WINDOWS.md) for platform details (glibc 2.39+ on Linux, unsigned macOS builds, WSL2 setup).
 
 ### VS Code extension
 
-The extension `zycode.zycode` ([`vscode`](vscode/README.md)) puts the zycode agent in a chat view in VS Code. It has the agent program inside, so you do not install the Python agent first. It is unofficial and not affiliated with pi or Microsoft.
+The extension `zycode.zycode` ([`vscode/README.md`](vscode/README.md)) puts the zycode agent in a chat view in VS Code with the agent binary bundled inside (no separate Python install needed). It is unofficial and not affiliated with pi or Microsoft.
 
-- **VS Code:** install it from the [Visual Studio Marketplace](https://marketplace.visualstudio.com/items?itemName=zycode.zycode), or run `code --install-extension zycode.zycode`.
-- **VSCodium and other editors that use Open VSX:** install it from [Open VSX](https://open-vsx.org/extension/zycode/zycode).
-- **Platforms:** the extension is published on both registries for five platforms: `linux-x64`, `linux-arm64`, `darwin-arm64`, `darwin-x64` and `win32-x64`. Each one has the agent program inside.
-- **What it has:** a chat view with a question card for each tool call that is not read-only; a **Show diff** button for `write` and `edit`; a getting-started guide and help for the first start (the setup runs in a VS Code terminal); a **Past chats** view; a mode menu (**Ask**, **Auto** and **Always approve**); and a **Thinking** menu.
-- **Auto is not a sandbox.** It guards what a call writes or runs. It does not guard what a call reads or sends. Use a container or a virtual machine if you need a boundary. See the [extension README](vscode/README.md) for the three modes.
-- **Limits:** the bundled agent is not code-signed, and it has only the OpenAI-format provider. The project owner tested the install of 1.0.0 and the update from 0.1.0 to 1.0.0 on Windows (2026-11-12). On 2026-11-17 he ran 1.4.0 on Windows with agent 1.0.0 and a real model: the `max` level is usable, and the Context row shows after `context_window` is set in `agent.toml`. The rest of the Windows flow (the first-run setup in a terminal, the unsigned agent on other machines or under an antivirus), all macOS flows, and Linux in a real VS Code are not verified. The release record is in [`RELEASING.md`](vscode/RELEASING.md).
+- **VS Code:** install from the [Visual Studio Marketplace](https://marketplace.visualstudio.com/items?itemName=zycode.zycode), or run `code --install-extension zycode.zycode`.
+- **VSCodium / Open VSX:** install from [Open VSX](https://open-vsx.org/extension/zycode/zycode).
+- **Platforms:** `linux-x64`, `linux-arm64`, `darwin-arm64`, `darwin-x64`, and `win32-x64`.
+- **Limits:** the bundled agent is not code-signed and includes only the OpenAI-format provider (for Anthropic or DeepSeek providers, install `pi-agent-cli-lc` and set `zycode.agentPath`). The project owner tested installing 1.0.0 and updating from 0.1.0 to 1.0.0 on Windows (2026-11-12), and ran 1.4.0 with agent 1.0.0 and a real model on Windows (2026-11-17: `max` thinking level and the Context row after setting `context_window` in `agent.toml`). The rest of the Windows flow, all macOS flows, and Linux in a real VS Code are not verified. Release record: [`vscode/RELEASING.md`](vscode/RELEASING.md).
 
 ### In Zed (custom agent)
 
-The agent speaks ACP over stdio, so [Zed](https://zed.dev) can start it as a custom agent. Install [uv](https://docs.astral.sh/uv/), then add this entry to the Zed settings:
+Because the agent speaks ACP over stdio, [Zed](https://zed.dev) can run it as a custom agent. Install [uv](https://docs.astral.sh/uv/), then add this entry to Zed's `settings.json`:
 
 ```json
 {
@@ -197,406 +153,99 @@ The agent speaks ACP over stdio, so [Zed](https://zed.dev) can start it as a cus
 }
 ```
 
-- `--with` installs the LangChain provider package. Use `[openai]` or `[anthropic]` for those providers.
-- First run: the agent has no model and no key yet. Zed offers the login "Set up model and API key" for a new thread. It runs the agent command with `--setup` in a terminal. The command asks for the provider, the model and the key. It writes the model and the name of the key variable to `~/.pi-python/agent.toml`, and the key to `~/.pi-python/local.env`. If the variable that you name already has a value (in your environment, or in `local.env`), it does not ask for the key and writes no key: the agent reads the variable where it is. To run it yourself in a shell: `uvx --from pi-agent-cli-lc --with "pi-agent-core-lc[deepseek]" pi-agent-cli --setup`. The login in Zed is not tried yet in Zed itself; a script that acts as the client tested it.
-- To set up by hand: put the model and the name of the key variable in `~/.pi-python/agent.toml` (start from [`agent.example.toml`](packages/pi-agent-cli/agent.example.toml)). Never write the key in that file. Give it to the agent in an environment variable that Zed can see, in the `env` of the entry above, or in `~/.pi-python/local.env` (`KEY=VALUE` lines).
-- To run the code of a checkout, set `command` to the Python of its virtual environment and `args` to `["-m", "pi_agent_cli"]`.
-- The agent is not in Zed's ACP registry, so add it as a custom agent as shown.
-
-### In DeepSeek Harness (as a subagent)
-
-[DeepSeek Harness](https://github.com/deepseek-ai/deepseek-harness) (`dsh`) has an ACP client for subagents: `@deepseek-ai/dsh-subagent-acp`. It starts any ACP agent as a child process, gives it one task, and returns the final text. zycode can be that child. This is not a DSH plugin of ours, and zycode is not affiliated with DeepSeek or with DSH.
-
-> **Verified end to end with a real model (OpenRouter `deepseek/deepseek-v4.1-flash`, one read task and one write task, Linux, `headless` profile only).** Tested with DSH `0.2.2-alpha.2` and `pi-agent-cli-lc` 0.7.0. DSH's main model and zycode's model were both this model. The wiring (spawn, handshake, cwd, permissions, cancel, exit) was also run with a mock model. Details: [Not verified](#not-verified-dsh).
-
-Install the two packages (the `alpha` tag matches DSH `0.2.2-alpha.2`) and add rows to `$DSH_HOME/profiles/<profile>/cordis.patch.yml`. The install adds no row for you:
-
-```sh
-dsh plugin --profile headless add @deepseek-ai/dsh-subagent-acp@alpha @deepseek-ai/dsh-tool-subagent@alpha
-```
-
-```yaml
-- insert:
-    - id: subagent-acp-zycode
-      name: '@deepseek-ai/dsh-subagent-acp'
-      config:
-        providerName: zycode
-        command: uvx
-        args: ['--from', 'pi-agent-cli-lc', '--with', 'pi-agent-core-lc[deepseek]', 'pi-agent-cli']
-        permission: reject
-        env:
-          PI_HOME: /absolute/path/to/zycode-home
-    - id: tool-subagent-zycode
-      name: '@deepseek-ai/dsh-tool-subagent'
-      config:
-        provider: zycode
-        toolName: subagent_zycode
-        maxDepth: provider-managed
-```
-
-The model then has a tool `subagent_zycode` (`description`, `prompt`, optional `cwd`). It returns a child id at once; the final text of zycode comes back as a completion notice. The child runs in the `cwd` of the call, or in DSH's current directory.
-
-- **Use an isolated `PI_HOME`** for this child, with its own `agent.toml` and `local.env` (set the model and the key once: `PI_HOME=... uvx --from pi-agent-cli-lc --with "pi-agent-core-lc[deepseek]" pi-agent-cli --setup`). DSH removes credential-shaped variables from the child's environment, so the key must be in `local.env` or in `env` above. Without a model the child answers `Error: No model is set. Run the agent with --setup ...`; this client cannot offer the login.
-- **Example model for the isolated home (OpenRouter).** Install the `openai` extra in the `args` (`--with 'pi-agent-core-lc[openai]'`) and put this in `agent.toml`; put `OPENROUTER_API_KEY=...` in `local.env` (mode 600):
-
-  ```toml
-  [model]
-  provider = "openai"
-  id = "deepseek/deepseek-v4.1-flash"
-  base_url = "https://openrouter.ai/api/v1"
-  api_key_env = "OPENROUTER_API_KEY"
-  ```
-
-  For DSH's own main model, add a provider with `api: openai-completions`, `baseURL: https://openrouter.ai/api/v1` and `apiKeyEnv: OPENROUTER_API_KEY` to the `llm-pi-ai` row. DSH reads the key from its own environment. A model that reasons by default can use all of a small `max_tokens` on thought; keep the limit large.
-- **Permissions.** DSH answers the child's permission requests by its `permission` field, with no question to a person. `reject` (default) denies every request, so zycode in `ask` mode can only use read-only tools (`read`, `grep`, `find`, `ls`). To let it write, set `permission = "always-approve"` in the `agent.toml` of that isolated home; zycode then runs `bash`, `edit` and `write` without asking. Do not use `auto` for this: it is a mode that asks about what its rules and its model check cannot allow, and DSH's `reject` denies those questions.
-- **Warning: do not set `permission: allow` in the DSH row.** zycode asks before it runs a project's own extensions, and the only "yes" it offers is `allow_always` ("Trust and remember"). The DSH client takes the first `allow_once` or `allow_always` option, so it says yes for you, runs the project's code, and saves the answer in `<PI_HOME>/agent/trust.json`. Keep `reject`, and add this to the `agent.toml` of the isolated home so that zycode never asks and never trusts a project:
-
-  ```toml
-  [extensions]
-  default_project_trust = "never"
-  ```
-
-- One process per task: no follow-up messages to a running child, no session resume, and only the final text returns (tool calls and thoughts stay in zycode's own session files under `PI_HOME`).
-
-<a id="not-verified-dsh"></a>
-**Not verified:** zycode's `[deepseek]` extra with a real key and DeepSeek's own API (the real run used the `openai` extra through OpenRouter); a long or multi-step real task, and how other models phrase the delegation; the `ask` mode with a write task and a real model (the write task ran with `permission = "auto"`, which meant "no question" at that time; the same run needs `always-approve` now); a cold `uvx` download; the DSH Web and Desktop apps (only `headless` ran); Windows and macOS. The community plugin `@zaimokuza/dsh-acp-adapter` is a different route: see the next section.
-
-### In DeepSeek Harness (full session, community plugin)
-
-The subagent route above returns only the final text. The community plugin [`@zaimokuza/dsh-acp-adapter`](https://github.com/zaimokuza-yoshiteru/dsh-acp-adapter) (MIT) shows an ACP agent as a full session in the DSH app: messages, tool steps, diffs, permission cards, a model picker, resume. zycode can be that agent.
-
-> **Unofficial.** The plugin is third-party software. DeepSeek has not reviewed or endorsed it, and its README does not list zycode as a tested agent (it lists Devin, CodeBuddy, Antigravity, Claude, Codex, Kimi and Qwen Code). zycode is not affiliated with DeepSeek, with DSH, or with the plugin's author. The plugin works with exactly one DSH version, and DSH is a developer preview.
-
-> **Tested (Linux, DSH Web app in Chrome, real model):** DSH `0.2.1-rc.4` with `@zaimokuza/dsh-acp-adapter` `0.2.1-rc.4.1` (the newest adapter on npm; its `engines.dsh` is exactly `0.2.1-rc.4`), and `pi-agent-cli-lc` 0.8.0 from PyPI. DSH's main model and zycode's model were both OpenRouter `deepseek/deepseek-v4.1-flash`. Newer DSH versions exist (`0.2.1-rc.5`, `0.2.2-alpha.2`). The installer refuses this adapter on `0.2.1-rc.5`, so use the pair above. Details: [Not verified](#not-verified-dsh-community).
-
-Install DSH `0.2.1-rc.4` and the plugin into a profile (here `web`):
-
-```sh
-npm install --prefix ./dsh @deepseek-ai/dsh@0.2.1-rc.4
-export PATH="$PWD/dsh/node_modules/.bin:$PATH"
-dsh plugin --profile web add @zaimokuza/dsh-acp-adapter@0.2.1-rc.4.1
-```
-
-Add zycode as an agent. The "Plugins - ACP adapter - Add Agent" page of the app does this and writes the row below into `$DSH_HOME/profiles/web/cordis.patch.yml`. The page has no field for `loginHint`, so write the row by hand if you want one, and restart `dsh`:
-
-```yaml
-- id: dsh-acp-adapter
-  name: '@zaimokuza/dsh-acp-adapter'
-  config:
-    agents:
-      zycode:
-        name: zycode
-        command: uvx
-        args: ['--from', 'pi-agent-cli-lc', 'pi-agent-cli']
-        env:
-          PI_HOME: /absolute/path/to/zycode-home
-        loginHint: 'PI_HOME=/absolute/path/to/zycode-home uvx --from pi-agent-cli-lc pi-agent-cli --setup'
-```
-
-`uvx` must be on the `PATH` of the `dsh` process (a desktop app may not have your shell `PATH`; then use the absolute path). Then start a new session and pick `zycode · ACP` in the model picker.
-
-- **Key and model.** Set them once in a terminal: `PI_HOME=/absolute/path/to/zycode-home uvx --from pi-agent-cli-lc pi-agent-cli --setup`. It writes `agent.toml` and `local.env` (mode 600) in that folder. DSH removes credential-shaped variables from the child's environment and passes only the `env` of the row, so the key must be in `local.env` (do not put it in the row: the plugin stores the row in a plain file). The model of the test (OpenRouter): provider `OpenAI, or an OpenAI-compatible endpoint`, model `deepseek/deepseek-v4.1-flash`, base URL `https://openrouter.ai/api/v1`, key variable `OPENROUTER_API_KEY`. DSH's own model and key are separate: a zycode session does not use them.
-- **First run, no model or key.** The plugin does not say that it can run a terminal login (its `initialize` request has no `auth` capability), so zycode offers none (`authMethods: []`), and `loginHint` was not shown. The plugin shows `loginHint` only when the agent answers `auth_required`, and zycode does not do that for this client. The session opens, the model picker shows a model named `mock`, and the first prompt gets the answer `Error: No model is set. Run the agent with --setup, or add a [model] table to <PI_HOME>/agent.toml.` Run `--setup` once in a shell, as above. Open the plugin page and press Re-check, then start a new session.
-- **Permissions.** In the default `ask` mode zycode asks for `bash`, `edit` and `write`, and DSH shows its own card with zycode's two options, `Allow once` and `Reject`. `Reject` stops that call (the model may then try another tool and zycode asks again). The plugin's setting "DSH tool approval: Auto approve" did not answer zycode's own tool requests: it covers only requests about DSH tools, and zycode has no access to them (see the MCP note below). Read-only tools (`read`, `grep`, `find`, `ls`) run without a question.
-- **Project trust.** If the project has its own `.pi-python/extensions`, `.pi-python/workflows` or `.pi/SYSTEM.md`, zycode asks before it uses them. DSH shows a question card with the original options, `Don't trust` and `Trust and remember`, and nothing is answered for you. This is different from the subagent route, where a DSH client with `permission: allow` answers "Trust and remember" itself. `Don't trust` is not remembered, so the question comes back in the next session. `Trust and remember` saves the answer in `<PI_HOME>/agent/trust.json`. To never be asked, set `default_project_trust = "never"` in the `[extensions]` table of `agent.toml`.
-- **Models.** The picker group `zycode · ACP` lists the `[model]` table and every `[[models]]` table of `agent.toml`. A model switch in a running session takes effect on the next turn. After a change of `agent.toml`, press Re-check on the plugin page.
-- **Resume, cancel, exit.** After a restart of `dsh`, open an old session and send a prompt: the plugin starts a new agent process with `session/resume`, and zycode remembers the earlier turns. Stop sends `session/cancel`: the turn ends as `cancelled` and a running `bash` command is gone. Ctrl+C and `kill -9` of `dsh` both left no agent process behind (the `kill -9` run had a logging proxy in front of the agent).
-- **MCP notice.** On the first prompt of a session DSH passes one MCP server (its own tools), and prepends about 9 KB of instructions about them to the prompt. zycode has no MCP client in the core, so it says `The client passed 1 MCP server ... To use it, install the pi-mcp-py package.` and the DSH tools are not available. This notice is joined to the next sentence without a space in the chat view.
-- **The plugin's catalog.** The plugin ships a snapshot of the ACP registry and uses it to pre-fill the "Add Agent" form. It never starts an entry with `npx` or `uvx` for you. An entry that has a `uvx` distribution gets the command name of its console script (for example `fast-agent-acp`) and the hint `uv tool install <package>==<version>`, so the tool must be installed first. An entry that has only `binary` distributions gets an empty command (the form cannot be saved until you type one) and a hint that lists the archive URLs of the platforms, or the website. So a registry entry for zycode would not give a one-step start in DSH: type the `command: uvx` row above, or install the program first.
-
-<a id="not-verified-dsh-community"></a>
-**Not verified:** DSH versions other than `0.2.1-rc.4`; Windows and macOS; the DSH Desktop app (only the Web app ran); a cold `uvx` download from a profile with no cache; `session/load`, a fork of a session, and the images, Agent Teams and Auto Review features of the plugin; zycode with `pi-mcp-py` installed, to reach the DSH tools; zycode's `[deepseek]` extra and DeepSeek's own API; `permission = "auto"` or `"always-approve"` in `agent.toml` behind the plugin; the effect of "DSH tool approval: Ask"; long or multi-step tasks; any model other than `deepseek/deepseek-v4.1-flash` for the main run.
-
-## Quick start
-
-```python
-import asyncio
-from pi_agent_core import Agent, Model
-from pi_agent_core.adapters import langchain_stream
-
-
-async def main():
-    agent = Agent(
-        initial_state={
-            "system_prompt": "You are a helpful assistant.",
-            "model": Model(provider="openai", model_id="gpt-4o-mini"),
-        },
-        stream_fn=langchain_stream,
-    )
-
-    agent.subscribe(lambda event, signal: print(event.type))
-
-    await agent.prompt("Hello!")
-    await agent.wait_for_idle()
-
-
-asyncio.run(main())
-```
-
-Requires `OPENAI_API_KEY` (or the env var for your provider).
-
-### OpenAI-compatible gateways
-
-Point `Model.base_url` at any OpenAI-compatible endpoint. When the endpoint streams
-thinking as `reasoning_content` (or `reasoning`: SiliconFlow, DeepSeek, OpenRouter, most
-vLLM gateways), it surfaces as `thinking_delta` events with `provider="openai"` and with
-`provider="deepseek"` alike. Neither sends the thinking back to a gateway. `provider="deepseek"`
-needs `langchain-deepseek`; `provider="openai"` needs only `langchain-openai`:
-
-```python
-model = Model(
-    provider="deepseek",
-    model_id="Qwen/Qwen3-8B",
-    base_url="https://api.siliconflow.cn/v1",
-    context_window=32_000,
-)
-agent = Agent(initial_state={"model": model}, stream_fn=langchain_stream)
-# pass the key explicitly or via env: DEEPSEEK_API_KEY
-```
-
-On DeepSeek's own API (no `base_url`, or one on `deepseek.com`) the thinking switch follows
-`Model.reasoning` and `thinking_level`, and while thinking is on the earlier assistant
-messages' `reasoning_content` is sent back with every request, which DeepSeek requires once
-tools are involved. A gateway gets neither: it is left to its own defaults.
-
-### Structured output
-
-```python
-from pydantic import BaseModel
-
-
-class Person(BaseModel):
-    name: str
-    age: int
-
-
-agent = Agent(
-    initial_state={"model": model},
-    stream_fn=langchain_stream,
-    response_schema=Person,  # or a JSON schema dict
-)
-await agent.prompt("Invent a fictional person.")
-await agent.wait_for_idle()
-
-agent.messages[-1].structured_output  # {'name': ..., 'age': ...} (None if not parseable)
-```
-
-Schema instructions are injected into the system prompt for every provider; OpenAI-style
-providers additionally get native `response_format` enforcement. Streaming stays intact —
-the JSON text still flows as `text_delta` events.
-
-### Production configuration
-
-```python
-from pi_agent_core import Agent, ContextBudget
-
-
-def on_payload(payload: dict):  # outgoing request (pre-call)
-    log.debug("LLM call", model=payload["model"], tools=len(payload["tools"]))
-
-
-async def before_llm_call(context, budget: ContextBudget | None):
-    if budget and budget.fraction > 0.8:
-        return await my_compactor.compact(context)  # durably replaces loop context
-    return None
-
-
-def after_llm_call(context, message):
-    if contains_pii(message):  # guardrail tripwire: raise to abort the run
-        raise PiiDetected()
-
-
-agent = Agent(
-    initial_state={"model": model, "tools": tools},
-    stream_fn=langchain_stream,
-    max_turns=25,  # raises MaxTurnsExceededError -> agent.error_message
-    tool_timeout=120.0,  # per tool call, seconds; times out into an error tool result
-    max_retries=3,  # stream-level retries before the first token
-    on_payload=on_payload,
-    before_llm_call=before_llm_call,
-    after_llm_call=after_llm_call,
-)
-```
-
-Runnable version: [`examples/production_agent.py`](examples/production_agent.py).
-
-## Built-in coding tools
-
-A port of pi's coding-agent tool suite lives in `pi_agent_core.coding_tools`, decoupled
-from the core runtime (tools consume the loop; they are not part of it). Factories bind
-each tool to a working directory:
-
-```python
-from pi_agent_core.coding_tools import create_coding_tools, create_read_only_tools
-
-tools = create_coding_tools("/path/to/project")  # read / bash / edit / write
-audit = create_read_only_tools("/path/to/project")  # read / grep / find / ls
-agent = Agent(initial_state={"model": model, "tools": tools}, stream_fn=langchain_stream)
-```
-
-| Tool | Group | Behavior |
-|------|-------|----------|
-| `read` | both | Text (2000-line / 50KB truncation, `offset`/`limit` paging) and images (magic-number sniffing → image blocks) |
-| `edit` | coding | Exact-text replacement with unique-match guarantee, fuzzy fallback (smart quotes/dashes/trailing whitespace), CRLF/BOM round-trip, unified-diff `details` |
-| `write` | coding | Create/overwrite with automatic parent dirs; per-file mutation queue serializes concurrent writes |
-| `bash` | coding | Real shell (`bash -c`; Git Bash on Windows, `shell_path` override), merged stdout+stderr, tail truncation with full output spilled to a temp file (`details.fullOutputPath`), timeout/abort kill the whole process tree, 100ms-throttled streaming updates |
-| `grep` | read-only | ripgrep-first (`--json` streaming, kills the process at the match limit); pure-Python fallback when `rg` is missing |
-| `find` | read-only | Pure-Python glob walk; basename patterns vs any-depth path patterns (`src/**/*.py`) |
-| `ls` | read-only | Case-insensitive sort, `/` dir suffix, dotfiles, entry limit |
-
-Groups mirror pi: `create_coding_tools(cwd)` (read/bash/edit/write — full file operations
-plus command execution) and `create_read_only_tools(cwd)` (read/grep/find/ls — inspection
-with a no-modification guarantee). Per-tool `create_*_tool(cwd)` factories and
-`create_tool(name, cwd)` / `create_all_tools(cwd)` cover custom mixes. Truncation limits
-are pi's (2000 lines / 50KB, grep lines capped at 500 chars) with actionable notices
-("Use offset=N to continue") so the model can page through anything that was cut.
-
-### Using LangChain / MCP tools
-
-Any LangChain `BaseTool` — including MCP tools produced by `langchain-mcp-adapters` —
-plugs into the same loop through the adapter:
-
-```python
-from langchain_core.tools import tool
-from pi_agent_core.adapters import from_langchain_tool, from_langchain_tools
-
-
-@tool
-def get_weather(city: str) -> str:
-    """Get the current weather for a city."""
-    return f"Sunny in {city}"
-
-
-agent = Agent(
-    initial_state={"model": model, "tools": [from_langchain_tool(get_weather)]},
-    stream_fn=langchain_stream,
-)
-```
-
-Parameter schemas come from `tool_call_schema` (LangChain-injected arguments are
-excluded); results normalize to pi content blocks (plain strings, content-block lists,
-base64 images); `content_and_artifact` artifacts land in `details["artifact"]`; tool
-exceptions bubble into `is_error=True` tool results that the model can react to.
-
-## Custom messages
-
-`AgentMessage` is structurally open: anything with a string `role` flows through the
-loop and persists to the session (`AgentMessageProtocol`, a runtime-checkable Protocol
-in `pi_agent_harness`). The harness ships four custom roles — `bashExecution`,
-`custom`, `branchSummary`, `compactionSummary` — and `harness_convert_to_llm` decides
-how each role reaches the LLM; unknown roles are dropped at that boundary:
-
-```python
-from pydantic import BaseModel
-from pi_agent_harness import AgentMessageProtocol
-from pi_agent_harness.messages import BashExecutionMessage, harness_convert_to_llm
-
-# Built-in custom role: record a shell run in the session/context
-bash = BashExecutionMessage(command="pytest -q", output="97 passed", exitCode=0, timestamp=0)
-await harness.append_message(bash)  # persisted; replayed to the LLM as a user message
-
-
-# Your own role: any object with `role: str` satisfies the protocol
-class DeployNote(BaseModel):
-    role: str = "deployNote"
-    environment: str
-    timestamp: int
-
-
-assert isinstance(DeployNote(environment="staging", timestamp=0), AgentMessageProtocol)
-```
-
-To make a custom role visible to the LLM, wrap `harness_convert_to_llm` (or pass your
-own `convert_to_llm` to the core loop) and map it to a `UserMessage` — the same pattern
-the harness uses for its own roles.
-
-## Events
-
-Agent events (all carry `run_id` and a 1-based `turn_id`):
-
-```
-agent_start → turn_start → message_start/end (user)
-→ message_start(assistant) → message_update* → message_end(assistant)
-→ [tool_execution_start/update/end → message_start/end (toolResult)]
-→ turn_end → ... → agent_end
-```
-
-`message_update` wraps the granular assistant-stream events:
-`text_start/delta/end`, `thinking_start/delta/end`, `toolcall_start/delta/end`.
-End events carry the aggregate (`content` full text / complete `tool_call` block).
-
-## Test
+- `--with` installs the LangChain provider package (`[openai]` or `[anthropic]` for those providers).
+- First run: Zed offers the terminal login "Set up model and API key" (runs `--setup` in a terminal to write `~/.pi-python/agent.toml` and `~/.pi-python/local.env`), or run `uvx --from pi-agent-cli-lc --with "pi-agent-core-lc[deepseek]" pi-agent-cli --setup` directly in a shell. (The Zed login dialog was verified with a scripted ACP client, not yet inside Zed itself.)
+- To configure manually, start from [`packages/pi-agent-cli/agent.example.toml`](packages/pi-agent-cli/agent.example.toml) and supply the API key via environment variables or `~/.pi-python/local.env` (never inside `agent.toml`).
+- To run from a local checkout, set `command` to your venv Python and `args` to `["-m", "pi_agent_cli"]`.
+
+### Headless CLI & Python packages (PyPI)
 
 ```bash
-uv run --extra dev --extra harness python -m pytest  # 418 tests, no API keys needed
-ruff check . && ruff format --check .
+# Install the coding agent CLI + a provider:
+pip install pi-agent-cli-lc
+pip install "pi-agent-core-lc[openai]"     # or [anthropic], [deepseek]
+
+# First-run interactive configuration:
+python -m pi_agent_cli --setup
+
+# Headless one-shot prompt (for scripts & CI):
+python -m pi_agent_cli -p "Explain this codebase" --cwd /path/to/project
+
+# Optional extensions:
+pip install pi-web-access-py          # web search & URL fetch
+pip install pi-goal-x-py              # goal-driven planning (/goal)
+pip install pi-dynamic-workflows-py   # subagent workflow orchestration
+pip install pi-mcp-py                 # MCP servers passed by an ACP editor
 ```
 
-Real-API validation (key via env only). A plain `pytest` leaves the `real_llm` tests out, so keys in your shell never cost anything by accident; `-m real_llm` selects them, and each skips when its key is unset:
+Using the underlying Python agent loop or harness as a library? See [`pi_agent_core/README.md`](pi_agent_core/README.md) and [`packages/pi-agent-harness/README.md`](packages/pi-agent-harness/README.md).
 
-| Purpose | Command | Env vars |
-|---------|---------|----------|
-| Automated regression | `pytest -m real_llm -v` | `REAL_LLM_API_KEY`, optional `REAL_LLM_BASE_URL` / `REAL_LLM_MODEL` |
-| Provider matrix (OpenAI, Anthropic, DeepSeek, SiliconFlow) | `pytest -m real_llm pi_agent_core/tests/test_provider_matrix.py -v` | `OPENAI_API_KEY`, `ANTHROPIC_API_KEY`, `DEEPSEEK_API_KEY`, `REAL_LLM_API_KEY`; CI runs it weekly (`provider-matrix.yml`) |
-| Manual pre-release smoke | `python scripts/smoke_real_api.py` | `SMOKE_API_KEY` (or `REAL_LLM_API_KEY`), `SMOKE_BASE_URL`, `SMOKE_MODEL` |
-| **pi TUI foundation case** | `python scripts/smoke_pelican.py` | `REAL_LLM_API_KEY`; saves SVG to `~/.pi-python/benchmarks/pelican/` — see [docs/benchmarks/PELCAN-BICYCLE.md](docs/benchmarks/PELCAN-BICYCLE.md) |
+<details>
+<summary>Development install (editable)</summary>
 
-Use `.venv-test-real` for pytest real-LLM tests; the smoke script can run from the main `.venv`.
+```bash
+pip install -e ".[dev]"
+pip install -e "./packages/pi-agent-harness"
+pip install -e "./packages/pi-agent-cli"
+pip install -e "./packages/pi-web-access"
+pip install -e "./packages/pi-goal-x"
+pip install -e "./packages/pi-dynamic-workflows"
+pip install -e "./packages/pi-mcp"
+```
+
+</details>
+
+### Other ACP clients (DeepSeek Harness)
+
+zycode can also run inside [DeepSeek Harness](https://github.com/deepseek-ai/deepseek-harness) (`dsh`) as a delegated ACP subagent (`@deepseek-ai/dsh-subagent-acp`) or as a full session via the third-party community plugin (`@zaimokuza/dsh-acp-adapter`). See [docs/DEEPSEEK-HARNESS.md](docs/DEEPSEEK-HARNESS.md) for setup, permission/trust caveats, and verification scope.
+
+## Benchmark
+
+Evaluated on **FrontierHarness 30** (21 Terminal-Bench + 9 DeepSWE tasks across Windows local and WSL2 Docker sandbox runtimes), including a side-by-side comparison with official Pi and documented methodology caveats.
+
+Full report: [FRONTIER-HARNESS-30-EVAL-REPORT.md](docs/benchmarks/FRONTIER-HARNESS-30-EVAL-REPORT.md).
+
+## Development & Testing
+
+```bash
+# Python tests (no API keys required; real_llm tests are excluded by default)
+uv run --extra dev --extra harness python -m pytest
+ruff check . && ruff format --check .
+
+# Rust TUI check (Linux / WSL2)
+cd tui && cargo check -p pi-pager-bin
+
+# VS Code extension check
+cd vscode && npm run check
+```
+
+For real-LLM regression tests, the weekly provider matrix, and smoke scripts, see [`pi_agent_core/README.md#testing`](pi_agent_core/README.md#testing). For contributor conventions and invariants, see [`AGENTS.md`](AGENTS.md).
 
 ## Documentation
 
 | Document | Contents |
 |----------|----------|
-| [AGENTS.md](AGENTS.md) | Project overview, module map, invariants, current status |
-| [docs/DESIGN.md](docs/DESIGN.md) | Project-wide architecture and module design |
-| [docs/PLAN/PLAN-PHASE1.md](docs/PLAN/PLAN-PHASE1.md) | Phase 1 original planning document (historical) |
-| [docs/AUDIT/AUDIT-2026-07-02.md](docs/AUDIT/AUDIT-2026-07-02.md) | Core-layer audit: findings, fixes, Phase 2.5 enhancements |
-| [docs/AUDIT/AUDIT-H1.md](docs/AUDIT/AUDIT-H1.md) ~ [H4](docs/AUDIT/AUDIT-H4.md) | Harness batch audits (H1 session, H2 runtime, H3 compaction, H4 skills/env) |
-| [P0 TUI spike](docs/AUDIT/SPIKE-P0-GROK-TUI.md) | grok pager `x.ai/*` strip inventory |
-| [Phase 2 spec](docs/specs/2026-05-25-phase2-production-enhancements-design.md) | Usage/cost, thinking/reasoning, transform_messages |
-| [Phase 3 spec](docs/specs/2026-07-03-phase3-agent-harness-design.md) | AgentHarness: sessions, compaction, skills, templates, ExecutionEnv |
-| [Phase 3.5 spec](docs/specs/2026-07-03-phase3.5-tool-ecosystem-design.md) | Built-in coding tools + LangChain adapter |
-| [Phase 4 spec](docs/specs/2026-08-25-phase4-coding-agent-cli-design.md) | Coding Agent CLI: forked grok TUI + standard ACP agent |
-| [Phase 5 spec](docs/specs/2026-09-02-phase5-prompt-engine-design.md) | Coding Agent prompt engine: system prompt assembly |
-| [Phase 6 spec](docs/specs/2026-09-24-phase6-extended-integrations-design.md) | Git context injection and multi-provider test matrix |
-| [**TUI & Code-Agent Guide**](docs/TUI-AND-CODE-AGENT.md) | Installation, configuration, usage for `zypi` TUI and `pi_agent_cli` |
-| [Windows notes](docs/WINDOWS.md) | Phase 4 Windows setup, WSL TUI build, spawn/config |
+| [**TUI & Code-Agent Guide**](docs/TUI-AND-CODE-AGENT.md) | Installation, configuration, and usage for `zypi` TUI and `pi-agent-cli-lc` |
+| [**VS Code extension**](vscode/README.md) | `zycode.zycode` features, permissions, thinking menu, settings, and limits |
+| [**ACP CLI package**](packages/pi-agent-cli/README.md) | `pi-agent-cli-lc` entry points, headless flags, config, and setup |
+| [**Core runtime & coding tools**](pi_agent_core/README.md) | `pi-agent-core-lc`: agent loop, LangChain adapter, structured output, guardrails, coding tools, events, pi concept mapping |
+| [**AgentHarness runtime**](packages/pi-agent-harness/README.md) | `pi-agent-harness-lc`: sessions, compaction, custom messages, skills, `LocalExecutionEnv` |
+| [**DeepSeek Harness guide**](docs/DEEPSEEK-HARNESS.md) | Running zycode in DeepSeek Harness (subagent and community ACP adapter) |
+| [Windows notes](docs/WINDOWS.md) | Windows setup, WSL2 TUI build, spawn/config notes |
 | [Benchmark report](docs/benchmarks/FRONTIER-HARNESS-30-EVAL-REPORT.md) | FrontierHarness 30-task evaluation & Pi comparison |
-
-## Concept mapping (pi → Python)
-
-| pi (TypeScript) | pi-python |
-|-----------------|-----------|
-| `@earendil-works/pi-agent-core` | `pi_agent_core` |
-| `packages/agent/src/harness` | `pi_agent_harness` |
-| `@earendil-works/pi-ai` `streamSimple` | `langchain_stream` |
-| `AgentMessage` | `UserMessage` / `AssistantMessage` / `ToolResultMessage` + custom |
-| `Model.baseUrl` | `Model.base_url` |
-| `onPayload` / `onResponse` | `on_payload` / `on_response` |
-| `agent.prompt()` | `await agent.prompt()` |
-| `agent.continue()` | `await agent.continue_()` |
+| [Architecture & specs](docs/DESIGN.md) | Project-wide architecture; detailed phase specs in `docs/specs/` and audits in `docs/AUDIT/` |
+| [AGENTS.md](AGENTS.md) | Repository map, invariants, and development workflows |
 
 ## Roadmap
 
-### Completed
+Core runtime, `AgentHarness`, coding tools, ACP CLI, `zypi` TUI, VS Code extension, and extension packages are all released at `1.0.0` (see [`CHANGELOG.md`](CHANGELOG.md) for the full history).
 
-- **Phase 1 (MVP loop)** — done: `Agent` + `agent_loop` + event protocol + tool execution
-- **Phase 2 (production enhancements)** — done: `transform_messages`, usage/cost, thinking/reasoning
-- **Phase 2.5 (core hardening)** — done: retries, runaway protection, observability, granular events, guardrail hooks, `ContextBudget`, structured output, tool-result images
-- **Phase 3 (AgentHarness)** — done: H1 session tree, H2 runtime, H3 compaction/tree navigation, H4 skills/templates/system prompt/LocalExecutionEnv ([design doc](docs/specs/2026-07-03-phase3-agent-harness-design.md))
-- **Phase 3.5 (tool ecosystem)** — done: all 7 built-in tools (read/bash/edit/write/grep/find/ls), group factories, and the LangChain `BaseTool` adapter ([design doc](docs/specs/2026-07-03-phase3.5-tool-ecosystem-design.md))
-- **Phase 4 (Coding Agent CLI)** — done: `tui/` vendored grok-build fork (Apache-2.0); `pi_agent_cli` standard ACP agent; TUI binary `zypi`; `x.ai/*` vendor RPCs removed; session management (`/new` `/resume` `/quit`); headless `-p`; `config.toml` + Windows notes ([design doc](docs/specs/2026-08-25-phase4-coding-agent-cli-design.md), [Windows](docs/WINDOWS.md), [TUI guide](docs/TUI-AND-CODE-AGENT.md))
-- **Phase 5 (Coding Agent prompt engine)** — done: pi-aligned `build_system_prompt` + tool contributions + context files + `<available_skills>` ([design doc](docs/specs/2026-09-02-phase5-prompt-engine-design.md))
-- **Phase 6 (extended integrations)** — done: git workspace context in the system prompt; opt-in multi-provider live matrix. MCP stays a caller-side `BaseTool` import ([design doc](docs/specs/2026-09-24-phase6-extended-integrations-design.md)); the optional `pi-mcp-py` extension (2026-10) connects the servers an editor passes, and the core, harness and CLI still hold no MCP client ([design doc](docs/specs/2026-10-23-mcp-extension-design.md))
-- **Phase 7 (extension packages)** — done: `pi-web-access-py`, `pi-goal-x-py`, `pi-dynamic-workflows-py` ([design doc](docs/specs/2026-09-22-phase7-extension-api-design.md))
-- **FrontierHarness Eval** — done: 30-task benchmark (21 Terminal-Bench + 9 DeepSWE); Windows + WSL Docker runtimes; side-by-side Pi comparison ([report](docs/benchmarks/FRONTIER-HARNESS-30-EVAL-REPORT.md))
+**Next:**
 
-### Next
-
-- **TUI platform expansion** — planned, no date: a prebuilt `zypi` binary for Windows. There is no macOS x86_64 build of `zypi` and none is planned, and there is no automatic update
+- **TUI platform expansion** — planned, no date: a prebuilt `zypi` binary for Windows. There is no macOS `x86_64` build of `zypi` and none is planned, and there is no automatic update.
 
 ## License
 
-Python packages (`pi-agent-core-lc`, `pi-agent-harness-lc`, `pi-agent-cli-lc`) are **MIT**.
+Python packages (`pi-agent-core-lc`, `pi-agent-harness-lc`, `pi-agent-cli-lc`, and extension packages) and the VS Code extension (`vscode/`) are **MIT**.
 
 The `tui/` directory is a vendored fork of [xai-org/grok-build](https://github.com/xai-org/grok-build) and remains **Apache License 2.0**. See `tui/LICENSE`, `tui/NOTICE`, and `tui/THIRD-PARTY-NOTICES`. `tui/` is not included in Python sdists or wheels.
