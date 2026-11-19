@@ -1,3 +1,4 @@
+import { cleanCodeLine, codeLanguageLabel } from "../core/copy.js";
 import { inlineText, type Align, type Block, type Inline } from "../core/markdown.js";
 import { isSafeLink } from "../core/protocol.js";
 
@@ -5,7 +6,17 @@ type Child = Node | string | null | undefined | false;
 
 export function el<K extends keyof HTMLElementTagNameMap>(
   tag: K,
-  props: { class?: string; text?: string; title?: string; type?: string; disabled?: boolean; dataset?: Record<string, string> } = {},
+  props: {
+    class?: string;
+    text?: string;
+    title?: string;
+    type?: string;
+    disabled?: boolean;
+    ariaLabel?: string;
+    ariaHidden?: boolean;
+    role?: string;
+    dataset?: Record<string, string>;
+  } = {},
   ...children: Child[]
 ): HTMLElementTagNameMap[K] {
   const node = document.createElement(tag);
@@ -14,12 +25,33 @@ export function el<K extends keyof HTMLElementTagNameMap>(
   if (props.title) node.title = props.title;
   if (props.type) node.setAttribute("type", props.type);
   if (props.disabled) node.setAttribute("disabled", "");
+  if (props.ariaLabel) node.setAttribute("aria-label", props.ariaLabel);
+  if (props.ariaHidden) node.setAttribute("aria-hidden", "true");
+  if (props.role) node.setAttribute("role", props.role);
   for (const [key, value] of Object.entries(props.dataset ?? {})) node.dataset[key] = value;
   for (const child of children) {
     if (child === null || child === undefined || child === false) continue;
     node.append(child);
   }
   return node;
+}
+
+/**
+ * Icon + CSS-rendered label copy button. It intentionally contains no text nodes so `textContent`
+ * of surrounding prose/code blocks stays clean and drag-selection never captures button labels.
+ */
+export function copyButton(text: string, ariaLabel = "Copy", extraClass = "", label = "Copy"): HTMLButtonElement {
+  return el(
+    "button",
+    {
+      type: "button",
+      class: ["copy-btn", extraClass].filter(Boolean).join(" "),
+      ariaLabel,
+      title: ariaLabel,
+      dataset: { copy: text, label },
+    },
+    el("span", { class: "copy-icon", ariaHidden: true }),
+  );
 }
 
 /** A link. The click goes to the host (see `main.ts`), which opens only http, https and mailto. */
@@ -35,7 +67,7 @@ function inlineNodes(inline: Inline[]): Node[] {
       case "text":
         return [document.createTextNode(part.text)];
       case "code":
-        return [el("code", { text: part.text })];
+        return [el("code", { class: "inline-code", text: part.text, title: "Click to copy", dataset: { copy: part.text } })];
       case "br":
         return [document.createElement("br")];
       case "strong":
@@ -75,8 +107,27 @@ function blockNodes(block: Block): Node[] {
       const tag = `h${block.level}` as const;
       return [el(tag, {}, ...inlineNodes(block.inline))];
     }
-    case "code":
-      return [el("pre", { class: "code" }, el("code", { text: block.text }))];
+    case "code": {
+      const langLabel = codeLanguageLabel(block.lang);
+      const copyAria = block.lang ? `Copy ${block.lang} code` : "Copy code";
+      const head = el(
+        "div",
+        { class: "code-head" },
+        el("span", { class: "code-lang", dataset: { lang: langLabel } }),
+        copyButton(block.text, copyAria, "code-copy", "Copy"),
+      );
+      const codeEl = el("code");
+      const lines = block.text.split("\n");
+      lines.forEach((line, index) => {
+        if (index > 0) codeEl.append(document.createTextNode("\n"));
+        const lineEl = el("span", { class: "code-line" }, document.createTextNode(line));
+        if (line.trim() !== "") {
+          lineEl.append(copyButton(cleanCodeLine(line, block.lang), "Copy line", "line-copy", ""));
+        }
+        codeEl.append(lineEl);
+      });
+      return [el("div", { class: "code-block" }, head, el("pre", { class: "code" }, codeEl))];
+    }
     case "list": {
       const list = el(block.ordered ? "ol" : "ul", {}, ...block.items.map((item) => el("li", {}, ...renderBlocks(item))));
       if (block.ordered && block.start !== 1) list.setAttribute("start", String(block.start));

@@ -4,7 +4,7 @@
 //   node scripts/webview-harness.mjs out.html [demo]
 import { writeFileSync } from "node:fs";
 import path from "node:path";
-import { fileURLToPath } from "node:url";
+import { fileURLToPath, pathToFileURL } from "node:url";
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 
@@ -26,8 +26,8 @@ const DARK_THEME = `
 }`;
 
 export function buildHarness({ script, demo }) {
-  const cssHref = "file://" + path.join(root, "media", "chat.css");
-  const jsSrc = "file://" + path.join(root, "dist", "webview.js");
+  const cssHref = pathToFileURL(path.join(root, "media", "chat.css")).href;
+  const jsSrc = pathToFileURL(path.join(root, "dist", "webview.js")).href;
   return `<!DOCTYPE html><html><head><meta charset="utf-8"><style>${DARK_THEME}</style>
 <link rel="stylesheet" href="${cssHref}"></head><body><div id="root"></div>${demo ? "" : '<pre id="result"></pre>'}
 <script>
