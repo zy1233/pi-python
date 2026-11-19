@@ -10,6 +10,7 @@ import type {
   SessionNotification,
 } from "./acp-connection.js";
 import { AgentProcess, type StopTimings } from "./agent-process.js";
+import { parseAvailableCommandsUpdate, sameSlashCommands, type SlashCommandInfo } from "./composer.js";
 import { DiffTracker, type DiffInfo } from "./diff-tracker.js";
 import { classifyAuthRequired, classifyTurnFailure, failureNotice, setupText } from "./first-run.js";
 import type { Host } from "./host.js";
@@ -19,9 +20,16 @@ import {
   type AgentCommand,
 } from "./locate.js";
 import {
+  DEFAULT_MENTION_LIMIT,
+  formatPromptWithMentions,
+  type MentionAttachment,
+  type RankedMention,
+} from "./mentions.js";
+import {
   ALWAYS_APPROVE,
   type HostMessage,
   type ModeState,
+  type ModelState,
   type NoticeAction,
   type NoticeLevel,
   type PermissionModeName,
@@ -130,6 +138,8 @@ export class ChatController {
   private cwd: string | undefined;
   private mode: ModeState | undefined;
   private model: string | undefined;
+  private models: ModelState | undefined;
+  private agentCommands: SlashCommandInfo[] = [];
   /** The context window, as the agent last said it (`usage_update`). Not counted here. */
   private usage: UsageState | undefined;
   /** When the prompt of the running turn was sent, and how long the last turn took (our clock). */
@@ -206,6 +216,8 @@ export class ChatController {
     if (this.cwd !== undefined) message.cwd = this.cwd;
     if (this.mode) message.mode = this.visibleMode(this.mode);
     if (this.model !== undefined) message.model = this.model;
+    if (this.models) message.models = { current: this.models.current, options: [...this.models.options] };
+    if (this.agentCommands.length > 0) message.commands = this.agentCommands.map((c) => ({ ...c }));
     if (this.usage) message.usage = { ...this.usage };
     const turn = this.turnState();
     if (turn) message.turn = turn;
@@ -535,6 +547,7 @@ export class ChatController {
     const generation = this.generation;
     this.opening = true;
     this.earlyUpdates = [];
+    this.agentCommands = [];
     let response: NewSessionResponse;
     try {
       response = await conn.newSession(cwd);
@@ -565,14 +578,17 @@ export class ChatController {
 
   private readConfigOptions(options: SessionConfigOption[], modesCurrent?: string): void {
     this.mode = undefined;
+    this.models = undefined;
     for (const option of options) {
       if (option.type !== "select") continue;
       const flat = flattenSelect(option);
       if (option.id === "mode") {
         this.mode = { current: String(option.currentValue), options: flat };
       } else if (option.id === "model") {
-        const current = flat.find((choice) => choice.id === String(option.currentValue));
-        this.model = current?.name ?? String(option.currentValue);
+        const currentId = String(option.currentValue);
+        const current = flat.find((choice) => choice.id === currentId);
+        this.model = current?.name ?? currentId;
+        this.models = { current: currentId, options: flat };
       }
     }
     if (!this.mode && modesCurrent !== undefined) {
@@ -620,6 +636,32 @@ export class ChatController {
     if (mode === ALWAYS_APPROVE) await this.enterAlwaysApprove();
     else await this.setSessionMode(mode, true);
     this.emit(this.stateMessage());
+  }
+
+  /** Switches the active model for the open session via ACP `session/set_config_option`. */
+  async applyModel(modelId: string): Promise<void> {
+    const conn = this.conn;
+    const sessionId = this.sessionId;
+    if (!conn || !sessionId || this.status !== "ready" || !this.models) return;
+    const target = this.models.options.find((option) => option.id === modelId);
+    if (!target) return;
+    if (this.models.current === modelId) {
+      this.pushNotice("info", `Model: ${this.model ?? modelId} (already active).`);
+      return;
+    }
+    try {
+      const options = await conn.setConfigOption(sessionId, "model", modelId);
+      if (options.length > 0) {
+        this.readConfigOptions(options);
+      } else {
+        this.models = { ...this.models, current: modelId };
+        this.model = target.name;
+      }
+      this.pushNotice("info", `Model: ${this.model ?? modelId}.`);
+      this.emit(this.stateMessage());
+    } catch (error) {
+      this.pushNotice("warning", `Could not set the model: ${messageOf(error)}`);
+    }
   }
 
   /** `ask` or `auto`. Leaving `always-approve` also puts the start mode of the agent back. */
@@ -715,6 +757,8 @@ export class ChatController {
     }
     await this.stopProcess();
     this.sessionId = undefined;
+    this.models = undefined;
+    this.agentCommands = [];
     this.opening = false;
     this.clearSessionStats();
     this.setStatus("stopped");
@@ -751,6 +795,8 @@ export class ChatController {
     this.conn?.close();
     this.conn = undefined;
     this.sessionId = undefined;
+    this.models = undefined;
+    this.agentCommands = [];
     this.opening = false;
     this.clearSessionStats();
     this.pushNotice("error", text);
@@ -766,10 +812,11 @@ export class ChatController {
   // ----- chat
 
   /** Sends a prompt. Returns `false` if it was not sent (the view should not offer it). */
-  async send(text: string): Promise<boolean> {
+  async send(text: string, mentions: readonly MentionAttachment[] = []): Promise<boolean> {
     const conn = this.conn;
     const sessionId = this.sessionId;
-    if (this.status !== "ready" || !conn || !sessionId || text.trim() === "") return false;
+    const promptText = formatPromptWithMentions(text, mentions);
+    if (this.status !== "ready" || !conn || !sessionId || promptText.trim() === "") return false;
     const dirty = this.cwd !== undefined ? this.host.dirtyFiles(this.cwd) : [];
     if (dirty.length > 0) {
       this.pushNotice(
@@ -779,15 +826,15 @@ export class ChatController {
     }
     this.segmentId = undefined;
     const id = this.nextId("user");
-    this.items.push({ type: "user", id, text });
+    this.items.push({ type: "user", id, text: promptText });
     this.turnStart = this.items.length;
     this.turnStartedAt = this.now();
     this.lastTurnMs = undefined;
-    this.emit({ type: "userMessage", id, text });
+    this.emit({ type: "userMessage", id, text: promptText });
     this.setStatus("busy");
     const generation = this.generation;
     try {
-      const stopReason = await conn.prompt(sessionId, text);
+      const stopReason = await conn.prompt(sessionId, promptText);
       if (generation !== this.generation) return true;
       this.finishTurn(stopReason);
     } catch (error) {
@@ -798,6 +845,19 @@ export class ChatController {
       }
     }
     return true;
+  }
+
+  /** Searches workspace files, folders, and active editor context for `@` mention completion. */
+  async searchMentions(query: string): Promise<RankedMention[]> {
+    if (!this.host.isTrusted() || this.cwd === undefined || !this.host.searchMentions) {
+      return [];
+    }
+    try {
+      return await this.host.searchMentions(this.cwd, query, DEFAULT_MENTION_LIMIT);
+    } catch (error) {
+      this.host.log.warn(`mention search failed: ${messageOf(error)}`);
+      return [];
+    }
   }
 
   private finishTurn(stopReason: string): void {
@@ -1092,6 +1152,7 @@ export class ChatController {
     this.resetTranscript();
     this.opening = true;
     this.earlyUpdates = [];
+    this.agentCommands = [];
     this.setStatus("starting", "Opening the chat");
     await this.closeSessionQuietly(previous);
     let response: Awaited<ReturnType<AcpConnection["loadSession"]>>;
@@ -1209,6 +1270,14 @@ export class ChatController {
           this.emit(this.stateMessage());
         }
         return;
+      case "available_commands_update": {
+        const parsed = parseAvailableCommandsUpdate(update.availableCommands);
+        if (parsed !== undefined && !sameSlashCommands(this.agentCommands, parsed)) {
+          this.agentCommands = parsed;
+          this.emit(this.stateMessage());
+        }
+        return;
+      }
       case "usage_update": {
         // The standard message (ACP v1) for the context window. The SDK has checked its shape already (it
         // drops an update with no `used`), so `readUsageUpdate` only leaves out what the row cannot show.

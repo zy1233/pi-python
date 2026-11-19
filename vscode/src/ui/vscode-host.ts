@@ -5,7 +5,9 @@ import * as vscode from "vscode";
 
 import { agentConfigPath } from "../core/first-run.js";
 import type { ConfirmRequest, Host, Logger, Settings, SetupTerminalRequest } from "../core/host.js";
+import type { RankedMention } from "../core/mentions.js";
 import type { StartModeName } from "../core/protocol.js";
+import { WorkspaceMentions } from "./workspace-mentions.js";
 
 export interface HostInfo {
   extensionPath: string;
@@ -34,12 +36,13 @@ function underFolder(file: string, folder: string): boolean {
 }
 
 /** The `Host` of the core, made of the `vscode` module. */
-export class VsCodeHost implements Host {
+export class VsCodeHost implements Host, vscode.Disposable {
   readonly log: Logger;
   readonly extensionPath: string;
   readonly extensionVersion: string;
   readonly agentVersionPin: string;
   readonly platform = process.platform;
+  private readonly mentions = new WorkspaceMentions();
 
   constructor(
     private readonly channel: vscode.LogOutputChannel,
@@ -127,5 +130,13 @@ export class VsCodeHost implements Host {
 
   showLog(): void {
     this.channel.show(true);
+  }
+
+  searchMentions(folder: string, query: string, limit?: number): Promise<RankedMention[]> {
+    return this.mentions.search(folder, query, limit);
+  }
+
+  dispose(): void {
+    this.mentions.dispose();
   }
 }

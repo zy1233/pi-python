@@ -5,6 +5,7 @@ import { fileURLToPath } from "node:url";
 
 import { ChatController, type ControllerOptions } from "../src/core/chat-controller.js";
 import type { ConfirmRequest, Host, Logger, Settings, SetupTerminalRequest } from "../src/core/host.js";
+import { DEFAULT_MENTION_LIMIT, rankMentions, type MentionCandidate, type RankedMention } from "../src/core/mentions.js";
 import type { HostMessage } from "../src/core/protocol.js";
 
 export const FAKE_AGENT = path.join(path.dirname(fileURLToPath(import.meta.url)), "fake-agent.mjs");
@@ -35,6 +36,7 @@ export interface TestHostOptions {
   setup?: (request: SetupTerminalRequest) => Promise<{ exitCode: number | undefined }>;
   /** The answer to a modal question (default: no). */
   confirm?: boolean | ((request: ConfirmRequest) => boolean);
+  mentions?: MentionCandidate[] | ((folder: string, query: string, limit?: number) => Promise<RankedMention[]> | RankedMention[]);
 }
 
 export function tempDir(registry: string[] | undefined, prefix: string): string {
@@ -95,6 +97,11 @@ export class TestHost implements Host {
   }
   notify(level: "info" | "warning" | "error", text: string): void {
     this.notifications.push({ level, text });
+  }
+  async searchMentions(folder: string, query: string, limit = DEFAULT_MENTION_LIMIT): Promise<RankedMention[]> {
+    if (!this.options.mentions) return [];
+    if (typeof this.options.mentions === "function") return this.options.mentions(folder, query, limit);
+    return rankMentions(this.options.mentions, query, limit);
   }
   cleanup(): void {
     for (const dir of this.tempDirs) rmSync(dir, { recursive: true, force: true });

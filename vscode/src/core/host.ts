@@ -3,6 +3,7 @@
  * tests implement it with plain objects (docs/specs/2026-11-04-vscode-extension-design.md, section 2).
  */
 
+import type { RankedMention } from "./mentions.js";
 import type { StartModeName } from "./protocol.js";
 
 export interface Logger {
@@ -62,4 +63,6 @@ export interface Host {
   confirm(request: ConfirmRequest): Promise<boolean>;
   /** Shows a notification that has no chat to go to (for example a version warning). */
   notify(level: "info" | "warning" | "error", text: string): void;
+  /** Searches files, folders, and active editor context for `@` mentions in `folder`. */
+  searchMentions?(folder: string, query: string, limit?: number): Promise<RankedMention[]>;
 }

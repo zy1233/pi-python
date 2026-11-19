@@ -6,6 +6,17 @@
  * `parseWebviewMessage`: a page script can send anything.
  */
 
+import type { SlashCommandInfo } from "./composer.js";
+import {
+  MAX_MENTIONS,
+  MAX_MENTION_QUERY_CHARS,
+  normalizeRelativePath,
+  type MentionAttachment,
+  type MentionKind,
+  type MentionRange,
+  type RankedMention,
+} from "./mentions.js";
+
 export type Status =
   | "stopped"
   | "starting"
@@ -30,6 +41,11 @@ export interface ModeState {
   /** The mode the session is in. It can be `always-approve`, also when `agent.toml` sets it. */
   current: string;
   /** The values the menu offers. Empty when the agent has no `mode` option. `always-approve` is in the list only when it can be chosen. */
+  options: { id: string; name: string }[];
+}
+
+export interface ModelState {
+  current: string;
   options: { id: string; name: string }[];
 }
 
@@ -94,6 +110,8 @@ export interface StateMessage {
   cwd?: string;
   mode?: ModeState;
   model?: string;
+  models?: ModelState;
+  commands?: SlashCommandInfo[];
   /** The context window, from the agent's `usage_update`. Absent until the agent sends one. */
   usage?: UsageState;
   /** The times of the turn. */
@@ -170,17 +188,20 @@ export type HostMessage =
   | { type: "permissionDone"; requestId: string; outcome: PermissionOutcome; optionId?: string }
   | { type: "notice"; level: NoticeLevel; text: string; actions?: NoticeAction[] }
   | { type: "turnEnd"; stopReason: string }
-  | { type: "diffState"; toolCallId: string; available: boolean };
+  | { type: "diffState"; toolCallId: string; available: boolean }
+  | { type: "mentionResults"; requestId: number; query: string; items: RankedMention[] };
 
 export type WebviewMessage =
   | { type: "ready" }
-  | { type: "send"; text: string }
+  | { type: "send"; text: string; mentions?: MentionAttachment[] }
   | { type: "cancel" }
   | { type: "newChat" }
   | { type: "permissionAnswer"; requestId: string; optionId: string }
   | { type: "showDiff"; toolCallId: string }
   | { type: "setMode"; value: PermissionModeName }
   | { type: "setThinking"; value: ThinkingLevel }
+  | { type: "setModel"; value: string }
+  | { type: "queryMentions"; requestId: number; query: string }
   | { type: "runSetup" }
   | { type: "openGuide" }
   | { type: "openAgentConfig" }
@@ -200,6 +221,48 @@ function shortString(value: unknown, max: number): value is string {
   return typeof value === "string" && value.length > 0 && value.length <= max;
 }
 
+function parseMentionKind(value: unknown): MentionKind | undefined {
+  if (value === "file" || value === "folder" || value === "selection") return value;
+  return undefined;
+}
+
+function parseMentionRange(value: unknown): MentionRange | undefined {
+  if (!isRecord(value)) return undefined;
+  const { startLine, endLine } = value;
+  if (
+    typeof startLine !== "number" ||
+    typeof endLine !== "number" ||
+    !Number.isSafeInteger(startLine) ||
+    !Number.isSafeInteger(endLine) ||
+    startLine < 1 ||
+    endLine < startLine
+  ) {
+    return undefined;
+  }
+  return { startLine, endLine };
+}
+
+function parseMentions(value: unknown): MentionAttachment[] | undefined {
+  if (!Array.isArray(value) || value.length > MAX_MENTIONS) return undefined;
+  const out: MentionAttachment[] = [];
+  for (const entry of value) {
+    if (!isRecord(entry)) return undefined;
+    const kind = parseMentionKind(entry.kind);
+    if (!kind || typeof entry.path !== "string") return undefined;
+    const path = normalizeRelativePath(entry.path, kind);
+    if (!path) return undefined;
+    if (kind === "selection") {
+      const range = parseMentionRange(entry.range);
+      if (!range) return undefined;
+      out.push({ kind, path, range });
+    } else {
+      if (entry.range !== undefined) return undefined;
+      out.push({ kind, path });
+    }
+  }
+  return out;
+}
+
 /** The message, if `value` is a well-formed message of the webview. Unknown types give `undefined`. */
 export function parseWebviewMessage(value: unknown): WebviewMessage | undefined {
   if (!isRecord(value) || typeof value.type !== "string") return undefined;
@@ -213,10 +276,14 @@ export function parseWebviewMessage(value: unknown): WebviewMessage | undefined 
     case "restartAgent":
     case "openLog":
       return { type: value.type };
-    case "send":
+    case "send": {
       if (typeof value.text !== "string") return undefined;
       if (value.text.trim() === "" || value.text.length > MAX_PROMPT_CHARS) return undefined;
-      return { type: "send", text: value.text };
+      if (value.mentions === undefined) return { type: "send", text: value.text };
+      const mentions = parseMentions(value.mentions);
+      if (!mentions) return undefined;
+      return mentions.length > 0 ? { type: "send", text: value.text, mentions } : { type: "send", text: value.text };
+    }
     case "permissionAnswer":
       if (!shortString(value.requestId, MAX_ID_CHARS) || !shortString(value.optionId, MAX_ID_CHARS)) {
         return undefined;
@@ -241,6 +308,20 @@ export function parseWebviewMessage(value: unknown): WebviewMessage | undefined 
         return undefined;
       }
       return { type: "setThinking", value: value.value };
+    case "setModel":
+      if (!shortString(value.value, MAX_ID_CHARS)) return undefined;
+      return { type: "setModel", value: value.value };
+    case "queryMentions":
+      if (
+        typeof value.requestId !== "number" ||
+        !Number.isSafeInteger(value.requestId) ||
+        value.requestId < 0 ||
+        typeof value.query !== "string" ||
+        value.query.length > MAX_MENTION_QUERY_CHARS
+      ) {
+        return undefined;
+      }
+      return { type: "queryMentions", requestId: value.requestId, query: value.query };
     case "openLink":
       if (!shortString(value.url, MAX_URL_CHARS)) return undefined;
       return { type: "openLink", url: value.url };

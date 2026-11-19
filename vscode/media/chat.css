@@ -580,6 +580,193 @@ pre.code code {
   padding: 8px 12px 12px;
   border-top: 1px solid var(--vscode-panel-border, var(--vscode-widget-border, transparent));
 }
+.composer-popover {
+  position: absolute;
+  left: 12px;
+  right: 12px;
+  bottom: calc(100% + 4px);
+  max-height: min(260px, 45vh);
+  overflow-y: auto;
+  z-index: 10;
+  background: var(--vscode-editorSuggestWidget-background, var(--vscode-dropdown-background, var(--vscode-editor-background)));
+  color: var(--vscode-editorSuggestWidget-foreground, var(--vscode-foreground));
+  border: 1px solid var(--vscode-editorSuggestWidget-border, var(--vscode-widget-border, var(--vscode-dropdown-border, #454545)));
+  border-radius: 6px;
+  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.32);
+  padding: 4px 0;
+}
+.composer-popover[hidden] { display: none; }
+.popover-head {
+  padding: 4px 10px;
+  font-size: 0.78em;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.03em;
+  color: var(--vscode-descriptionForeground);
+  border-bottom: 1px solid color-mix(in srgb, var(--vscode-widget-border, #888) 40%, transparent);
+  margin-bottom: 2px;
+}
+.popover-item {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  padding: 5px 10px;
+  cursor: pointer;
+  user-select: none;
+}
+.popover-item:hover:not(.active) {
+  background: var(--vscode-list-hoverBackground, rgba(128, 128, 128, 0.14));
+}
+.popover-item.active {
+  background: var(--vscode-editorSuggestWidget-selectedBackground, var(--vscode-list-activeSelectionBackground, var(--vscode-focusBorder)));
+  color: var(--vscode-editorSuggestWidget-selectedForeground, var(--vscode-list-activeSelectionForeground, var(--vscode-foreground)));
+}
+.popover-item.active .popover-detail,
+.popover-item.active .popover-hint {
+  color: inherit;
+  opacity: 0.85;
+}
+.popover-main {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+}
+.popover-title {
+  flex: 0 1 auto;
+  min-width: 0;
+  font-family: var(--vscode-editor-font-family);
+  font-size: 0.92em;
+  font-weight: 500;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.popover-hint {
+  flex: 1 1 0;
+  min-width: 0;
+  font-family: var(--vscode-editor-font-family);
+  font-size: 0.82em;
+  color: var(--vscode-descriptionForeground);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.popover-badge {
+  margin-left: auto;
+  flex: none;
+  font-size: 0.75em;
+  padding: 0 6px;
+  border-radius: 10px;
+  border: 1px solid color-mix(in srgb, var(--vscode-widget-border, #888) 55%, transparent);
+  color: var(--vscode-descriptionForeground);
+  white-space: nowrap;
+}
+.popover-badge.current,
+.popover-badge.selection,
+.popover-badge.active {
+  color: var(--vscode-textLink-foreground, var(--vscode-focusBorder));
+  border-color: color-mix(in srgb, var(--vscode-textLink-foreground, var(--vscode-focusBorder)) 55%, transparent);
+}
+.popover-detail {
+  font-size: 0.82em;
+  color: var(--vscode-descriptionForeground);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.popover-empty {
+  padding: 8px 10px;
+  font-size: 0.88em;
+  color: var(--vscode-descriptionForeground);
+}
+mark.match {
+  background: transparent;
+  color: var(--vscode-editorSuggestWidget-highlightForeground, var(--vscode-textLink-foreground, #4daafc));
+  font-weight: 700;
+}
+.popover-item.active mark.match {
+  color: var(--vscode-editorSuggestWidget-selectedIconForeground, inherit);
+  text-decoration: underline;
+}
+.composer-chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-bottom: 6px;
+}
+.composer-chips[hidden] { display: none; }
+.chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  max-width: 100%;
+  padding: 1px 2px 1px 7px;
+  border-radius: 12px;
+  background: var(--vscode-input-background);
+  border: 1px solid color-mix(in srgb, var(--vscode-widget-border, #888) 70%, transparent);
+  font-size: 0.86em;
+}
+.chip-label {
+  font-family: var(--vscode-editor-font-family);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  max-width: 28ch;
+}
+.chip-remove {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-inline-size: 24px;
+  min-block-size: 24px;
+  padding: 0 4px;
+  border: 0;
+  border-radius: 50%;
+  background: transparent;
+  color: var(--vscode-descriptionForeground);
+  line-height: 1;
+}
+.chip-remove:hover:not(:disabled) {
+  color: var(--vscode-foreground);
+  background: var(--vscode-toolbar-hoverBackground, rgba(128, 128, 128, 0.2));
+}
+.composer-bar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  margin-top: 6px;
+}
+.composer-bar .actions {
+  margin-top: 0;
+}
+.composer-triggers {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+.trigger-btn {
+  min-inline-size: 26px;
+  min-block-size: 24px;
+  padding: 2px 7px;
+  font-family: var(--vscode-editor-font-family);
+  font-weight: 600;
+}
+.mention-icon {
+  inline-size: 14px;
+  block-size: 14px;
+  flex: none;
+  background-color: var(--vscode-descriptionForeground);
+  mask: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16' fill='none' stroke='black' stroke-width='1.4' stroke-linejoin='round'%3E%3Cpath d='M4 2h5.5L13 5.5V14H4z'/%3E%3Cpath d='M9.5 2v3.5H13'/%3E%3C/svg%3E") no-repeat center / contain;
+}
+.mention-icon.folder {
+  mask-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16' fill='none' stroke='black' stroke-width='1.4' stroke-linejoin='round'%3E%3Cpath d='M2 4.5h4.5l1.5 1.5H14v7.5H2z'/%3E%3C/svg%3E");
+}
+.mention-icon.selection {
+  background-color: var(--vscode-textLink-foreground, var(--vscode-focusBorder));
+  mask-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16' fill='none' stroke='black' stroke-width='1.5' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M5.5 4.5L2.5 8l3 3.5M10.5 4.5l3 3.5-3 3.5'/%3E%3C/svg%3E");
+}
 .jump-bottom {
   position: absolute;
   left: 50%;
