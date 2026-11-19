@@ -1,7 +1,7 @@
 # Omarchy Linux: Add zycode (`zypi`) Coding Agent to Agent Menu
 
-> Date: 2026-11-15 (updated 2026-11-16)  
-> Status: **The draft PR `zy1233/omarchy#1` is fixed after a review (2026-11-16). It is not sent upstream.** The review found two defects: `latest` resolved to the oldest release, and the agent id `zycode` was not the name of a command (the command is `zypi`). Both are fixed (commit `67fb4fe`). A test run then showed a third defect: the shell tests could write into a real zycode home (commit `6b1fb25`). Sections 2 to 5 show the PR as it is now.  
+> Date: 2026-11-15 (updated 2026-11-19)  
+> Status: **Sent upstream on 2026-11-19: [`omacom/omarchy#19501`](https://github.com/omacom/omarchy/pull/19501) (4 commits, 14 files, ready for review). The staging PR in the fork is `zy1233/omarchy#1`.** Before this, a review (2026-11-16) found two defects: `latest` resolved to the oldest release, and the agent id `zycode` was not the name of a command (the command is `zypi`). Both are fixed (commit `67fb4fe`). A test run then showed a third defect: the shell tests could write into a real zycode home (commit `6b1fb25`). On 2026-11-19 the branch was rebased on `quattro` (`fc781d3`) and got a fourth commit, because upstream had added a launcher for each agent. Sections 2 to 5 show the first three commits, as they were before the rebase. Section 6 has the rebase, the fourth commit, and the tests on a real Omarchy system.  
 > Upstream target: `omacom/omarchy` (`quattro` branch)  
 > Component: Omarchy desktop coding agent menu & launcher  
 
@@ -467,3 +467,53 @@ A local server took the place of GitHub. It served the real release list of `zy1
 - The real `v1.0.0` archive was not downloaded through mise. GitHub's asset download from the test machine ran at about 20 KB/s. The archive layout comes from `packaging/agent/build.py` (`pack_bundle`).
 - The aarch64 archive, and the first use on a real Omarchy desktop (Hyprland, the menu in the live shell).
 - A new release has its archives a few minutes after its tag (the agent-binaries workflow attaches them after the Release workflow). In that time `latest` can name a version that has no archive yet.
+
+---
+
+## 6. Real Omarchy system, rebase and upstream PR (2026-11-19)
+
+### A. Machine and method
+
+- A new Omarchy 4.5.0 install (Arch Linux, x86_64), real mise 2026.11.7, real GitHub. The network was slow (about 100 KB/s at first). A full clone of `omarchy` failed twice, so the test checkout was a sparse, blobless clone of the PR branch (no `themes/` wallpapers).
+- The PR was read with the public GitHub API. `gh` was logged in later.
+
+### B. Tests at commit `6b1fb25` (before the rebase)
+
+- `default-agent-test.sh` 48 ok, 0 not ok. The other related files also have no `not ok`: `agent-instructions` 5, `preinstalls` 15, `mise-dev-env` 7, `remove-ai` 35, `agent-account` 32, `first-run` 5, `agent-invitation` 2, `crash-capture` 28, `mise-provision` 2 (with real mise).
+- `i18n-test.sh`: 204 ok, 1 not ok (`every cli catalog key is referenced`, key `about.days`). The test stops at that point. The PR base commit gives the same result (the base was made by putting the 9 changed files back to their state before the PR). So the PR does not cause it. The first run on WSL had a full checkout and gave 401 ok, 0 not ok, so the sparse checkout can be the cause.
+- **Real archive.** `mise install http:zycode` with the declaration of the PR (isolated mise directories) downloaded the real `zycode-linux-x86_64-1.0.0.tar.gz` (166 MB). `latest` is `1.0.0`. The install directory holds two files: `zypi` and `zycode-agent`. `zypi --version` prints `zypi 1.0.0 (037b162ea59a)`. `zypi --help` lists `--always-approve`.
+- **Real system.** With the `bin/` of the PR first in `PATH`, and only the last `omarchy-agent` call stubbed (no terminal):
+  - `omarchy-default-agent --install zycode` ran `mise use -g http:zycode[...]`, wrote `~/.config/mise/config.toml`, and saved `zypi` in `~/.config/omarchy/defaults/agent`.
+  - After `mise reshim`, `zypi` is a shim, and the real `omarchy-cmd-missing zypi` says present. `omarchy-cmd-missing zycode` says missing, as designed.
+  - `omarchy-agent --prompt ping` runs `zypi --always-approve -- ping` with `--app-id=org.omarchy.agent`.
+  - `omarchy-agent-instructions` made `~/.pi-python/agent/AGENTS.md`, linked to the shared `AGENTS.md`.
+- **A wrong conclusion, found and removed.** After the first run, `command -v zypi` found nothing, and it looked like a defect of the PR. The cause was the test itself: the install directory was copied from the earlier download without mise's `.mise.backend.toml`, so `mise reshim` did not know the tool. With the file, `mise reshim` made the shims for `zypi` and `zycode-agent`. The `mise use -g` path (a system whose `/etc/mise` has no `http:zycode` line) makes shims for both names. The declared path (`lazy_bins = ["zypi"]`) makes one.
+
+### C. Rebase on `quattro` (`fc781d3`) and the fourth commit
+
+- The 3 commits were rebased on `quattro` (172 upstream commits ahead) without conflicts. The compare API cuts its file list at 300 files, so it did not show which of the PR files had changed upstream; four of them had.
+- After the rebase, `default-agent-test.sh` failed at `installing zypi adds a launcher that starts it`. Upstream now gives each agent a launcher (`bin/omarchy-agent-launcher`, `default/applications/omarchy-agent-<agent>.desktop`), and a test checks that its icon is in both icon sets (`icons/papercraft`, `icons/arcade`) and in `applications/icons`. (This check needs `icons/` and `applications/` in the checkout.)
+- The fourth commit (`d296bd3`) adds:
+  - `default/applications/omarchy-agent-zypi.desktop` (copied from the Pi entry: `Exec=omarchy-agent --agent zypi --app-id=org.omarchy.zypi`).
+  - `icons/papercraft/omarchy-agent-zypi.svg.tpl`: the prompt and the cursor block of the zycode logo (`web/public/favicon.svg`) in the terminal window of the Pi icon, with a hard shadow.
+  - `icons/arcade/omarchy-agent-zypi.svg.tpl`: the same in 8-bit pixels on the 16 by 16 grid (made by a small script from a pixel map).
+  - `applications/icons/omarchy-agent-zypi.png`: the Papercraft template drawn in the default colors (Tokyo Night). The recipe was checked first: the Pi template drawn with it gives the Pi PNG with 0 different pixels.
+  - A row in `manual/17-ai.md`. The translations are left to the upstream sync.
+- The menu row keeps a Nerd Font glyph. A brand glyph in the Omarchy icon font needs a single-path monochrome SVG and a change to `omarchy.ttf`. It is offered in the PR text, not done.
+- Tests after the rebase: `default-agent-test.sh` **62 ok, 0 not ok**. `theme-templates` 19 ok (it draws every Papercraft template, the new one too). `desktop-entries` 2, `app-icon-scan` 10, `agents-panel` 139, `dock` 48, `launcher-remove` 7, `agent-instructions` 5, `preinstalls` 15, `mise-dev-env` 7, `remove-ai` 35, `agent-account` 38, `first-run` 4, `agent-invitation` 2, `crash-capture` 28, `mise-provision` 2. No `not ok`.
+- `i18n-test.sh`: 204 ok, 1 not ok (`about.days`), as before the rebase. It was not run again on the new base commit.
+- `agent-look-test.sh` did not run: it needs the wallpapers of a theme, which the sparse checkout leaves out.
+
+### D. Publication
+
+- The branch needed the `workflow` scope of the `gh` token to be pushed (the new base has upstream workflow files). The push to the fork was a forced update (`--force-with-lease`, old head `6b1fb25`, kept as the local tag `backup/pre-rebase-6b1fb25`).
+- The fork's `quattro` was synced with upstream, and the fork PR (`zy1233/omarchy#1`, now not a draft) was closed and opened again, so that GitHub counts its base again (it showed 1284 files with the old base). It shows 4 commits and 14 files now.
+- The upstream PR body follows the upstream template (`What changes`, `Verification`, `Screenshots`). It shows the Papercraft PNG from the commit. The Arcade icon has no PNG in the repository, so it has no image.
+- The real system was changed by the tests: `~/.config/mise/config.toml` (a `http:zycode` line; a backup is in `/tmp/mise-config.toml.bak`), the default agent in `~/.config/omarchy/defaults/agent` is `zypi`, and `omarchy-agent-instructions` made `AGENTS.md` links for the installed agents.
+
+### E. Not verified
+
+- The menu row and the launcher in the live shell (Hyprland). The installed 4.5.0 package has neither. A test needs `omarchy dev link` and a reboot.
+- The aarch64 archive.
+- `mise reshim --system` for the declared `lazy_bins`, and the first run through that lazy shim from a clean state (needs `sudo`).
+- The upstream CI for `omacom/omarchy#19501`. Right after the PR was opened, `gh pr checks` listed one check only (`Greptile Review`, pending). The test workflows of `.github/workflows` were not listed yet.
