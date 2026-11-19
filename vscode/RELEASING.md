@@ -15,6 +15,17 @@ This file is the checklist for a release. How the files are made is in `PACKAGIN
 - VS Code on his machine records the install (read on 2026-11-17 from `extensions.json` of the VS Code profile and from the user settings): `zycode.zycode` 1.4.0, target `win32-x64`, source `gallery`, `updated` true, installed at 09:48 Asia/Shanghai (01:48Z). The folder of 1.2.0 is still on disk. The user settings have no `zycode.agentPath`. So 1.4.0 came from the Marketplace as an update from 1.2.0, and the agent was probably the bundled one (the workspace settings were not read).
 - Not verified: the numbers of the Context row against the count of the provider (he did not say that he compared them). What the gateway does with `reasoning_effort = "max"`. A first install of 1.4.0 on a machine that had no earlier version. The first-run setup in a terminal, all macOS flows, Linux in a real VS Code, and the unsigned agent on other machines or under an antivirus.
 
+### 1.2.0 (2026-11-13)
+
+This record was added later, with the release PR of 1.6.0. The numbers come from the notes of the project at the time of the release.
+
+- The pull request is #128 (merge commit `eedee46`, "release 1.2.0 and cap the nesting of inline marks"). 1.2.0 follows 1.0.0 and bundles the same agent (0.9.1).
+- Published by the workflow: run `43385299617` on `main`. The run finished green at 07:28:36Z (10 jobs). The user `zy1233` approved `Publish` in the environment `vscode-publish` at about 15:26 Asia/Shanghai, and the job started at 07:26:41Z. The Publish job took 1 min 55 s: `npm ci` 40 s, Open VSX 07:27:29Z to 07:27:48Z, Marketplace 07:27:48Z to 07:28:34Z.
+- Both registries took the five VSIX files by OIDC on the first try, with no token (`Published zycode.zycode v1.2.0@<target>` on Open VSX, `Published zycode.zycode (<target>) v1.2.0.` on the Marketplace).
+- Time until the version was visible: Open VSX showed 1.0.0 as the latest at 07:29:52Z and 1.2.0 for the five targets at 07:32:52Z (2 to 5 minutes after the last upload). The Marketplace listed 1.0.0 only at 07:32:52Z and all five 1.2.0 targets at 07:36:02Z (at most 7.5 minutes after the last upload).
+- Checked with the public APIs: five targets at 1.2.0 on both registries. On Open VSX `preRelease` is false, `engines.vscode` is `^1.90.0` and `verified` is true. The `.sha256` file of each Open VSX VSIX equals the `sha256sum` line of the Publish log (darwin-arm64 `c1b61222…`, darwin-x64 `59f935b5…`, linux-arm64 `efe497ca…`, linux-x64 `e531cc67…`, win32-x64 `695ccab1…`). The Marketplace shows no hash, so it was not compared there. The 16 check runs of `eedee46` all passed (Ruff, pytest on Python 3.11 to 3.13, the site check and build, the extension run, and the zycode.dev deploy).
+- Not verified: an install of 1.2.0 in a real VS Code (the owner's Windows test of 2026-11-12 covered 1.0.0 only), and the update from 1.0.0 to 1.2.0 in practice. The owner's later test of 1.4.0 (see above) came as an update from 1.2.0, so 1.2.0 was on his machine, but he did not test it by itself.
+
 ### 1.0.0 (2026-11-12)
 
 - Published by the workflow `.github/workflows/vscode-extension.yml`: run `43181052994` on `main`, commit `8b0e50c`. The run finished green at 08:20Z.
@@ -44,7 +55,7 @@ This file is the checklist for a release. How the files are made is in `PACKAGIN
 
 - A release and a pre-release are two lines of the same extension. The version decides which one a user gets. The Marketplace rule: use **even minor numbers for releases** (`1.0.0`, `1.2.0`) and **odd minor numbers for pre-releases** (`1.1.0`, `1.1.1`). A user on the pre-release channel gets the highest version of both lines. A user on the release channel gets the highest release.
 - `1.0.0` is above `0.1.0`, so the pre-release `0.1.0` updates to `1.0.0`. `1.0.0` has no pre-release flag: the VSIX is made without `--pre-release`, the workflow calls `vsce publish` without it, and `scripts/check-vsix.mjs` fails a VSIX that has the flag.
-- The versions in use: `1.0.0`, `1.2.0` and `1.4.0` (releases), and `0.1.0` (pre-release). After `1.4.0`, the next pre-release line is `1.5.x`, and the next stable release is `1.6.0` (or `1.4.1` for a fix). A pre-release needs a new input in the workflow and the flag in `scripts/package.mjs` first. Do that in its own pull request.
+- The versions in use: `1.0.0`, `1.2.0`, `1.4.0` and `1.6.0` (releases), and `0.1.0` (pre-release). After `1.6.0`, the next pre-release line is `1.7.x`, and the next stable release is `1.8.0` (or `1.6.1` for a fix). A pre-release needs a new input in the workflow and the flag in `scripts/package.mjs` first. Do that in its own pull request.
 - A version cannot be published twice or changed. If a published version is wrong, publish a higher one.
 
 ## Before the run

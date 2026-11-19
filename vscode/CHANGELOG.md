@@ -1,5 +1,20 @@
 # Changelog
 
+## 1.6.0 (2026-11-19)
+
+Stable release. It follows 1.4.0 and has the same bundled agent (1.0.0). A user of 1.4.0 gets it as an update. The agent was not changed.
+
+### New
+
+- **Copy buttons in the chat.** A code block has a header with its language and a **Copy** button for the whole block. Each line of a code block has its own copy button, which shows when the pointer is on the line or the button has focus. For a shell block (`sh`, `bash`, `zsh`, `powershell`, `cmd` and the like) and for a block with no language, the line copy takes off a leading `$ ` or `PS> `, so you can paste the command into a terminal. The whole-block copy keeps the text as it is. A message has a **Copy message** button. A tool card has a button that copies its command (or its path, or its title when there is neither), and the output of a command has a **Copy output** button. Click an inline `code` span, or the summary line of a question card, to copy it (a click that ends a text selection does not copy). A link is not changed: it still opens through VS Code. When the clipboard is not available, the button shows **Copy failed**. A screen reader hears "Copied" or "Copy failed".
+- A **↓ Latest** button shows above the message box when you have scrolled up from the end of the chat. It goes to the newest message. Sending a message also goes to the end.
+
+### Changed
+
+- The chat has a new look: message headers, a card for your messages, tables and quotes with borders and colours that follow the VS Code theme, tool cards with a colour stripe for the state of the call (done, running, failed), and a thinking block that you open and close with an arrow (`…` shows while the model only thinks). Text in a code block, a link and the other old behaviour are unchanged.
+- The message box grows with its text, up to 35 % of the height of the view. This needs a VS Code that has Chromium 123 or later. An older VS Code (1.90 and later still work) keeps the fixed height of three lines.
+- **Enter** no longer sends a message while an input method (IME) is composing text, also in a browser engine that reports only `keyCode` 229 for the composing key.
+
 ## 1.4.0 (2026-11-16)
 
 Stable release. It follows 1.2.0 and bundles agent 1.0.0 (1.2.0 had 0.9.1). A user of 1.2.0 gets it as an update.
