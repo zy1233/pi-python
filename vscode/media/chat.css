@@ -506,7 +506,7 @@ pre.code code {
 }
 .tool-output pre {
   margin: 0;
-  padding: 8px 38px 8px 10px;
+  padding: 8px 68px 8px 10px;
   border-radius: 4px;
   background: var(--vscode-textCodeBlock-background);
   white-space: pre-wrap;
