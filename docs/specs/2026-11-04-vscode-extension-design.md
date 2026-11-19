@@ -221,7 +221,7 @@ All messages are JSON objects with a string `type`. The types live in one file (
 | `diffState` | `toolCallId`, `available` | Updates the **Show diff** button. |
 | `mentionResults` | `requestId`, `query`, `items[]` (`{kind, path, range?, label, detail, ...}`) | Filtered workspace file, folder, and selection candidates for an `@` composer query. |
 
-`toolCall` object: `{id, title, kind, status, rawInput?, text?, terminal?: {output, exitCode?}, paths?, canDiff?, diffNote?}`. `text` holds non-terminal text blocks and is omitted while `terminal` output is active. It is plain text.
+`toolCall` object: `{id, title, kind, status, rawInput?, text?, terminal?: {output, exitCode?}, canDiff?}`. `text` holds non-terminal text blocks and is omitted while `terminal` output is active. It is plain text.
 
 ### 6.2 Webview to host
 
