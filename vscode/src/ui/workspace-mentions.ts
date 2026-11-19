@@ -3,6 +3,13 @@ import path from "node:path";
 import * as vscode from "vscode";
 
 import {
+  DEFAULT_MENTION_EXCLUDES,
+  buildFindFilesExcludeGlob,
+  createPathFilter,
+  expandExcludePattern,
+  parseGitignorePatterns,
+} from "../core/mention-excludes.js";
+import {
   DEFAULT_MENTION_LIMIT,
   deriveFolders,
   mentionDetail,
@@ -14,20 +21,9 @@ import {
   type RankedMention,
 } from "../core/mentions.js";
 
-const CACHE_TTL_MS = 15_000;
+const CACHE_TTL_MS = 300_000;
 const MAX_INDEX_FILES = 5000;
-
-const DEFAULT_EXCLUDES = [
-  "**/.git/**",
-  "**/node_modules/**",
-  "**/.venv/**",
-  "**/venv/**",
-  "**/__pycache__/**",
-  "**/target/**",
-  "**/.vsix-cache/**",
-  "**/.next/**",
-  "**/.nuxt/**",
-];
+const MAX_GITIGNORE_BYTES = 128 * 1024;
 
 interface CachedIndex {
   folder: string;
@@ -41,23 +37,32 @@ function underFolder(file: string, folder: string): boolean {
   return relative !== "" && !relative.startsWith("..") && !path.isAbsolute(relative);
 }
 
+function relativePosix(file: string, folder: string): string | undefined {
+  if (!underFolder(file, folder)) return undefined;
+  return path.relative(folder, file).replace(/\\/g, "/").replace(/\/+$/, "");
+}
+
 function collectConfigExcludes(folderUri: vscode.Uri, target: Set<string>): void {
   for (const section of ["files", "search"] as const) {
     const raw = vscode.workspace.getConfiguration(section, folderUri).get<Record<string, unknown>>("exclude");
     if (!raw || typeof raw !== "object") continue;
     for (const [pattern, enabled] of Object.entries(raw)) {
       if (enabled !== true) continue;
-      const trimmed = pattern.trim();
-      if (trimmed === "" || /[{},]/.test(trimmed)) continue;
-      target.add(trimmed);
+      for (const expanded of expandExcludePattern(pattern)) {
+        target.add(expanded);
+      }
     }
   }
 }
 
-function buildExcludeGlob(folderUri: vscode.Uri): string {
-  const patterns = new Set<string>(DEFAULT_EXCLUDES);
-  collectConfigExcludes(folderUri, patterns);
-  return `{${[...patterns].join(",")}}`;
+async function readRootGitignore(folderUri: vscode.Uri): Promise<{ excludes: string[]; negations: string[] }> {
+  try {
+    const bytes = await vscode.workspace.fs.readFile(vscode.Uri.joinPath(folderUri, ".gitignore"));
+    if (bytes.byteLength > MAX_GITIGNORE_BYTES) return { excludes: [], negations: [] };
+    return parseGitignorePatterns(new TextDecoder("utf-8").decode(bytes));
+  } catch {
+    return { excludes: [], negations: [] };
+  }
 }
 
 /**
@@ -66,6 +71,7 @@ function buildExcludeGlob(folderUri: vscode.Uri): string {
 export class WorkspaceMentions implements vscode.Disposable {
   private cache: CachedIndex | undefined;
   private cacheVersion = 0;
+  private pathFilter: ((relPath: string) => boolean) | undefined;
   private watcherFolder: string | undefined;
   private watcherDisposables: vscode.Disposable[] = [];
   private pendingIndex: { folder: string; version: number; promise: Promise<CachedIndex> } | undefined;
@@ -147,13 +153,16 @@ export class WorkspaceMentions implements vscode.Disposable {
 
   dispose(): void {
     this.disposeWatcher();
-    this.invalidateCache();
+    this.invalidateCache(true);
     this.pendingIndex = undefined;
   }
 
-  private invalidateCache(): void {
+  private invalidateCache(clearFilter = false): void {
     this.cacheVersion++;
     this.cache = undefined;
+    if (clearFilter) {
+      this.pathFilter = undefined;
+    }
   }
 
   private disposeWatcher(): void {
@@ -161,21 +170,39 @@ export class WorkspaceMentions implements vscode.Disposable {
       d.dispose();
     }
     this.watcherFolder = undefined;
+    this.pathFilter = undefined;
   }
 
   private ensureWatcher(folder: string): void {
     if (this.watcherFolder === folder) return;
     this.disposeWatcher();
-    this.invalidateCache();
+    this.invalidateCache(true);
     this.watcherFolder = folder;
+    const onTreeEvent = (uri: vscode.Uri) => {
+      if (uri.scheme !== "file") return;
+      const rel = relativePosix(uri.fsPath, folder);
+      if (!rel) return;
+      if (rel === ".gitignore") {
+        this.invalidateCache(true);
+        return;
+      }
+      if (this.pathFilter?.(rel)) return;
+      this.invalidateCache();
+    };
     const watcher = vscode.workspace.createFileSystemWatcher(new vscode.RelativePattern(folder, "**/*"));
     this.watcherDisposables.push(
       watcher,
-      watcher.onDidCreate(() => {
-        this.invalidateCache();
+      watcher.onDidCreate(onTreeEvent),
+      watcher.onDidDelete(onTreeEvent),
+      watcher.onDidChange((uri) => {
+        if (uri.scheme === "file" && relativePosix(uri.fsPath, folder) === ".gitignore") {
+          this.invalidateCache(true);
+        }
       }),
-      watcher.onDidDelete(() => {
-        this.invalidateCache();
+      vscode.workspace.onDidChangeConfiguration((event) => {
+        if (event.affectsConfiguration("files.exclude") || event.affectsConfiguration("search.exclude")) {
+          this.invalidateCache(true);
+        }
       }),
     );
   }
@@ -196,10 +223,18 @@ export class WorkspaceMentions implements vscode.Disposable {
 
     const build = (async (): Promise<CachedIndex> => {
       const folderUri = vscode.Uri.file(folder);
-      const exclude = buildExcludeGlob(folderUri);
+      const baseExcludes = new Set<string>(DEFAULT_MENTION_EXCLUDES);
+      collectConfigExcludes(folderUri, baseExcludes);
+      const gitignore = await readRootGitignore(folderUri);
+      const findFilesExcludes = new Set<string>(baseExcludes);
+      if (gitignore.negations.length === 0) {
+        for (const pattern of gitignore.excludes) findFilesExcludes.add(pattern);
+      }
+      const exclude = buildFindFilesExcludeGlob(findFilesExcludes);
+      const pathFilter = createPathFilter([...baseExcludes, ...gitignore.excludes], gitignore.negations);
       const uris = await vscode.workspace.findFiles(
         new vscode.RelativePattern(folder, "**/*"),
-        exclude,
+        exclude || undefined,
         MAX_INDEX_FILES,
       );
       const files: string[] = [];
@@ -207,7 +242,7 @@ export class WorkspaceMentions implements vscode.Disposable {
       for (const uri of uris) {
         if (uri.scheme !== "file" || !underFolder(uri.fsPath, folder)) continue;
         const rel = normalizeRelativePath(path.relative(folder, uri.fsPath), "file");
-        if (rel && !seen.has(rel)) {
+        if (rel && !seen.has(rel) && !pathFilter(rel)) {
           seen.add(rel);
           files.push(rel);
         }
@@ -220,6 +255,7 @@ export class WorkspaceMentions implements vscode.Disposable {
         expiresAt: Date.now() + CACHE_TTL_MS,
       };
       if (this.watcherFolder === folder && this.cacheVersion === buildVersion) {
+        this.pathFilter = pathFilter;
         this.cache = index;
       }
       return index;

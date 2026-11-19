@@ -60,7 +60,9 @@ export function activate(context: vscode.ExtensionContext): void {
     view,
     sessions,
     diffs,
-    vscode.window.registerWebviewViewProvider(CHAT_VIEW_ID, view),
+    vscode.window.registerWebviewViewProvider(CHAT_VIEW_ID, view, {
+      webviewOptions: { retainContextWhenHidden: true },
+    }),
     vscode.workspace.registerTextDocumentContentProvider(DIFF_SCHEME, diffs),
   );
 

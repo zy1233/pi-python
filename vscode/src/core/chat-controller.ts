@@ -173,6 +173,7 @@ export class ChatController {
   private readonly sessionListeners = new Set<() => void>();
 
   private items: TranscriptItem[] = [];
+  private readonly toolItemIndices = new Map<string, number>();
   private readonly tools = new ToolCallStore();
   private readonly diffs: DiffTracker;
   private readonly pending = new Map<string, PendingPermission>();
@@ -224,6 +225,7 @@ export class ChatController {
     const thinking = this.thinkingState();
     if (thinking) message.thinking = thinking;
     if (this.status === "needs-setup" && this.setupInfo) message.setup = this.setupInfo;
+    if (this.pending.size > 0) message.pendingPermissions = this.pending.size;
     return message;
   }
 
@@ -649,6 +651,8 @@ export class ChatController {
       this.pushNotice("info", `Model: ${this.model ?? modelId} (already active).`);
       return;
     }
+    const previousUsage = this.usage;
+    this.usage = undefined;
     try {
       const options = await conn.setConfigOption(sessionId, "model", modelId);
       if (options.length > 0) {
@@ -660,6 +664,7 @@ export class ChatController {
       this.pushNotice("info", `Model: ${this.model ?? modelId}.`);
       this.emit(this.stateMessage());
     } catch (error) {
+      if (this.usage === undefined) this.usage = previousUsage;
       this.pushNotice("warning", `Could not set the model: ${messageOf(error)}`);
     }
   }
@@ -930,6 +935,7 @@ export class ChatController {
 
   private resetTranscript(): void {
     this.items = [];
+    this.toolItemIndices.clear();
     this.tools.clear();
     this.diffs.clear();
     this.segmentId = undefined;
@@ -1337,10 +1343,15 @@ export class ChatController {
   private onToolUpdate(update: Record<string, unknown>, replay = false): void {
     // The files may have changed since: a replayed call gets no diff.
     if (!replay) this.diffs.observe(update);
-    const view = this.tools.apply(update);
-    if (!view) return;
+    const applied = this.tools.applyWithDelta(update);
+    if (!applied) return;
+    const { view } = applied;
     this.segmentId = undefined;
-    this.putToolItem(view);
+    const deltaOnly =
+      !replay && applied.pureTerminalAppend && applied.terminalDelta !== undefined
+        ? applied.terminalDelta
+        : undefined;
+    this.putToolItem(view, deltaOnly);
     if (!replay && (view.status === "completed" || view.status === "failed")) {
       const generation = this.generation;
       void this.diffs
@@ -1348,19 +1359,28 @@ export class ChatController {
         .then((available) => {
           if (generation !== this.generation) return;
           const current = this.tools.get(view.id);
-          if (!current || current.canDiff === available) return;
+          if (!current || (current.canDiff ?? false) === available) return;
           this.putToolItem({ ...current, canDiff: available });
         })
         .catch((error: unknown) => this.host.log.warn(`diff failed: ${messageOf(error)}`));
     }
   }
 
-  private putToolItem(view: ToolCallView): void {
+  private putToolItem(view: ToolCallView, deltaOnly?: string): void {
     const stored = this.tools.update(view.id, view);
-    const index = this.items.findIndex((item) => item.type === "tool" && item.toolCall.id === stored.id);
-    if (index >= 0) this.items[index] = { type: "tool", toolCall: stored };
-    else this.items.push({ type: "tool", toolCall: stored });
-    this.emit({ type: "toolCall", toolCall: stored });
+    const index = this.toolItemIndices.get(stored.id);
+    const existing = index === undefined ? undefined : this.items[index];
+    if (index !== undefined && existing?.type === "tool" && existing.toolCall.id === stored.id) {
+      this.items[index] = { type: "tool", toolCall: stored };
+    } else {
+      this.toolItemIndices.set(stored.id, this.items.length);
+      this.items.push({ type: "tool", toolCall: stored });
+    }
+    if (deltaOnly !== undefined) {
+      this.emit({ type: "toolCallOutput", id: stored.id, delta: deltaOnly, status: stored.status });
+    } else {
+      this.emit({ type: "toolCall", toolCall: stored });
+    }
   }
 
   private async onPermissionRequest(
@@ -1383,6 +1403,7 @@ export class ChatController {
       this.segmentId = undefined;
       this.items.push({ type: "permission", request: view });
       this.emit({ type: "permission", ...view });
+      this.emit(this.stateMessage());
       if (signal.aborted) {
         this.settlePermission(requestId, "cancelled");
       } else {
@@ -1443,6 +1464,7 @@ export class ChatController {
         : cancelled(),
     );
     this.emit({ type: "permissionDone", requestId, ...done });
+    this.emit(this.stateMessage());
   }
 
   /** The user's answer to the agent's own project-trust question: a refusal takes Always approve away. */

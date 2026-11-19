@@ -158,3 +158,17 @@ export function statusRowLines(state: Pick<StateMessage, "usage" | "turn" | "cwd
   if (state.cwd) lines.push(`Folder: ${state.cwd}`);
   return lines;
 }
+
+/** Short status bar label when permission/trust questions are waiting for user input. */
+export function approvalStatusText(pendingCount: number | undefined): string | undefined {
+  if (!pendingCount || pendingCount <= 0) return undefined;
+  return pendingCount === 1 ? "approval needed" : `approval needed (${pendingCount})`;
+}
+
+/** Tooltip line when permission/trust questions are waiting for user input. */
+export function approvalTooltipLine(pendingCount: number | undefined): string | undefined {
+  if (!pendingCount || pendingCount <= 0) return undefined;
+  return pendingCount === 1
+    ? "Waiting for your approval in the zycode chat."
+    : `Waiting for your approval on ${pendingCount} requests in the zycode chat.`;
+}

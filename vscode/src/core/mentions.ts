@@ -408,6 +408,27 @@ function isTokenBoundaryChar(ch: string | undefined): boolean {
   return ch === undefined || !/[A-Za-z0-9_./\\-]/.test(ch);
 }
 
+/** Returns whether `text` still contains the formatted `@` token for `item` at token boundaries. */
+export function containsMentionToken(
+  text: string,
+  item: Pick<MentionAttachment, "kind" | "path" | "range">,
+): boolean {
+  const token = formatMentionToken(item);
+  if (token === "" || text === "") return false;
+  let searchFrom = 0;
+  while (searchFrom <= text.length - token.length) {
+    const idx = text.indexOf(token, searchFrom);
+    if (idx < 0) return false;
+    const before = idx > 0 ? text[idx - 1] : undefined;
+    const after = idx + token.length < text.length ? text[idx + token.length] : undefined;
+    if ((before === undefined || !/[A-Za-z0-9_]/.test(before)) && isTokenBoundaryChar(after)) {
+      return true;
+    }
+    searchFrom = idx + 1;
+  }
+  return false;
+}
+
 export function removeMentionToken(text: string, item: MentionAttachment): string {
   const token = formatMentionToken(item);
   if (token === "" || text === "") return text;

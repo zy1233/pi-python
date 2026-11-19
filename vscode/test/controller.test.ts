@@ -173,7 +173,50 @@ describe("chat", () => {
     expect(last.status).toBe("failed");
     expect(last.terminal?.exitCode).toBe(3);
     expect(last.terminal?.output).toContain("hi");
+    expect(last.text).toBeUndefined();
     expect(ofType(messages, "permission")).toHaveLength(0);
+  });
+
+  it("emits incremental toolCallOutput deltas during in_progress terminal streaming", async () => {
+    const { controller, messages } = setup();
+    await controller.start();
+    await controller.send("tool:bash-stream");
+
+    const deltas = ofType(messages, "toolCallOutput");
+    expect(deltas).toEqual([
+      { type: "toolCallOutput", id: "call_bs", delta: "chunk2\n", status: "in_progress" },
+      { type: "toolCallOutput", id: "call_bs", delta: "chunk3\n", status: "in_progress" },
+    ]);
+
+    const calls = ofType(messages, "toolCall");
+    expect(calls.map((c) => c.toolCall.status)).toEqual(["pending", "in_progress", "completed"]);
+    const last = calls.at(-1)!.toolCall;
+    expect(last.terminal).toEqual({ output: "chunk1\nchunk2\nchunk3\n", exitCode: 0 });
+    expect(last.text).toBeUndefined();
+  });
+
+  it("reports pendingPermissions count in state while waiting and clears it on answer or cancel", async () => {
+    const { controller, messages } = setup();
+    await controller.start();
+    expect(controller.stateMessage().pendingPermissions).toBeUndefined();
+
+    const turn = controller.send("tool:write");
+    await waitFor(() => ofType(messages, "permission").length === 1, "the permission card");
+    expect(controller.stateMessage().pendingPermissions).toBe(1);
+    expect(ofType(messages, "state").some((s) => s.pendingPermissions === 1)).toBe(true);
+
+    const card = ofType(messages, "permission")[0]!;
+    controller.answerPermission(card.requestId, "allow-once");
+    await turn;
+    expect(controller.stateMessage().pendingPermissions).toBeUndefined();
+    expect(ofType(messages, "state").at(-1)?.pendingPermissions).toBeUndefined();
+
+    const hung = controller.send("hang");
+    await waitFor(() => ofType(messages, "permission").length === 2, "second permission card");
+    expect(controller.stateMessage().pendingPermissions).toBe(1);
+    await controller.cancel();
+    await hung;
+    expect(controller.stateMessage().pendingPermissions).toBeUndefined();
   });
 
   it("asks for a write, and sends the choice that the user made", async () => {

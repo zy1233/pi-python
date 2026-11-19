@@ -8,6 +8,7 @@ import {
   type HostMessage,
   type WebviewMessage,
 } from "../core/protocol.js";
+import { PermissionFallback } from "./permission-fallback.js";
 
 export const CHAT_VIEW_ID = "zycode.chat";
 
@@ -25,6 +26,7 @@ function nonce(): string {
 export class ChatViewProvider implements vscode.WebviewViewProvider, vscode.Disposable {
   private view: vscode.WebviewView | undefined;
   private readonly subscription: { dispose(): void };
+  private readonly fallback = new PermissionFallback();
   private latestMentionRequest = 0;
 
   constructor(
@@ -38,7 +40,17 @@ export class ChatViewProvider implements vscode.WebviewViewProvider, vscode.Disp
       openAgentConfig(): void;
     },
   ) {
-    this.subscription = controller.onMessage((message) => this.post(message));
+    this.subscription = controller.onMessage((message) => {
+      this.post(message);
+      if (message.type === "permission" && !this.view?.visible) {
+        this.fallback.show(message, {
+          answer: (requestId, optionId) => this.controller.answerPermission(requestId, optionId),
+          reveal: () => this.reveal(),
+        });
+      } else if (message.type === "permissionDone") {
+        this.fallback.forget(message.requestId);
+      }
+    });
   }
 
   resolveWebviewView(view: vscode.WebviewView): void {
@@ -67,6 +79,7 @@ export class ChatViewProvider implements vscode.WebviewViewProvider, vscode.Disp
   }
 
   dispose(): void {
+    this.fallback.clear();
     this.subscription.dispose();
   }
 

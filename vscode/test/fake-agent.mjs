@@ -137,6 +137,14 @@ async function runPrompt(ctx, sessionId, prompt) {
     await notify(text(sessionId, "agent_message_chunk", "done"));
     return "end_turn";
   }
+  if (prompt === "tool:bash-stream") {
+    await notify({ sessionId, update: { sessionUpdate: "tool_call", toolCallId: "call_bs", title: "stream", kind: "execute", status: "pending", rawInput: { command: "stream" }, content: [{ type: "terminal", terminalId: "call_bs" }], _meta: { terminal_info: { terminal_id: "call_bs" } } } });
+    await notify({ sessionId, update: { sessionUpdate: "tool_call_update", toolCallId: "call_bs", status: "in_progress", content: [{ type: "terminal", terminalId: "call_bs" }, { type: "content", content: { type: "text", text: "chunk1\n" } }], _meta: { terminal_output: { terminal_id: "call_bs", data: "chunk1\n" } } } });
+    await notify({ sessionId, update: { sessionUpdate: "tool_call_update", toolCallId: "call_bs", status: "in_progress", content: [{ type: "terminal", terminalId: "call_bs" }, { type: "content", content: { type: "text", text: "chunk1\nchunk2\n" } }], _meta: { terminal_output: { terminal_id: "call_bs", data: "chunk2\n" } } } });
+    await notify({ sessionId, update: { sessionUpdate: "tool_call_update", toolCallId: "call_bs", status: "in_progress", content: [{ type: "terminal", terminalId: "call_bs" }, { type: "content", content: { type: "text", text: "chunk1\nchunk2\nchunk3\n" } }], _meta: { terminal_output: { terminal_id: "call_bs", data: "chunk3\n" } } } });
+    await notify({ sessionId, update: { sessionUpdate: "tool_call_update", toolCallId: "call_bs", status: "completed", content: [{ type: "terminal", terminalId: "call_bs" }, { type: "content", content: { type: "text", text: "chunk1\nchunk2\nchunk3\n" } }], _meta: { terminal_exit: { terminal_id: "call_bs", exit_code: 0 } } } });
+    return "end_turn";
+  }
   if (prompt === "tool:write") {
     const rawInput = { path: "a.txt", content: "hello\n" };
     await notify({ sessionId, update: { sessionUpdate: "tool_call", toolCallId: "call_w", title: "write a.txt", kind: "edit", status: "pending", rawInput } });
@@ -260,6 +268,7 @@ const app = acp
       mode = value;
     } else if (ctx.params.configId === "model") {
       const value = String(ctx.params.value);
+      if (env.FAKE_FAIL_SET_MODEL) throw new acp.RequestError(-32603, "model switch failed");
       if (!parsedModels.some((item) => item.value === value)) throw new acp.RequestError(-32602, `unknown model ${value}`);
       currentModel = value;
     }

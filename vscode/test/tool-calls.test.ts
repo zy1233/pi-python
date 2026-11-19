@@ -24,6 +24,51 @@ describe("ToolCallStore", () => {
       _meta: { terminal_output: { data: "two\n" }, terminal_exit: { exit_code: 3 } },
     });
     expect(view?.terminal).toEqual({ output: "one\ntwo\n", exitCode: 3 });
+    expect(view?.text).toBeUndefined();
+  });
+
+  it("reports pure terminal appends without duplicating text alongside terminal output", () => {
+    const store = new ToolCallStore();
+    const first = store.applyWithDelta({
+      toolCallId: "b",
+      title: "pytest",
+      kind: "execute",
+      status: "pending",
+      rawInput: { command: "pytest" },
+    });
+    expect(first?.pureTerminalAppend).toBe(false);
+
+    const startRunning = store.applyWithDelta({
+      toolCallId: "b",
+      status: "in_progress",
+      content: [{ type: "content", content: { type: "text", text: "line 1\n" } }],
+      _meta: { terminal_output: { data: "line 1\n" } },
+    });
+    expect(startRunning?.pureTerminalAppend).toBe(false);
+    expect(startRunning?.view.text).toBeUndefined();
+
+    const secondChunk = store.applyWithDelta({
+      toolCallId: "b",
+      status: "in_progress",
+      content: [{ type: "content", content: { type: "text", text: "line 1\nline 2\n" } }],
+      _meta: { terminal_output: { data: "line 2\n" } },
+    });
+    expect(secondChunk).toMatchObject({
+      pureTerminalAppend: true,
+      terminalDelta: "line 2\n",
+    });
+    expect(secondChunk?.view.text).toBeUndefined();
+    expect(secondChunk?.view.terminal).toEqual({ output: "line 1\nline 2\n" });
+
+    const done = store.applyWithDelta({
+      toolCallId: "b",
+      status: "completed",
+      content: [{ type: "content", content: { type: "text", text: "line 1\nline 2\n" } }],
+      _meta: { terminal_exit: { exit_code: 0 } },
+    });
+    expect(done?.pureTerminalAppend).toBe(false);
+    expect(done?.view.terminal).toEqual({ output: "line 1\nline 2\n", exitCode: 0 });
+    expect(done?.view.text).toBeUndefined();
   });
 
   it("ignores an update without an id and an unknown status", () => {

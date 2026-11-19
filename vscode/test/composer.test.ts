@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 
 import {
   buildCommandCatalog,
+  canRunClientCommandInStatus,
   detectComposerTrigger,
   parseAvailableCommandsUpdate,
   rankCommands,
@@ -155,6 +156,32 @@ describe("catalog, ranking, and client slash command resolution", () => {
     expect(names).not.toContain("model");
     expect(names).toContain("new");
     expect(names).toContain("setup");
+
+    const askAutoOnly = buildCommandCatalog({
+      mode: {
+        current: "ask",
+        options: [
+          { id: "ask", name: "Ask" },
+          { id: "auto", name: "Auto" },
+        ],
+      },
+    });
+    expect(askAutoOnly.find((c) => c.name === "mode")?.argHint).toBe("ask | auto");
+    expect(buildCommandCatalog(fullState).find((c) => c.name === "mode")?.argHint).toBe("ask | auto | always-approve");
+  });
+
+  it("checks which client slash commands can run in non-ready states", () => {
+    expect(canRunClientCommandInStatus({ type: "openLog" }, "busy")).toBe(true);
+    expect(canRunClientCommandInStatus({ type: "openAgentConfig" }, "error")).toBe(true);
+    expect(canRunClientCommandInStatus({ type: "openGuide" }, "needs-setup")).toBe(true);
+    expect(canRunClientCommandInStatus({ type: "restartAgent" }, "busy")).toBe(true);
+    expect(canRunClientCommandInStatus({ type: "restartAgent" }, "starting")).toBe(false);
+    expect(canRunClientCommandInStatus({ type: "runSetup" }, "needs-setup")).toBe(true);
+    expect(canRunClientCommandInStatus({ type: "runSetup" }, "busy")).toBe(false);
+    expect(canRunClientCommandInStatus({ type: "newChat" }, "busy")).toBe(false);
+    expect(canRunClientCommandInStatus({ type: "newChat" }, "ready")).toBe(true);
+    expect(canRunClientCommandInStatus({ type: "setMode", value: "auto" }, "busy")).toBe(false);
+    expect(canRunClientCommandInStatus({ type: "setModel", value: "gpt-4o" }, "busy")).toBe(false);
   });
 
   it("ranks slash commands and Stage 2 arg options", () => {
