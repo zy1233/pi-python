@@ -1,5 +1,25 @@
+import {
+  buildCommandCatalog,
+  detectComposerTrigger,
+  rankCommands,
+  resolveClientSlashCommand,
+  slashArgOptions,
+  type ComposerCommand,
+  type ComposerTrigger,
+  type SlashArgCommand,
+  type SlashArgOption,
+} from "../core/composer.js";
 import { toolCopyText } from "../core/copy.js";
 import { parseMarkdown } from "../core/markdown.js";
+import {
+  MAX_MENTIONS,
+  formatMentionToken,
+  mentionKey,
+  mentionLabel,
+  removeMentionToken,
+  type MentionAttachment,
+  type RankedMention,
+} from "../core/mentions.js";
 import type {
   HostMessage,
   NoticeAction,
@@ -11,7 +31,7 @@ import type {
 } from "../core/protocol.js";
 import { describeContext, folderName, formatCost, formatDuration } from "../core/status-row.js";
 import { throttle, type Scheduler, type Throttled } from "../core/throttle.js";
-import { copyButton, el, renderBlocks } from "./dom.js";
+import { copyButton, el, highlightedText, renderBlocks } from "./dom.js";
 
 declare function acquireVsCodeApi(): { postMessage(message: WebviewMessage): void };
 
@@ -36,9 +56,44 @@ const header = el("header", { class: "header" });
 const banner = el("section", { class: "banner" });
 const transcript = el("main", { class: "transcript", dataset: { testid: "transcript" } });
 const copyStatus = el("span", { class: "sr-only", role: "status" });
-const input = el("textarea", { class: "input" });
-input.placeholder = "Ask zycode (Enter to send, Shift+Enter for a new line)";
+const inputLabel = el("label", { class: "sr-only", for: "chat-input", text: "Message to zycode" });
+const input = el("textarea", {
+  id: "chat-input",
+  class: "input",
+  role: "combobox",
+  ariaAutocomplete: "list",
+  ariaExpanded: "false",
+  ariaControls: "composer-menu",
+});
+input.placeholder = "Ask zycode (@ to mention, / for commands; Enter to send, Shift+Enter for a new line)";
 input.rows = 3;
+const popover = el("div", {
+  id: "composer-menu",
+  class: "composer-popover",
+  role: "listbox",
+  ariaLabel: "Suggestions",
+  hidden: true,
+});
+const chipsBar = el("div", {
+  class: "composer-chips",
+  role: "list",
+  ariaLabel: "Attached context",
+  hidden: true,
+});
+const mentionTriggerButton = el("button", {
+  class: "trigger-btn secondary",
+  type: "button",
+  text: "@",
+  ariaLabel: "Mention file, folder, or selection",
+  title: "Mention file, folder, or selection (@)",
+});
+const slashTriggerButton = el("button", {
+  class: "trigger-btn secondary",
+  type: "button",
+  text: "/",
+  ariaLabel: "Slash commands",
+  title: "Slash commands (/)",
+});
 const sendButton = el("button", { class: "primary", text: "Send", type: "button" });
 const stopButton = el("button", { class: "secondary", text: "Stop", type: "button" });
 const jumpBottomButton = el("button", {
@@ -49,7 +104,13 @@ const jumpBottomButton = el("button", {
   dataset: { label: "↓ Latest" },
 });
 jumpBottomButton.hidden = true;
-const composer = el("footer", { class: "composer" }, jumpBottomButton, input, el("div", { class: "actions" }, stopButton, sendButton));
+const composerBar = el(
+  "div",
+  { class: "composer-bar" },
+  el("div", { class: "composer-triggers" }, mentionTriggerButton, slashTriggerButton),
+  el("div", { class: "actions" }, stopButton, sendButton),
+);
+const composer = el("footer", { class: "composer" }, jumpBottomButton, popover, chipsBar, inputLabel, input, composerBar);
 root.append(header, banner, transcript, composer);
 
 /**
@@ -83,9 +144,34 @@ const permissionEls = new Map<string, HTMLElement>();
 const permissionViews = new Map<string, PermissionRequestView>();
 let followTail = true;
 
+type MenuItem =
+  | { kind: "slash"; command: ComposerCommand; nameMatches?: number[] }
+  | { kind: "slash-arg"; command: SlashArgCommand; option: SlashArgOption; labelMatches?: number[] }
+  | { kind: "mention"; item: RankedMention };
+
+let activeTrigger: ComposerTrigger | undefined;
+let menuItems: MenuItem[] = [];
+let activeIndex = 0;
+let menuOpen = false;
+let mentionLoading = false;
+let dismissedKey: string | undefined;
+let mentionSeq = 0;
+let mentionTimer: number | undefined;
+let attachments: MentionAttachment[] = [];
+
+function triggerKey(trigger: ComposerTrigger): string {
+  return trigger.kind === "slash-arg"
+    ? `${trigger.kind}:${trigger.command}:${trigger.range.start}:${trigger.query}`
+    : `${trigger.kind}:${trigger.range.start}:${trigger.query}`;
+}
+
+function syncJumpBottom(): void {
+  jumpBottomButton.hidden = followTail || menuOpen;
+}
+
 transcript.addEventListener("scroll", () => {
   followTail = transcript.scrollHeight - transcript.scrollTop - transcript.clientHeight < 40;
-  jumpBottomButton.hidden = followTail;
+  syncJumpBottom();
 });
 
 function scrollToEnd(): void {
@@ -94,7 +180,7 @@ function scrollToEnd(): void {
 
 jumpBottomButton.addEventListener("click", () => {
   followTail = true;
-  jumpBottomButton.hidden = true;
+  syncJumpBottom();
   transcript.scrollTop = transcript.scrollHeight;
 });
 
@@ -350,9 +436,12 @@ function renderBanner(): void {
 function renderComposer(): void {
   const canType = state.status === "ready" || state.status === "busy";
   input.disabled = !canType;
+  mentionTriggerButton.disabled = !canType;
+  slashTriggerButton.disabled = !canType;
   sendButton.disabled = state.status !== "ready";
   stopButton.hidden = state.status !== "busy" && state.status !== "cancelling";
   stopButton.disabled = state.status === "cancelling";
+  if (!canType) closePopover();
 }
 
 function applyState(next: StateMessage): void {
@@ -365,6 +454,9 @@ function applyState(next: StateMessage): void {
   renderHeader();
   renderBanner();
   renderComposer();
+  if (menuOpen && (activeTrigger?.kind === "slash" || activeTrigger?.kind === "slash-arg")) {
+    refreshOpenMenu();
+  }
 }
 
 function fill(node: HTMLElement, text: string): void {
@@ -560,8 +652,11 @@ function resetTranscript(items: TranscriptItem[]): void {
   toolEls.clear();
   permissionEls.clear();
   permissionViews.clear();
+  attachments = [];
+  renderChips();
+  closePopover();
   followTail = true;
-  jumpBottomButton.hidden = true;
+  syncJumpBottom();
   for (const item of items) renderItem(item);
   scrollToEnd();
 }
@@ -604,24 +699,523 @@ function onHostMessage(message: HostMessage): void {
     case "turnEnd":
     case "diffState":
       return;
+    case "mentionResults":
+      if (message.requestId !== mentionSeq || activeTrigger?.kind !== "mention") return;
+      mentionLoading = false;
+      menuItems = message.items.map((item) => ({ kind: "mention", item }));
+      activeIndex = 0;
+      renderPopover();
+      return;
   }
   scrollToEnd();
+}
+
+function clearMentionTimer(): void {
+  if (mentionTimer !== undefined) {
+    window.clearTimeout(mentionTimer);
+    mentionTimer = undefined;
+  }
+}
+
+function syncComboboxAria(): void {
+  input.setAttribute("aria-expanded", menuOpen ? "true" : "false");
+  if (menuOpen && menuItems.length > 0 && activeIndex >= 0 && activeIndex < menuItems.length) {
+    input.setAttribute("aria-activedescendant", `composer-opt-${activeIndex}`);
+  } else {
+    input.removeAttribute("aria-activedescendant");
+  }
+}
+
+function closePopover(): void {
+  clearMentionTimer();
+  mentionLoading = false;
+  activeTrigger = undefined;
+  menuItems = [];
+  activeIndex = 0;
+  menuOpen = false;
+  popover.hidden = true;
+  popover.replaceChildren();
+  syncComboboxAria();
+  syncJumpBottom();
+}
+
+function syncActiveOption(): void {
+  const options = popover.querySelectorAll<HTMLElement>("[role='option']");
+  options.forEach((node, index) => {
+    const isActive = index === activeIndex;
+    node.classList.toggle("active", isActive);
+    node.setAttribute("aria-selected", isActive ? "true" : "false");
+    if (isActive) {
+      node.scrollIntoView?.({ block: "nearest" });
+    }
+  });
+  syncComboboxAria();
+}
+
+function renderPopover(): void {
+  if (!activeTrigger) {
+    closePopover();
+    return;
+  }
+  menuOpen = true;
+  popover.hidden = false;
+  syncJumpBottom();
+
+  const headerText =
+    activeTrigger.kind === "slash"
+      ? "Commands"
+      : activeTrigger.kind === "slash-arg"
+        ? `/${activeTrigger.command} options`
+        : "Context · files, folders, selection";
+  const nodes: Node[] = [el("div", { class: "popover-head", text: headerText })];
+
+  if (menuItems.length === 0) {
+    const emptyText =
+      activeTrigger.kind === "mention"
+        ? mentionLoading
+          ? "Searching workspace…"
+          : "No matching files or folders"
+        : activeTrigger.kind === "slash-arg"
+          ? `No matching options for /${activeTrigger.command}`
+          : "No matching commands";
+    nodes.push(el("div", { class: "popover-empty", role: "status", text: emptyText }));
+    popover.replaceChildren(...nodes);
+    syncComboboxAria();
+    return;
+  }
+
+  if (activeIndex >= menuItems.length) activeIndex = menuItems.length - 1;
+  if (activeIndex < 0) activeIndex = 0;
+
+  menuItems.forEach((entry, index) => {
+    const active = index === activeIndex;
+    const row = el("div", {
+      id: `composer-opt-${index}`,
+      class: active ? "popover-item active" : "popover-item",
+      role: "option",
+      ariaSelected: active ? "true" : "false",
+      dataset: { index: String(index) },
+    });
+
+    if (entry.kind === "slash") {
+      const top = el("div", { class: "popover-main" });
+      const title = el("span", { class: "popover-title" }, document.createTextNode("/"), ...highlightedText(entry.command.name, entry.nameMatches));
+      top.append(title);
+      if (entry.command.argHint) {
+        top.append(el("span", { class: "popover-hint", text: entry.command.argHint }));
+      }
+      top.append(el("span", { class: `popover-badge ${entry.command.source}`, text: entry.command.source === "agent" ? "agent" : "zycode" }));
+      row.append(top);
+      if (entry.command.description !== "") {
+        row.append(el("div", { class: "popover-detail", text: entry.command.description }));
+      }
+    } else if (entry.kind === "slash-arg") {
+      const top = el("div", { class: "popover-main" });
+      top.append(el("span", { class: "popover-title" }, ...highlightedText(entry.option.label, entry.labelMatches)));
+      if (entry.option.current) {
+        top.append(el("span", { class: "popover-badge current", text: "current" }));
+      }
+      row.append(top);
+      if (entry.option.description) {
+        row.append(el("div", { class: "popover-detail", text: entry.option.description }));
+      }
+    } else {
+      const item = entry.item;
+      const top = el("div", { class: "popover-main" });
+      top.append(
+        el("span", { class: `mention-icon ${item.kind}`, ariaHidden: true }),
+        el("span", { class: "popover-title" }, ...highlightedText(item.label, item.labelMatches)),
+      );
+      if (item.badge) {
+        top.append(el("span", { class: `popover-badge ${item.badge}`, text: item.badge }));
+      }
+      row.append(top);
+      if (item.detail !== "") {
+        row.append(el("div", { class: "popover-detail" }, ...highlightedText(item.detail, item.detailMatches)));
+      }
+    }
+    nodes.push(row);
+  });
+
+  popover.replaceChildren(...nodes);
+  syncComboboxAria();
+}
+
+function renderChips(): void {
+  chipsBar.replaceChildren();
+  chipsBar.hidden = attachments.length === 0;
+  for (const att of attachments) {
+    const label = mentionLabel(att);
+    const title =
+      att.kind === "selection" && att.range
+        ? `${att.path} (lines ${att.range.startLine}-${att.range.endLine})`
+        : att.path;
+    const removeBtn = el("button", {
+      class: "chip-remove",
+      type: "button",
+      text: "×",
+      ariaLabel: `Remove ${label}`,
+      title: `Remove ${label}`,
+    });
+    removeBtn.addEventListener("click", () => removeAttachment(att));
+    chipsBar.append(
+      el(
+        "div",
+        { class: "chip", role: "listitem", title },
+        el("span", { class: `mention-icon ${att.kind}`, ariaHidden: true }),
+        el("span", { class: "chip-label", text: label }),
+        removeBtn,
+      ),
+    );
+  }
+}
+
+function addAttachment(attachment: MentionAttachment): void {
+  const key = mentionKey(attachment);
+  if (attachments.some((item) => mentionKey(item) === key)) return;
+  if (attachments.length >= MAX_MENTIONS) return;
+  attachments.push(attachment);
+  renderChips();
+}
+
+function removeAttachment(target: MentionAttachment): void {
+  const key = mentionKey(target);
+  attachments = attachments.filter((item) => mentionKey(item) !== key);
+  input.value = removeMentionToken(input.value, target);
+  renderChips();
+  updateTrigger();
+  input.focus();
+}
+
+function dispatchClientCommand(text: string): boolean {
+  const resolved = resolveClientSlashCommand(text, state);
+  if (!resolved) return false;
+  if (resolved.kind === "message") {
+    send(resolved.message);
+  } else {
+    addNotice(resolved.level, resolved.text);
+    scrollToEnd();
+  }
+  return true;
+}
+
+function requestMentions(query: string): void {
+  clearMentionTimer();
+  const requestId = ++mentionSeq;
+  mentionLoading = true;
+  send({ type: "queryMentions", requestId, query });
+}
+
+function refreshOpenMenu(): void {
+  if (!activeTrigger) return;
+  if (activeTrigger.kind === "slash") {
+    const ranked = rankCommands(buildCommandCatalog(state), activeTrigger.query);
+    menuItems = ranked.map((entry) => ({
+      kind: "slash",
+      command: entry.command,
+      ...(entry.nameMatches ? { nameMatches: entry.nameMatches } : {}),
+    }));
+    renderPopover();
+    return;
+  }
+  if (activeTrigger.kind === "slash-arg") {
+    const command = activeTrigger.command;
+    const opts = slashArgOptions(command, state, activeTrigger.query);
+    menuItems = opts.map((entry) => ({
+      kind: "slash-arg",
+      command,
+      option: entry.option,
+      ...(entry.labelMatches ? { labelMatches: entry.labelMatches } : {}),
+    }));
+    renderPopover();
+  }
+}
+
+function updateTrigger(force = false): void {
+  if (input.disabled) {
+    closePopover();
+    return;
+  }
+  const cursor = input.selectionStart ?? input.value.length;
+  const trigger = detectComposerTrigger(input.value, cursor);
+  if (!trigger) {
+    dismissedKey = undefined;
+    closePopover();
+    return;
+  }
+  const key = triggerKey(trigger);
+  if (!force && dismissedKey === key) {
+    return;
+  }
+  if (dismissedKey !== undefined && dismissedKey !== key) {
+    dismissedKey = undefined;
+  }
+
+  const prev = activeTrigger;
+  const sameKindAndStart = prev !== undefined && prev.kind === trigger.kind && prev.range.start === trigger.range.start;
+  const wasMentionOpen = menuOpen && prev?.kind === "mention";
+  activeTrigger = trigger;
+  if (!sameKindAndStart) {
+    activeIndex = 0;
+  }
+
+  if (trigger.kind === "slash" || trigger.kind === "slash-arg") {
+    clearMentionTimer();
+    mentionLoading = false;
+    refreshOpenMenu();
+    return;
+  }
+
+  if (wasMentionOpen && prev.kind === "mention" && prev.query === trigger.query && !force) {
+    return;
+  }
+
+  if (!wasMentionOpen || trigger.query === "" || force) {
+    requestMentions(trigger.query);
+    renderPopover();
+  } else {
+    clearMentionTimer();
+    mentionLoading = true;
+    renderPopover();
+    const query = trigger.query;
+    mentionTimer = window.setTimeout(() => {
+      if (activeTrigger?.kind === "mention" && activeTrigger.query === query) {
+        requestMentions(query);
+      }
+    }, 40);
+  }
+}
+
+function replaceTriggerRange(trigger: ComposerTrigger, inserted: string): void {
+  const val = input.value;
+  const prefix = val.slice(0, trigger.range.start);
+  const suffix = val.slice(trigger.range.end);
+  const cleanedSuffix = inserted.endsWith(" ") && suffix.startsWith(" ") ? suffix.slice(1) : suffix;
+  input.value = prefix + inserted + cleanedSuffix;
+  const nextCursor = prefix.length + inserted.length;
+  input.setSelectionRange(nextCursor, nextCursor);
+}
+
+function acceptMenuItem(index: number, mode: "enter" | "tab"): void {
+  if (!activeTrigger || index < 0 || index >= menuItems.length) return;
+  const selected = menuItems[index];
+  if (!selected) return;
+
+  const trigger = activeTrigger;
+  const val = input.value;
+  const prefix = val.slice(0, trigger.range.start);
+  const suffix = val.slice(trigger.range.end);
+
+  if (selected.kind === "slash") {
+    const cmd = selected.command;
+    if (!cmd.takesArgs && mode === "enter" && prefix.trim() === "" && suffix.trim() === "" && cmd.source === "client") {
+      if (state.status === "ready") {
+        closePopover();
+        input.value = "";
+        dispatchClientCommand(`/${cmd.name}`);
+      } else {
+        replaceTriggerRange(trigger, `/${cmd.name}`);
+        closePopover();
+      }
+      return;
+    }
+    replaceTriggerRange(trigger, `/${cmd.name} `);
+    closePopover();
+    if (cmd.takesArgs) updateTrigger(true);
+    return;
+  }
+
+  if (selected.kind === "slash-arg") {
+    const argId = selected.option.id;
+    if (mode === "enter" && state.status === "ready" && suffix.trim() === "") {
+      const fullText = prefix + argId;
+      closePopover();
+      input.value = "";
+      dispatchClientCommand(fullText);
+      return;
+    }
+    replaceTriggerRange(trigger, mode === "tab" ? `${argId} ` : argId);
+    closePopover();
+    return;
+  }
+
+  const item = selected.item;
+  if (item.kind === "folder" && mode === "tab") {
+    replaceTriggerRange(trigger, `@${item.path}`);
+    dismissedKey = undefined;
+    updateTrigger(true);
+    return;
+  }
+
+  const attachment: MentionAttachment =
+    item.kind === "selection" && item.range
+      ? { kind: "selection", path: item.path, range: item.range }
+      : { kind: item.kind, path: item.path };
+  const token = formatMentionToken(attachment);
+  replaceTriggerRange(trigger, `${token} `);
+  addAttachment(attachment);
+  closePopover();
 }
 
 function submit(): void {
   const text = input.value;
   if (text.trim() === "" || state.status !== "ready") return;
+  if (attachments.length === 0 && dispatchClientCommand(text)) {
+    closePopover();
+    input.value = "";
+    return;
+  }
+  closePopover();
   followTail = true;
-  jumpBottomButton.hidden = true;
-  send({ type: "send", text });
+  syncJumpBottom();
+  const payload: WebviewMessage =
+    attachments.length > 0 ? { type: "send", text, mentions: [...attachments] } : { type: "send", text };
+  send(payload);
   input.value = "";
+  attachments = [];
+  renderChips();
 }
 
 sendButton.addEventListener("click", submit);
 stopButton.addEventListener("click", () => send({ type: "cancel" }));
+
+mentionTriggerButton.addEventListener("click", () => {
+  if (input.disabled) return;
+  input.focus();
+  const cursor = input.selectionStart ?? input.value.length;
+  const current = detectComposerTrigger(input.value, cursor);
+  if (current?.kind === "mention") {
+    dismissedKey = undefined;
+    updateTrigger(true);
+    return;
+  }
+  const before = input.value.slice(0, cursor);
+  const after = input.value.slice(cursor);
+  const needSpace = before.length > 0 && !/[\s(]$/.test(before);
+  const insert = needSpace ? " @" : "@";
+  input.value = before + insert + after;
+  const nextPos = before.length + insert.length;
+  input.setSelectionRange(nextPos, nextPos);
+  dismissedKey = undefined;
+  updateTrigger(true);
+});
+
+slashTriggerButton.addEventListener("click", () => {
+  if (input.disabled) return;
+  input.focus();
+  const cursor = input.selectionStart ?? input.value.length;
+  const current = detectComposerTrigger(input.value, cursor);
+  if (current && (current.kind === "slash" || current.kind === "slash-arg")) {
+    dismissedKey = undefined;
+    updateTrigger(true);
+    return;
+  }
+  if (input.value.trim() === "") {
+    input.value = "/";
+    input.setSelectionRange(1, 1);
+  } else if (!/^[ \t]*\//.test(input.value)) {
+    input.value = `/ ${input.value}`;
+    input.setSelectionRange(1, 1);
+  } else {
+    const firstSpace = input.value.search(/\s/);
+    const pos = firstSpace >= 0 ? firstSpace : input.value.length;
+    input.setSelectionRange(pos, pos);
+  }
+  dismissedKey = undefined;
+  updateTrigger(true);
+});
+
+popover.addEventListener("mousedown", (event) => {
+  event.preventDefault();
+});
+
+popover.addEventListener("mouseover", (event) => {
+  const target = event.target;
+  if (!(target instanceof Element)) return;
+  const option = target.closest<HTMLElement>("[role='option'][data-index]");
+  if (!option) return;
+  const idx = Number(option.dataset.index);
+  if (Number.isInteger(idx) && idx >= 0 && idx < menuItems.length && idx !== activeIndex) {
+    activeIndex = idx;
+    syncActiveOption();
+  }
+});
+
+popover.addEventListener("click", (event) => {
+  const target = event.target;
+  if (!(target instanceof Element)) return;
+  const option = target.closest<HTMLElement>("[role='option'][data-index]");
+  if (!option) return;
+  const idx = Number(option.dataset.index);
+  if (Number.isInteger(idx)) {
+    acceptMenuItem(idx, "enter");
+    input.focus();
+  }
+});
+
+document.addEventListener("mousedown", (event) => {
+  if (!menuOpen) return;
+  const target = event.target;
+  if (target instanceof Node && composer.contains(target)) return;
+  closePopover();
+});
+
+input.addEventListener("input", () => updateTrigger());
+input.addEventListener("click", () => updateTrigger());
+input.addEventListener("keyup", (event) => {
+  if (event.key === "ArrowLeft" || event.key === "ArrowRight" || event.key === "Home" || event.key === "End") {
+    updateTrigger();
+  }
+});
+
 input.addEventListener("keydown", (event) => {
+  const composing = event.isComposing || event.keyCode === 229;
+  if (composing) {
+    if (
+      event.key === "Enter" ||
+      event.key === "Tab" ||
+      event.key === "ArrowUp" ||
+      event.key === "ArrowDown" ||
+      event.key === "Escape"
+    ) {
+      return;
+    }
+  }
+
+  if (menuOpen) {
+    if (event.key === "Escape") {
+      event.preventDefault();
+      dismissedKey = activeTrigger ? triggerKey(activeTrigger) : undefined;
+      closePopover();
+      return;
+    }
+    if (menuItems.length > 0) {
+      if (event.key === "ArrowDown") {
+        event.preventDefault();
+        activeIndex = (activeIndex + 1) % menuItems.length;
+        syncActiveOption();
+        return;
+      }
+      if (event.key === "ArrowUp") {
+        event.preventDefault();
+        activeIndex = (activeIndex - 1 + menuItems.length) % menuItems.length;
+        syncActiveOption();
+        return;
+      }
+      if (event.key === "Tab") {
+        event.preventDefault();
+        acceptMenuItem(activeIndex, "tab");
+        return;
+      }
+      if (event.key === "Enter" && !event.shiftKey) {
+        event.preventDefault();
+        acceptMenuItem(activeIndex, "enter");
+        return;
+      }
+    }
+  }
+
   if (event.key === "Enter" && !event.shiftKey) {
-    if (event.isComposing || event.keyCode === 229) return;
     event.preventDefault();
     submit();
   }

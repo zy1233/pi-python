@@ -7,26 +7,42 @@ type Child = Node | string | null | undefined | false;
 export function el<K extends keyof HTMLElementTagNameMap>(
   tag: K,
   props: {
+    id?: string;
+    for?: string;
     class?: string;
     text?: string;
     title?: string;
     type?: string;
     disabled?: boolean;
+    hidden?: boolean;
     ariaLabel?: string;
     ariaHidden?: boolean;
+    ariaExpanded?: string;
+    ariaControls?: string;
+    ariaSelected?: string;
+    ariaAutocomplete?: string;
+    ariaActiveDescendant?: string;
     role?: string;
     dataset?: Record<string, string>;
   } = {},
   ...children: Child[]
 ): HTMLElementTagNameMap[K] {
   const node = document.createElement(tag);
+  if (props.id) node.id = props.id;
+  if (props.for) node.setAttribute("for", props.for);
   if (props.class) node.className = props.class;
   if (props.text !== undefined) node.textContent = props.text;
   if (props.title) node.title = props.title;
   if (props.type) node.setAttribute("type", props.type);
   if (props.disabled) node.setAttribute("disabled", "");
+  if (props.hidden) node.hidden = true;
   if (props.ariaLabel) node.setAttribute("aria-label", props.ariaLabel);
   if (props.ariaHidden) node.setAttribute("aria-hidden", "true");
+  if (props.ariaExpanded !== undefined) node.setAttribute("aria-expanded", props.ariaExpanded);
+  if (props.ariaControls) node.setAttribute("aria-controls", props.ariaControls);
+  if (props.ariaSelected !== undefined) node.setAttribute("aria-selected", props.ariaSelected);
+  if (props.ariaAutocomplete) node.setAttribute("aria-autocomplete", props.ariaAutocomplete);
+  if (props.ariaActiveDescendant) node.setAttribute("aria-activedescendant", props.ariaActiveDescendant);
   if (props.role) node.setAttribute("role", props.role);
   for (const [key, value] of Object.entries(props.dataset ?? {})) node.dataset[key] = value;
   for (const child of children) {
@@ -34,6 +50,31 @@ export function el<K extends keyof HTMLElementTagNameMap>(
     node.append(child);
   }
   return node;
+}
+
+/** Splits `text` into text nodes and `<mark class="match">` spans using `textContent` only. */
+export function highlightedText(text: string, indices?: readonly number[]): Node[] {
+  if (!indices || indices.length === 0 || text === "") {
+    return [document.createTextNode(text)];
+  }
+  const matched = new Set<number>();
+  for (const idx of indices) {
+    if (idx >= 0 && idx < text.length) matched.add(idx);
+  }
+  if (matched.size === 0) {
+    return [document.createTextNode(text)];
+  }
+  const nodes: Node[] = [];
+  let i = 0;
+  while (i < text.length) {
+    const isHit = matched.has(i);
+    let j = i + 1;
+    while (j < text.length && matched.has(j) === isHit) j++;
+    const slice = text.slice(i, j);
+    nodes.push(isHit ? el("mark", { class: "match", text: slice }) : document.createTextNode(slice));
+    i = j;
+  }
+  return nodes;
 }
 
 /**

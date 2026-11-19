@@ -38,6 +38,8 @@ if (env.FAKE_TOML && existsSync(env.FAKE_TOML)) {
 if (env.FAKE_TOML) record("start thinking_level=" + startLevel);
 
 let mode = "ask";
+const parsedModels = env.FAKE_MODELS ? JSON.parse(env.FAKE_MODELS) : [{ value: "fake-model", name: "Fake model" }];
+let currentModel = parsedModels[0]?.value ?? "fake-model";
 const cancelled = new Set();
 const cwds = new Map();
 
@@ -61,7 +63,7 @@ function remember(sessionId, role, value) {
 
 function configOptions() {
   const options = [
-    { id: "model", name: "Model", category: "model", type: "select", currentValue: "fake-model", options: [{ value: "fake-model", name: "Fake model" }] },
+    { id: "model", name: "Model", category: "model", type: "select", currentValue: currentModel, options: parsedModels },
   ];
   if (!env.FAKE_NO_MODE) {
     options.push({
@@ -70,6 +72,17 @@ function configOptions() {
     });
   }
   return options;
+}
+
+function advertiseCommands(ctx, sessionId) {
+  if (!env.FAKE_COMMANDS) return;
+  const availableCommands = JSON.parse(env.FAKE_COMMANDS);
+  setTimeout(() => {
+    void ctx.client.notify(acp.methods.client.session.update, {
+      sessionId,
+      update: { sessionUpdate: "available_commands_update", availableCommands },
+    }).catch(() => undefined);
+  }, 5);
 }
 
 const text = (sessionId, kind, value) => ({ sessionId, update: { sessionUpdate: kind, content: { type: "text", text: value } } });
@@ -232,6 +245,7 @@ const app = acp
     }
     const sessionId = `fake-${++sessionCounter}`;
     cwds.set(sessionId, ctx.params.cwd);
+    advertiseCommands(ctx, sessionId);
     return {
       sessionId,
       configOptions: configOptions(),
@@ -244,6 +258,10 @@ const app = acp
       const value = String(ctx.params.value);
       if (env.FAKE_ONLY_ASK_AUTO && value !== "ask" && value !== "auto") throw new acp.RequestError(-32602, `invalid mode ${value}`);
       mode = value;
+    } else if (ctx.params.configId === "model") {
+      const value = String(ctx.params.value);
+      if (!parsedModels.some((item) => item.value === value)) throw new acp.RequestError(-32602, `unknown model ${value}`);
+      currentModel = value;
     }
     return { configOptions: configOptions() };
   })
@@ -269,6 +287,7 @@ const app = acp
     for (const item of entry.history) {
       await ctx.client.notify(acp.methods.client.session.update, replay(entry.id, item.role === "user" ? "user_message_chunk" : "agent_message_chunk", item.text));
     }
+    advertiseCommands(ctx, entry.id);
     return { configOptions: configOptions(), _meta: { "pi/cwd": env.FAKE_LOAD_CWD ?? entry.cwd } };
   })
   .onRequest("_pi/session/delete", raw, (ctx) => {

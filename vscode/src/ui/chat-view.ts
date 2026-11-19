@@ -25,6 +25,7 @@ function nonce(): string {
 export class ChatViewProvider implements vscode.WebviewViewProvider, vscode.Disposable {
   private view: vscode.WebviewView | undefined;
   private readonly subscription: { dispose(): void };
+  private latestMentionRequest = 0;
 
   constructor(
     private readonly extensionUri: vscode.Uri,
@@ -52,7 +53,10 @@ export class ChatViewProvider implements vscode.WebviewViewProvider, vscode.Disp
       if (message) void this.handle(message);
     });
     view.onDidDispose(() => {
-      if (this.view === view) this.view = undefined;
+      if (this.view === view) {
+        this.view = undefined;
+        this.latestMentionRequest = 0;
+      }
     });
   }
 
@@ -74,12 +78,13 @@ export class ChatViewProvider implements vscode.WebviewViewProvider, vscode.Disp
     const controller = this.controller;
     switch (message.type) {
       case "ready":
+        this.latestMentionRequest = 0;
         this.post(controller.stateMessage());
         this.post({ type: "reset", transcript: controller.transcript() });
         if (controller.currentStatus === "stopped") await controller.start();
         return;
       case "send":
-        await controller.send(message.text);
+        await controller.send(message.text, message.mentions);
         return;
       case "cancel":
         await controller.cancel();
@@ -96,6 +101,17 @@ export class ChatViewProvider implements vscode.WebviewViewProvider, vscode.Disp
       case "setThinking":
         await controller.applyThinkingLevel(message.value);
         return;
+      case "setModel":
+        await controller.applyModel(message.value);
+        return;
+      case "queryMentions": {
+        if (message.requestId < this.latestMentionRequest) return;
+        this.latestMentionRequest = message.requestId;
+        const items = await controller.searchMentions(message.query);
+        if (message.requestId !== this.latestMentionRequest) return;
+        this.post({ type: "mentionResults", requestId: message.requestId, query: message.query, items });
+        return;
+      }
       case "runSetup":
         await controller.runSetup();
         return;

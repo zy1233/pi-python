@@ -45,7 +45,7 @@ export function activate(context: vscode.ExtensionContext): void {
   const chat = new ChatController(host);
   controller = chat;
   const status = new StatusBar("zycode.openChat");
-  context.subscriptions.push(channel, status);
+  context.subscriptions.push(host, channel, status);
 
   const diffs = new DiffDocuments(() => chat.diffStore);
   const view = new ChatViewProvider(context.extensionUri, chat, {

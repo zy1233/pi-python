@@ -715,3 +715,291 @@ describe.skipIf(!chrome || !built)("webview: code blocks, copy interactions, and
     });
   });
 });
+
+describe.skipIf(!chrome || !built)("webview: slash commands and @ mentions", () => {
+  const richState = `${state}
+    const modes = [{ id: "ask", name: "Ask" }, { id: "auto", name: "Auto" }];
+    const models = [{ id: "gpt-4o", name: "GPT-4o" }, { id: "deepseek-chat", name: "DeepSeek Chat" }];
+    const commands = [
+      { name: "goal", description: "Start goal-driven planning", inputHint: "<desc>" },
+      { name: "auto-log", description: "Show Auto decisions", inputHint: "<args>" },
+    ];
+    state({ mode: { current: "ask", options: modes }, models: { current: "gpt-4o", options: models }, commands });`;
+
+  it("opens slash popover, navigates with arrows/ARIA, inserts agent commands, and dismisses with Escape", () => {
+    const out = run(`${richState}
+      const input = document.querySelector("textarea");
+      const menu = document.getElementById("composer-menu");
+      input.value = "/";
+      input.setSelectionRange(1, 1);
+      input.dispatchEvent(new Event("input", { bubbles: true }));
+      const openState = {
+        hidden: menu.hidden,
+        expanded: input.getAttribute("aria-expanded"),
+        activeDesc0: input.getAttribute("aria-activedescendant"),
+        options: [...menu.querySelectorAll("[role='option']")].map((el) => el.querySelector(".popover-title").textContent),
+      };
+      input.dispatchEvent(new KeyboardEvent("keydown", { key: "ArrowDown", bubbles: true }));
+      const afterDown = {
+        activeDesc: input.getAttribute("aria-activedescendant"),
+        selected: [...menu.querySelectorAll("[role='option']")].map((el) => el.getAttribute("aria-selected")),
+      };
+      input.dispatchEvent(new KeyboardEvent("keydown", { key: "ArrowUp", bubbles: true }));
+      const afterUp = input.getAttribute("aria-activedescendant");
+      input.dispatchEvent(new KeyboardEvent("keydown", { key: "Enter", bubbles: true }));
+      const afterAccept = {
+        value: input.value,
+        menuHidden: menu.hidden,
+        sends: window.__posted.filter((m) => m.type === "send").length,
+      };
+      input.value = "/auto";
+      input.setSelectionRange(5, 5);
+      input.dispatchEvent(new Event("input", { bubbles: true }));
+      const openBeforeEsc = !menu.hidden;
+      input.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", bubbles: true }));
+      window.__result = {
+        openState,
+        afterDown,
+        afterUp,
+        afterAccept,
+        openBeforeEsc,
+        hiddenAfterEsc: menu.hidden,
+        expandedAfterEsc: input.getAttribute("aria-expanded"),
+      };`);
+    expect(out).toMatchObject({
+      ok: true,
+      openState: { hidden: false, expanded: "true", activeDesc0: "composer-opt-0" },
+      afterDown: { activeDesc: "composer-opt-1" },
+      afterUp: "composer-opt-0",
+      afterAccept: { value: "/goal ", menuHidden: true, sends: 0 },
+      openBeforeEsc: true,
+      hiddenAfterEsc: true,
+      expandedAfterEsc: "false",
+    });
+    const opts = (out.openState as { options: string[] }).options;
+    expect(opts.slice(0, 3)).toEqual(["/goal", "/auto-log", "/new"]);
+    const selected = (out.afterDown as { selected: string[] }).selected;
+    expect(selected[0]).toBe("false");
+    expect(selected[1]).toBe("true");
+  });
+
+  it("supports Stage 2 /mode completion and immediate /new execution", () => {
+    const out = run(`${richState}
+      const input = document.querySelector("textarea");
+      const menu = document.getElementById("composer-menu");
+      input.value = "/mode";
+      input.setSelectionRange(5, 5);
+      input.dispatchEvent(new Event("input", { bubbles: true }));
+      input.dispatchEvent(new KeyboardEvent("keydown", { key: "Enter", bubbles: true }));
+      const stage2Value = input.value;
+      const stage2Options = [...menu.querySelectorAll("[role='option'] .popover-title")].map((n) => n.textContent);
+      input.dispatchEvent(new KeyboardEvent("keydown", { key: "ArrowDown", bubbles: true }));
+      input.dispatchEvent(new KeyboardEvent("keydown", { key: "Enter", bubbles: true }));
+      const afterMode = { value: input.value, hidden: menu.hidden };
+
+      input.value = "/new";
+      input.setSelectionRange(4, 4);
+      input.dispatchEvent(new Event("input", { bubbles: true }));
+      input.dispatchEvent(new KeyboardEvent("keydown", { key: "Enter", bubbles: true }));
+      window.__result = {
+        stage2Value,
+        stage2Options,
+        afterMode,
+        afterNew: { value: input.value, hidden: menu.hidden },
+        posted: window.__posted.slice(1),
+      };`);
+    expect(out).toMatchObject({
+      ok: true,
+      stage2Value: "/mode ",
+      stage2Options: ["Ask", "Auto"],
+      afterMode: { value: "", hidden: true },
+      afterNew: { value: "", hidden: true },
+      posted: [
+        { type: "setMode", value: "auto" },
+        { type: "newChat" },
+      ],
+    });
+  });
+
+  it("queries @ mentions, highlights matches, drills folders with Tab, manages chips, and submits with mentions", () => {
+    const out = run(`${richState}
+      const input = document.querySelector("textarea");
+      const menu = document.getElementById("composer-menu");
+      const chips = document.querySelector(".composer-chips");
+      const lastQuery = () => [...window.__posted].filter((m) => m.type === "queryMentions").at(-1);
+
+      input.value = "check @app";
+      input.setSelectionRange(10, 10);
+      input.dispatchEvent(new Event("input", { bubbles: true }));
+      const q1 = lastQuery();
+      host({
+        type: "mentionResults",
+        requestId: q1.requestId,
+        query: q1.query,
+        items: [
+          { kind: "file", path: "src/app.ts", label: "app.ts", detail: "src", labelMatches: [0, 1, 2] },
+          { kind: "folder", path: "src/core/", label: "src/core/", detail: "Folder", badge: "folder" },
+        ],
+      });
+      const marks = [...menu.querySelectorAll("mark.match")].map((m) => m.textContent);
+      input.dispatchEvent(new KeyboardEvent("keydown", { key: "Enter", bubbles: true }));
+      const afterSelectFile = {
+        value: input.value,
+        chipsHidden: chips.hidden,
+        chipLabels: [...chips.querySelectorAll(".chip-label")].map((c) => c.textContent),
+      };
+
+      // Drill folder with Tab: replaces token without trailing space and without adding a chip.
+      input.value += "@core";
+      input.setSelectionRange(input.value.length, input.value.length);
+      input.dispatchEvent(new Event("input", { bubbles: true }));
+      const q2 = lastQuery();
+      host({
+        type: "mentionResults",
+        requestId: q2.requestId,
+        query: q2.query,
+        items: [
+          { kind: "folder", path: "src/core/", label: "src/core/", detail: "Folder", badge: "folder" },
+        ],
+      });
+      input.dispatchEvent(new KeyboardEvent("keydown", { key: "Tab", bubbles: true }));
+      const afterDrill = {
+        value: input.value,
+        chipCount: chips.querySelectorAll(".chip").length,
+        drillQuery: lastQuery().query,
+      };
+      host({
+        type: "mentionResults",
+        requestId: lastQuery().requestId,
+        query: "src/core/",
+        items: [
+          { kind: "file", path: "src/core/chat.ts", label: "chat.ts", detail: "src/core" },
+        ],
+      });
+      input.dispatchEvent(new KeyboardEvent("keydown", { key: "Enter", bubbles: true }));
+      const twoChips = [...chips.querySelectorAll(".chip-label")].map((c) => c.textContent);
+
+      // Remove first chip and verify both chip and inline @src/app.ts token are removed.
+      chips.querySelector(".chip-remove").click();
+      const afterRemove = {
+        value: input.value,
+        chipLabels: [...chips.querySelectorAll(".chip-label")].map((c) => c.textContent),
+      };
+
+      // Submit with remaining chip.
+      input.dispatchEvent(new KeyboardEvent("keydown", { key: "Enter", bubbles: true }));
+      window.__result = {
+        marks,
+        afterSelectFile,
+        afterDrill,
+        twoChips,
+        afterRemove,
+        afterSubmit: { value: input.value, chipsHidden: chips.hidden },
+        sends: window.__posted.filter((m) => m.type === "send"),
+      };`);
+    expect(out).toMatchObject({
+      ok: true,
+      marks: ["app"],
+      afterSelectFile: { value: "check @src/app.ts ", chipsHidden: false, chipLabels: ["app.ts"] },
+      afterDrill: { value: "check @src/app.ts @src/core/", chipCount: 1, drillQuery: "src/core/" },
+      twoChips: ["app.ts", "chat.ts"],
+      afterRemove: { value: "check @src/core/chat.ts ", chipLabels: ["chat.ts"] },
+      afterSubmit: { value: "", chipsHidden: true },
+      sends: [
+        {
+          type: "send",
+          text: "check @src/core/chat.ts ",
+          mentions: [{ kind: "file", path: "src/core/chat.ts" }],
+        },
+      ],
+    });
+  });
+
+  it("opens popovers from @ and / quick-trigger buttons and respects IME guard while open", () => {
+    const out = run(`${richState}
+      const input = document.querySelector("textarea");
+      const menu = document.getElementById("composer-menu");
+      const mentionBtn = document.querySelector("[aria-label='Mention file, folder, or selection']");
+      const slashBtn = document.querySelector("[aria-label='Slash commands']");
+
+      slashBtn.click();
+      const slashOpen = { value: input.value, hidden: menu.hidden, head: menu.querySelector(".popover-head").textContent };
+
+      // Guard Enter while IME is composing or keyCode is 229 when popover is open.
+      const beforeImeLen = window.__posted.length;
+      input.dispatchEvent(new KeyboardEvent("keydown", { key: "Enter", isComposing: true, bubbles: true }));
+      const ev229 = new KeyboardEvent("keydown", { key: "Enter", bubbles: true });
+      Object.defineProperty(ev229, "keyCode", { get: () => 229 });
+      input.dispatchEvent(ev229);
+      const afterIme = { value: input.value, hidden: menu.hidden, postedSame: window.__posted.length === beforeImeLen };
+
+      input.value = "explain";
+      input.setSelectionRange(7, 7);
+      mentionBtn.click();
+      const mentionOpen = {
+        value: input.value,
+        hidden: menu.hidden,
+        head: menu.querySelector(".popover-head").textContent,
+        query: [...window.__posted].filter((m) => m.type === "queryMentions").at(-1)?.query,
+      };
+      window.__result = { slashOpen, afterIme, mentionOpen };`);
+    expect(out).toMatchObject({
+      ok: true,
+      slashOpen: { value: "/", hidden: false, head: "Commands" },
+      afterIme: { value: "/", hidden: false, postedSame: true },
+      mentionOpen: { value: "explain @", hidden: false, head: "Context · files, folders, selection", query: "" },
+    });
+  });
+
+  it("renders hostile command descriptions and file paths as text, never as HTML", () => {
+    const out = run(`${state}
+      state({
+        commands: [{ name: "evil", description: ${lit("<img src=x onerror=window.__pwn=1><script>window.__pwn=2</script>")} }],
+      });
+      const input = document.querySelector("textarea");
+      const menu = document.getElementById("composer-menu");
+      input.value = "/evil";
+      input.setSelectionRange(5, 5);
+      input.dispatchEvent(new Event("input", { bubbles: true }));
+      const cmdImgs = menu.querySelectorAll("img").length;
+      const cmdScripts = menu.querySelectorAll("script").length;
+      const cmdDesc = menu.querySelector(".popover-detail").textContent;
+
+      input.value = "@xss";
+      input.setSelectionRange(4, 4);
+      input.dispatchEvent(new Event("input", { bubbles: true }));
+      const req = [...window.__posted].filter((m) => m.type === "queryMentions").at(-1);
+      host({
+        type: "mentionResults",
+        requestId: req.requestId,
+        query: req.query,
+        items: [{
+          kind: "file",
+          path: ${lit("<b>xss</b>/<img src=x onerror=window.__pwn=3>.ts")},
+          label: ${lit("<img src=x onerror=window.__pwn=3>.ts")},
+          detail: ${lit("<b>xss</b>")},
+        }],
+      });
+      window.__result = {
+        cmdImgs,
+        cmdScripts,
+        cmdDesc,
+        mentionImgs: menu.querySelectorAll("img").length,
+        mentionScripts: menu.querySelectorAll("script").length,
+        mentionBold: menu.querySelectorAll("b").length,
+        pwn: window.__pwn ?? null,
+        mentionText: menu.textContent,
+      };`);
+    expect(out).toMatchObject({
+      ok: true,
+      cmdImgs: 0,
+      cmdScripts: 0,
+      cmdDesc: "<img src=x onerror=window.__pwn=1><script>window.__pwn=2</script>",
+      mentionImgs: 0,
+      mentionScripts: 0,
+      mentionBold: 0,
+      pwn: null,
+    });
+    expect(String(out.mentionText)).toContain("<img src=x onerror=window.__pwn=3>.ts");
+  });
+});

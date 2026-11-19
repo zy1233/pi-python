@@ -23,6 +23,11 @@ const DARK_THEME = `
   --vscode-badge-background: #616161; --vscode-badge-foreground: #ffffff;
   --vscode-testing-iconPassed: #73c991; --vscode-editorWarning-foreground: #cca700;
   --vscode-editorError-foreground: #f14c4c; --vscode-errorForeground: #f85149;
+  --vscode-editorSuggestWidget-background: #252526; --vscode-editorSuggestWidget-foreground: #cccccc;
+  --vscode-editorSuggestWidget-border: #454545; --vscode-editorSuggestWidget-selectedBackground: #04395e;
+  --vscode-editorSuggestWidget-selectedForeground: #ffffff; --vscode-editorSuggestWidget-highlightForeground: #4daafc;
+  --vscode-list-activeSelectionBackground: #04395e; --vscode-list-activeSelectionForeground: #ffffff;
+  --vscode-list-hoverBackground: #2a2d2e;
 }`;
 
 export function buildHarness({ script, demo }) {
