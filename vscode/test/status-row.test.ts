@@ -1,6 +1,8 @@
 import { describe, expect, it } from "vitest";
 
 import {
+  approvalStatusText,
+  approvalTooltipLine,
   contextBadge,
   contextLevel,
   describeContext,
@@ -240,5 +242,17 @@ describe("the status bar item", () => {
 
   it("has no last-turn line while a turn runs", () => {
     expect(statusRowLines({ turn: { elapsedMs: 5000 }, cwd: "/p" })).toEqual(["Folder: /p"]);
+  });
+
+  it("formats pending approval status text and tooltip line", () => {
+    expect(approvalStatusText(undefined)).toBeUndefined();
+    expect(approvalStatusText(0)).toBeUndefined();
+    expect(approvalStatusText(1)).toBe("approval needed");
+    expect(approvalStatusText(3)).toBe("approval needed (3)");
+
+    expect(approvalTooltipLine(undefined)).toBeUndefined();
+    expect(approvalTooltipLine(0)).toBeUndefined();
+    expect(approvalTooltipLine(1)).toBe("Waiting for your approval in the zycode chat.");
+    expect(approvalTooltipLine(2)).toBe("Waiting for your approval on 2 requests in the zycode chat.");
   });
 });

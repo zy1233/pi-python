@@ -30,15 +30,22 @@ const DARK_THEME = `
   --vscode-list-hoverBackground: #2a2d2e;
 }`;
 
-export function buildHarness({ script, demo }) {
+export function buildHarness({ script, demo, beforeScript = "" }) {
   const cssHref = pathToFileURL(path.join(root, "media", "chat.css")).href;
   const jsSrc = pathToFileURL(path.join(root, "dist", "webview.js")).href;
   return `<!DOCTYPE html><html><head><meta charset="utf-8"><style>${DARK_THEME}</style>
 <link rel="stylesheet" href="${cssHref}"></head><body><div id="root"></div>${demo ? "" : '<pre id="result"></pre>'}
 <script>
 window.__posted = [];
-window.acquireVsCodeApi = () => ({ postMessage: (m) => window.__posted.push(JSON.parse(JSON.stringify(m))) });
+window.acquireVsCodeApi = () => ({
+  postMessage: (m) => window.__posted.push(JSON.parse(JSON.stringify(m))),
+  getState: () => (window.__webviewState === undefined ? undefined : JSON.parse(JSON.stringify(window.__webviewState))),
+  setState: (s) => {
+    window.__webviewState = JSON.parse(JSON.stringify(s));
+  },
+});
 window.host = (m) => window.dispatchEvent(new MessageEvent("message", { data: m }));
+${beforeScript}
 </script>
 <script src="${jsSrc}"></script>
 <script>${script}</script>

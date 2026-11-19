@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 
 import {
+  containsMentionToken,
   deriveFolders,
   formatMentionToken,
   formatPromptWithMentions,
@@ -168,5 +169,27 @@ describe("mention formatting and prompt assembly", () => {
     expect(removeMentionToken("fix bug @src/a.ts", target)).toBe("fix bug");
     expect(removeMentionToken("check @src/a.tsx and @src/a.ts", target)).toBe("check @src/a.tsx and");
     expect(removeMentionToken("line1\n@src/a.ts\nline2", target)).toBe("line1\n\nline2");
+  });
+
+  it("detects mention tokens strictly at token boundaries", () => {
+    const file = { kind: "file" as const, path: "src/a.ts" };
+    const spaced = { kind: "file" as const, path: "my docs/note.md" };
+    const selection = { kind: "selection" as const, path: "src/a.ts", range: { startLine: 5, endLine: 12 } };
+
+    expect(containsMentionToken("check @src/a.ts now", file)).toBe(true);
+    expect(containsMentionToken("@src/a.ts", file)).toBe(true);
+    expect(containsMentionToken("check @src/a.tsx", file)).toBe(false);
+    expect(containsMentionToken("email@src/a.ts", file)).toBe(false);
+    expect(containsMentionToken('open @"my docs/note.md" please', spaced)).toBe(true);
+    expect(containsMentionToken("see @src/a.ts:L5-L12, please", selection)).toBe(true);
+    expect(containsMentionToken("see @src/a.ts:L5-L120", selection)).toBe(false);
+    expect(containsMentionToken("see @src/a.ts.", file)).toBe(true);
+    expect(containsMentionToken("see @src/a.ts. Next sentence", file)).toBe(true);
+    expect(containsMentionToken("see @src/a.ts- explain", file)).toBe(true);
+    expect(containsMentionToken("see @src/a.ts:L5-L12.", selection)).toBe(true);
+    expect(containsMentionToken("see @src/a.ts.bak", file)).toBe(false);
+    expect(containsMentionToken("see @src/a.ts-old", file)).toBe(false);
+    expect(removeMentionToken("see @src/a.ts.", file)).toBe("see.");
+    expect(removeMentionToken("see @src/a.ts. Next", file)).toBe("see. Next");
   });
 });

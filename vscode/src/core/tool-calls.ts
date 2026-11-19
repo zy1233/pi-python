@@ -33,6 +33,12 @@ export function lastTextBlock(content: unknown): string | undefined {
   return found;
 }
 
+export interface ToolApplyResult {
+  view: ToolCallView;
+  terminalDelta?: string;
+  pureTerminalAppend: boolean;
+}
+
 /**
  * Merges `tool_call` and `tool_call_update` into one view for each call. The agent sends the
  * title and `rawInput` with the first update. Later updates carry the status and the content.
@@ -57,22 +63,33 @@ export class ToolCallStore {
 
   /** Applies one update and returns the call as it is now, or `undefined` for an update with no id. */
   apply(update: RawToolUpdate): ToolCallView | undefined {
+    return this.applyWithDelta(update)?.view;
+  }
+
+  /**
+   * Applies one update and reports whether it was a pure incremental terminal output append so the
+   * host can emit a small delta instead of resending the full accumulated output over IPC.
+   */
+  applyWithDelta(update: RawToolUpdate): ToolApplyResult | undefined {
     if (typeof update.toolCallId !== "string" || update.toolCallId === "") return undefined;
     const id = update.toolCallId;
     const previous = this.calls.get(id);
     const view: ToolCallView = previous
-      ? { ...previous }
+      ? {
+          ...previous,
+          ...(previous.terminal ? { terminal: { ...previous.terminal } } : {}),
+        }
       : { id, title: typeof update.title === "string" ? update.title : id, kind: "other", status: "pending" };
     if (typeof update.title === "string" && update.title !== "") view.title = update.title;
     if (typeof update.kind === "string") view.kind = update.kind;
     if (isStatus(update.status)) view.status = update.status;
     if (update.rawInput !== undefined) view.rawInput = update.rawInput;
-    const text = lastTextBlock(update.content);
-    if (text !== undefined) view.text = text;
+    let terminalDelta: string | undefined;
     const meta = isRecord(update._meta) ? update._meta : undefined;
     if (meta) {
       const output = isRecord(meta.terminal_output) ? meta.terminal_output : undefined;
       if (output && typeof output.data === "string") {
+        terminalDelta = output.data;
         view.terminal = { ...view.terminal, output: (view.terminal?.output ?? "") + output.data };
       }
       const exit = isRecord(meta.terminal_exit) ? meta.terminal_exit : undefined;
@@ -80,8 +97,30 @@ export class ToolCallStore {
         view.terminal = { output: view.terminal?.output ?? "", ...view.terminal, exitCode: exit.exit_code };
       }
     }
+    const text = lastTextBlock(update.content);
+    // Avoid duplicating full terminal stdout in both `view.terminal.output` and `view.text`.
+    if (view.terminal !== undefined && (view.terminal.output !== "" || text === undefined || text === "")) {
+      delete view.text;
+    } else if (text !== undefined) {
+      view.text = text;
+    }
+    const pureTerminalAppend =
+      previous !== undefined &&
+      terminalDelta !== undefined &&
+      terminalDelta !== "" &&
+      view.status === "in_progress" &&
+      previous.status === view.status &&
+      previous.title === view.title &&
+      previous.kind === view.kind &&
+      previous.text === view.text &&
+      previous.terminal?.exitCode === view.terminal?.exitCode &&
+      update.rawInput === undefined;
     this.calls.set(id, view);
-    return view;
+    return {
+      view,
+      ...(terminalDelta !== undefined ? { terminalDelta } : {}),
+      pureTerminalAppend,
+    };
   }
 }
 

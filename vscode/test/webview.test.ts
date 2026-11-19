@@ -33,13 +33,14 @@ function findChrome(): string | undefined {
 const chrome = findChrome();
 const dirs: string[] = [];
 
-function run(script: string): Record<string, unknown> {
+function run(script: string, beforeScript = ""): Record<string, unknown> {
   const dir = tempDir(dirs, "webview-");
   const file = path.join(dir, "page.html");
   writeFileSync(
     file,
     buildHarness({
       demo: false,
+      beforeScript,
       script: `try { ${script}; document.getElementById("result").textContent = JSON.stringify({ ok: true, ...(window.__result ?? {}) }); } catch (e) { document.getElementById("result").textContent = JSON.stringify({ ok: false, error: String(e && e.stack || e) }); }`,
     }),
   );
@@ -1120,6 +1121,227 @@ describe.skipIf(!chrome || !built)("webview: slash commands and @ mentions", () 
       afterEscSend: { value: "", sentText: "explain this" },
       afterPickGoal: { value: "/goal explain this", hidden: true },
       modeNotClipped: true,
+    });
+  });
+});
+
+describe.skipIf(!chrome || !built)("webview: P0 state restore, streaming tools, model picker, chip sync & busy commands", () => {
+  const models = `[{ id: "gpt-4o", name: "GPT-4o" }, { id: "deepseek-chat", name: "DeepSeek Chat" }]`;
+  const modes = `[{ id: "ask", name: "Ask" }, { id: "auto", name: "Auto" }]`;
+
+  it("restores draft, chips, and open <details> on initial reset and clears transient state on subsequent resets", () => {
+    const preseed = `window.__webviewState = ${JSON.stringify({
+      draft: "check @src/app.ts ",
+      attachments: [{ kind: "file", path: "src/app.ts" }],
+      followTail: false,
+      scrollTop: 80,
+      openDetails: { "thought:a1": true, "tool:t1": true },
+    })};`;
+    const out = run(
+      `${state}
+      state({});
+      host({
+        type: "reset",
+        transcript: [
+          { type: "agent", id: "a1", text: "done", thought: "plan" },
+          {
+            type: "tool",
+            toolCall: {
+              id: "t1",
+              title: "bash",
+              kind: "execute",
+              status: "completed",
+              terminal: { output: "long ".repeat(120), exitCode: 0 },
+            },
+          },
+        ],
+      });
+      const input = document.querySelector("textarea");
+      const chips = document.querySelector(".composer-chips");
+      const restored = {
+        draft: input.value,
+        chipsHidden: chips.hidden,
+        chipLabels: [...chips.querySelectorAll(".chip-label")].map((c) => c.textContent),
+        thoughtOpen: document.querySelector(".thought").open,
+        toolOpen: document.querySelector(".tool-output").open,
+        jumpHidden: document.querySelector(".jump-bottom").hidden,
+      };
+      host({ type: "reset", transcript: [] });
+      window.__result = {
+        restored,
+        afterSecondReset: {
+          chipsHidden: chips.hidden,
+          chipCount: chips.querySelectorAll(".chip").length,
+        },
+      };`,
+      preseed,
+    );
+    expect(out).toMatchObject({
+      ok: true,
+      restored: {
+        draft: "check @src/app.ts ",
+        chipsHidden: false,
+        chipLabels: ["app.ts"],
+        thoughtOpen: true,
+        toolOpen: true,
+        jumpHidden: false,
+      },
+      afterSecondReset: {
+        chipsHidden: true,
+        chipCount: 0,
+      },
+    });
+  });
+
+  it("updates streaming tool output in place without destroying <details>/<pre> or overriding user toggle", () => {
+    const out = run(`${state}
+      state({ status: "busy" });
+      host({ type: "toolCall", toolCall: { id: "t1", title: "pytest", kind: "execute", status: "pending" } });
+      host({ type: "toolCall", toolCall: { id: "t1", title: "pytest", kind: "execute", status: "in_progress", terminal: { output: "x".repeat(450) + "\\n" } } });
+      const detailsEl = document.querySelector(".tool-output");
+      const preEl = document.querySelector(".tool-output pre");
+      const initiallyOpen = detailsEl.open;
+      detailsEl.querySelector("summary").click();
+      const afterUserClick = detailsEl.open;
+      setTimeout(() => {
+        host({ type: "toolCallOutput", id: "t1", delta: "chunk-a\\n", status: "in_progress" });
+        host({ type: "toolCallOutput", id: "t1", delta: "chunk-b\\n", status: "in_progress" });
+        host({ type: "toolCall", toolCall: { id: "t1", title: "pytest", kind: "execute", status: "completed", terminal: { output: "x".repeat(450) + "\\nchunk-a\\nchunk-b\\n", exitCode: 0 } } });
+        document.getElementById("result").textContent = JSON.stringify({
+          ok: true,
+          initiallyOpen,
+          afterUserClick,
+          sameDetails: document.querySelector(".tool-output") === detailsEl,
+          samePre: document.querySelector(".tool-output pre") === preEl,
+          stillOpen: detailsEl.open,
+          endsWith: preEl.textContent.slice(-16),
+          status: document.querySelector(".tool").dataset.status,
+        });
+      }, 30);`);
+    expect(out).toMatchObject({
+      ok: true,
+      initiallyOpen: false,
+      afterUserClick: true,
+      sameDetails: true,
+      samePre: true,
+      stillOpen: true,
+      endsWith: "chunk-a\nchunk-b\n",
+      status: "completed",
+    });
+  });
+
+  it("renders a Model picker after Mode when multiple models exist and disables it when busy", () => {
+    const out = run(`${state}
+      state({ mode: { current: "ask", options: ${modes} }, models: { current: "gpt-4o", options: ${models} } });
+      const firstSelect = document.querySelector("select");
+      const modelSelect = document.querySelector(".model-picker select");
+      const readyInfo = {
+        firstIsMode: firstSelect !== modelSelect && firstSelect.value === "ask",
+        options: [...modelSelect.options].map((o) => o.value),
+        value: modelSelect.value,
+        disabled: modelSelect.disabled,
+      };
+      modelSelect.value = "deepseek-chat";
+      modelSelect.dispatchEvent(new Event("change"));
+      state({ status: "busy", mode: { current: "ask", options: ${modes} }, models: { current: "deepseek-chat", options: ${models} } });
+      window.__result = {
+        readyInfo,
+        busyDisabled: document.querySelector(".model-picker select").disabled,
+        posted: window.__posted.filter((m) => m.type === "setModel"),
+      };`);
+    expect(out).toMatchObject({
+      ok: true,
+      readyInfo: {
+        firstIsMode: true,
+        options: ["gpt-4o", "deepseek-chat"],
+        value: "gpt-4o",
+        disabled: false,
+      },
+      busyDisabled: true,
+      posted: [{ type: "setModel", value: "deepseek-chat" }],
+    });
+  });
+
+  it("removes attached @ chips automatically when the inline token is deleted manually", () => {
+    const out = run(`${state}
+      state({});
+      const input = document.querySelector("textarea");
+      const chips = document.querySelector(".composer-chips");
+      input.value = "check @app";
+      input.setSelectionRange(10, 10);
+      input.dispatchEvent(new Event("input", { bubbles: true }));
+      const req = [...window.__posted].filter((m) => m.type === "queryMentions").at(-1);
+      host({
+        type: "mentionResults",
+        requestId: req.requestId,
+        query: req.query,
+        items: [{ kind: "file", path: "src/app.ts", label: "app.ts", detail: "src" }],
+      });
+      input.dispatchEvent(new KeyboardEvent("keydown", { key: "Enter", bubbles: true }));
+      const countBefore = chips.querySelectorAll(".chip").length;
+
+      input.value = "check ";
+      input.dispatchEvent(new Event("input", { bubbles: true }));
+      const countAfter = chips.querySelectorAll(".chip").length;
+      const hiddenAfter = chips.hidden;
+      input.dispatchEvent(new KeyboardEvent("keydown", { key: "Enter", bubbles: true }));
+      window.__result = {
+        countBefore,
+        countAfter,
+        hiddenAfter,
+        sends: window.__posted.filter((m) => m.type === "send"),
+      };`);
+    expect(out).toMatchObject({
+      ok: true,
+      countBefore: 1,
+      countAfter: 0,
+      hiddenAfter: true,
+      sends: [{ type: "send", text: "check " }],
+    });
+  });
+
+  it("collapses streamed output automatically once it grows to >= 400 chars unless user-toggled, and opens on failure", () => {
+    const out = run(`${state}
+      state({ status: "busy" });
+      host({ type: "toolCall", toolCall: { id: "t1", title: "bash", kind: "execute", status: "in_progress", terminal: { output: "line 1\\n" } } });
+      const detailsEl = document.querySelector(".tool-output");
+      const openInitially = detailsEl.open;
+      host({ type: "toolCallOutput", id: "t1", delta: "y".repeat(420), status: "in_progress" });
+      const openAfterGrowth = detailsEl.open;
+      host({ type: "toolCall", toolCall: { id: "t1", title: "bash", kind: "execute", status: "failed", terminal: { output: "line 1\\n" + "y".repeat(420), exitCode: 1 } } });
+      const openAfterFailure = detailsEl.open;
+      window.__result = { openInitially, openAfterGrowth, openAfterFailure };`);
+    expect(out).toMatchObject({
+      ok: true,
+      openInitially: true,
+      openAfterGrowth: false,
+      openAfterFailure: true,
+    });
+  });
+
+  it("allows /log while busy and explains why /new must wait without wiping the input", () => {
+    const out = run(`${state}
+      state({ status: "busy" });
+      const input = document.querySelector("textarea");
+      input.value = "/log";
+      input.dispatchEvent(new KeyboardEvent("keydown", { key: "Enter", bubbles: true }));
+      const afterLog = { value: input.value, posted: window.__posted.slice(1) };
+
+      input.value = "/new";
+      input.dispatchEvent(new KeyboardEvent("keydown", { key: "Enter", bubbles: true }));
+      const notices = [...document.querySelectorAll(".notice")].map((n) => n.textContent);
+      window.__result = {
+        afterLog,
+        afterNewValue: input.value,
+        newPosted: window.__posted.some((m) => m.type === "newChat"),
+        notices,
+      };`);
+    expect(out).toMatchObject({
+      ok: true,
+      afterLog: { value: "", posted: [{ type: "openLog" }] },
+      afterNewValue: "/new",
+      newPosted: false,
+      notices: ["Wait until the current action finishes before running this command."],
     });
   });
 });

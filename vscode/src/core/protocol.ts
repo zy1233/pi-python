@@ -123,6 +123,8 @@ export interface StateMessage {
   canRestart: boolean;
   /** `zycode.showThinking`: show the thinking blocks (collapsed). */
   showThinking?: boolean;
+  /** Number of pending permission/trust questions waiting for user input. Omitted when 0. */
+  pendingPermissions?: number;
 }
 
 export type ToolStatus = "pending" | "in_progress" | "completed" | "failed";
@@ -184,6 +186,7 @@ export type HostMessage =
   | { type: "agentText"; messageId: string; text: string }
   | { type: "agentThought"; messageId: string; text: string }
   | { type: "toolCall"; toolCall: ToolCallView }
+  | { type: "toolCallOutput"; id: string; delta: string; status: ToolStatus }
   | ({ type: "permission" } & PermissionRequestView)
   | { type: "permissionDone"; requestId: string; outcome: PermissionOutcome; optionId?: string }
   | { type: "notice"; level: NoticeLevel; text: string; actions?: NoticeAction[] }

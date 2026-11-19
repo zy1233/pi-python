@@ -1,7 +1,7 @@
 import * as vscode from "vscode";
 
 import type { StateMessage, Status } from "../core/protocol.js";
-import { contextBadge, statusRowLines } from "../core/status-row.js";
+import { approvalStatusText, approvalTooltipLine, contextBadge, statusRowLines } from "../core/status-row.js";
 
 const LABELS: Record<Status, string> = {
   stopped: "stopped",
@@ -32,11 +32,16 @@ export class StatusBar implements vscode.Disposable {
 
   update(state: StateMessage): void {
     const alwaysApprove = state.mode?.current === "always-approve";
+    const approvalLabel = approvalStatusText(state.pendingPermissions);
+    const icon = approvalLabel !== undefined ? "warning" : state.status === "busy" ? "sync~spin" : alwaysApprove ? "warning" : "sparkle";
+    const stateText = approvalLabel ?? LABELS[state.status];
     this.item.text =
-      `$(${state.status === "busy" ? "sync~spin" : alwaysApprove ? "warning" : "sparkle"}) zycode: ${LABELS[state.status]}` +
+      `$(${icon}) zycode: ${stateText}` +
       contextBadge(state.usage) +
       (alwaysApprove ? " · always approve" : "");
-    const lines = [`zycode: ${LABELS[state.status]}`];
+    const lines = [`zycode: ${stateText}`];
+    const approvalTip = approvalTooltipLine(state.pendingPermissions);
+    if (approvalTip) lines.push(approvalTip);
     if (state.detail) lines.push(state.detail);
     if (state.agent) lines.push(`Agent ${state.agent.version} (${state.agent.source})`);
     if (state.model) lines.push(`Model: ${state.model}`);
@@ -47,7 +52,7 @@ export class StatusBar implements vscode.Disposable {
     this.item.backgroundColor =
       state.status === "error"
         ? new vscode.ThemeColor("statusBarItem.errorBackground")
-        : alwaysApprove
+        : approvalLabel !== undefined || alwaysApprove
           ? new vscode.ThemeColor("statusBarItem.warningBackground")
           : undefined;
   }

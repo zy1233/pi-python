@@ -1,5 +1,6 @@
 import {
   buildCommandCatalog,
+  canRunClientCommandInStatus,
   detectComposerTrigger,
   rankCommands,
   resolveClientSlashCommand,
@@ -13,9 +14,11 @@ import { toolCopyText } from "../core/copy.js";
 import { parseMarkdown } from "../core/markdown.js";
 import {
   MAX_MENTIONS,
+  containsMentionToken,
   formatMentionToken,
   mentionKey,
   mentionLabel,
+  normalizeRelativePath,
   removeMentionToken,
   type MentionAttachment,
   type RankedMention,
@@ -26,6 +29,7 @@ import type {
   PermissionRequestView,
   StateMessage,
   ToolCallView,
+  ToolStatus,
   TranscriptItem,
   WebviewMessage,
 } from "../core/protocol.js";
@@ -33,7 +37,19 @@ import { describeContext, folderName, formatCost, formatDuration } from "../core
 import { throttle, type Scheduler, type Throttled } from "../core/throttle.js";
 import { copyButton, el, highlightedText, renderBlocks } from "./dom.js";
 
-declare function acquireVsCodeApi(): { postMessage(message: WebviewMessage): void };
+interface PersistedWebviewState {
+  draft: string;
+  attachments: MentionAttachment[];
+  followTail: boolean;
+  scrollTop: number;
+  openDetails: Record<string, boolean>;
+}
+
+declare function acquireVsCodeApi(): {
+  postMessage(message: WebviewMessage): void;
+  getState?(): unknown;
+  setState?(state: PersistedWebviewState): void;
+};
 
 const vscode = acquireVsCodeApi();
 const send = (message: WebviewMessage) => vscode.postMessage(message);
@@ -126,23 +142,55 @@ const scheduler: Scheduler = {
 };
 
 type MessageEntry = {
+  id: string;
   root: HTMLElement;
   text: HTMLElement;
+  thoughtDetails: HTMLDetailsElement;
   thought: HTMLElement;
   copyBtn: HTMLButtonElement;
   raw: { text: string; thought: string };
   /** The text that `text` shows now. */
   drawn: string;
+  /** The thought text that `thought` shows now. */
+  drawnThought: string;
   /** Draws `raw.text` into `text`. */
   draw: Throttled;
+  /** Draws `raw.thought` into `thought`. */
+  drawThought: Throttled;
+  expectedThoughtOpen: boolean;
 };
+
+type ToolEntry = {
+  id: string;
+  root: HTMLElement;
+  headerLine: HTMLElement;
+  badge: HTMLElement;
+  titleEl: HTMLElement;
+  copyBtn: HTMLButtonElement;
+  outputDetails: HTMLDetailsElement;
+  outputSummary: HTMLElement;
+  outputBody: HTMLElement;
+  outputPre: HTMLPreElement;
+  outputCopyBtn: HTMLButtonElement;
+  diffWrap: HTMLElement;
+  call: ToolCallView;
+  drawnOutput: string;
+  drawOutput: Throttled;
+  userToggled: boolean;
+  expectedOpen: boolean;
+};
+
+const MAX_PERSISTED_OPEN_DETAILS = 500;
 
 let state: StateMessage = { type: "state", status: "stopped", canRestart: true };
 const messageEls = new Map<string, MessageEntry>();
-const toolEls = new Map<string, HTMLElement>();
+const toolEntries = new Map<string, ToolEntry>();
 const permissionEls = new Map<string, HTMLElement>();
 const permissionViews = new Map<string, PermissionRequestView>();
 let followTail = true;
+let awaitingInitialReset = true;
+const openDetails = new Map<string, boolean>();
+let pendingScrollRestore: { followTail: boolean; scrollTop: number } | undefined;
 
 type MenuItem =
   | { kind: "slash"; command: ComposerCommand; nameMatches?: number[] }
@@ -159,6 +207,97 @@ let mentionSeq = 0;
 let mentionTimer: number | undefined;
 let attachments: MentionAttachment[] = [];
 
+function isPlainRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
+function sanitizeAttachments(raw: unknown): MentionAttachment[] {
+  if (!Array.isArray(raw)) return [];
+  const out: MentionAttachment[] = [];
+  const seen = new Set<string>();
+  for (const entry of raw) {
+    if (!isPlainRecord(entry)) continue;
+    const kind = entry.kind;
+    if (kind !== "file" && kind !== "folder" && kind !== "selection") continue;
+    if (typeof entry.path !== "string") continue;
+    const normalized = normalizeRelativePath(entry.path, kind);
+    if (!normalized) continue;
+    let attachment: MentionAttachment;
+    if (kind === "selection") {
+      if (!isPlainRecord(entry.range)) continue;
+      const { startLine, endLine } = entry.range;
+      if (
+        typeof startLine !== "number" ||
+        typeof endLine !== "number" ||
+        !Number.isSafeInteger(startLine) ||
+        !Number.isSafeInteger(endLine) ||
+        startLine < 1 ||
+        endLine < startLine
+      ) {
+        continue;
+      }
+      attachment = { kind, path: normalized, range: { startLine, endLine } };
+    } else {
+      attachment = { kind, path: normalized };
+    }
+    const key = mentionKey(attachment);
+    if (seen.has(key)) continue;
+    seen.add(key);
+    out.push(attachment);
+    if (out.length >= MAX_MENTIONS) break;
+  }
+  return out;
+}
+
+function loadPersistedState(): PersistedWebviewState | undefined {
+  let raw: unknown;
+  try {
+    raw = vscode.getState?.();
+  } catch {
+    return undefined;
+  }
+  if (!isPlainRecord(raw)) return undefined;
+  const draft = typeof raw.draft === "string" ? raw.draft.slice(0, 200_000) : "";
+  const restoredAttachments = sanitizeAttachments(raw.attachments);
+  const follow = typeof raw.followTail === "boolean" ? raw.followTail : true;
+  const scrollTop =
+    typeof raw.scrollTop === "number" && Number.isFinite(raw.scrollTop) && raw.scrollTop >= 0 ? raw.scrollTop : 0;
+  const details: Record<string, boolean> = {};
+  if (isPlainRecord(raw.openDetails)) {
+    let count = 0;
+    for (const [key, value] of Object.entries(raw.openDetails)) {
+      if (typeof value === "boolean") {
+        details[key] = value;
+        count++;
+        if (count >= MAX_PERSISTED_OPEN_DETAILS) break;
+      }
+    }
+  }
+  return {
+    draft,
+    attachments: restoredAttachments,
+    followTail: follow,
+    scrollTop,
+    openDetails: details,
+  };
+}
+
+function saveWebviewState(): void {
+  try {
+    vscode.setState?.({
+      draft: input.value,
+      attachments: attachments.map((item) => (item.range ? { ...item, range: { ...item.range } } : { ...item })),
+      followTail,
+      scrollTop: Math.max(0, transcript.scrollTop),
+      openDetails: Object.fromEntries(openDetails),
+    });
+  } catch {
+    // Ignore storage failures in constrained webview environments.
+  }
+}
+
+const saveStateThrottled = throttle(saveWebviewState, 120, scheduler);
+
 function triggerKey(trigger: ComposerTrigger): string {
   return trigger.kind === "slash-arg"
     ? `${trigger.kind}:${trigger.command}:${trigger.range.start}:${trigger.query}`
@@ -172,6 +311,7 @@ function syncJumpBottom(): void {
 transcript.addEventListener("scroll", () => {
   followTail = transcript.scrollHeight - transcript.scrollTop - transcript.clientHeight < 40;
   syncJumpBottom();
+  if (!pendingScrollRestore) saveStateThrottled.request();
 });
 
 function scrollToEnd(): void {
@@ -182,6 +322,7 @@ jumpBottomButton.addEventListener("click", () => {
   followTail = true;
   syncJumpBottom();
   transcript.scrollTop = transcript.scrollHeight;
+  saveWebviewState();
 });
 
 const copyTimers = new WeakMap<HTMLElement, number>();
@@ -360,6 +501,28 @@ function renderHeader(): void {
   } else if (state.status === "ready" || state.status === "busy") {
     controls.append(el("span", { class: "mode", text: "Mode: set by the agent" }));
   }
+  const models = state.models;
+  if (models && models.options.length > 1) {
+    const select = el("select", { title: "Model", ariaLabel: "Model" });
+    for (const option of models.options) {
+      const o = el("option", { text: option.name });
+      o.value = option.id;
+      select.append(o);
+    }
+    if (!models.options.some((o) => o.id === models.current)) {
+      const o = el("option", { text: models.current });
+      o.value = models.current;
+      select.append(o);
+    }
+    select.value = models.current;
+    select.disabled = state.status !== "ready";
+    select.addEventListener("change", () => {
+      if (select.value !== "") {
+        send({ type: "setModel", value: select.value });
+      }
+    });
+    controls.append(el("label", { class: "mode model-picker" }, "Model ", select));
+  }
   const thinking = state.thinking;
   if (thinking) {
     const select = el("select", { title: thinking.disabled ?? "Thinking level" });
@@ -447,9 +610,8 @@ function renderComposer(): void {
 function applyState(next: StateMessage): void {
   state = next;
   for (const entry of messageEls.values()) {
-    const details = entry.thought.parentElement as HTMLElement;
-    details.hidden = entry.raw.thought === "" || state.showThinking === false;
-    details.classList.toggle("streaming", state.status === "busy" && entry.raw.text === "" && entry.raw.thought !== "");
+    entry.thoughtDetails.hidden = entry.raw.thought === "" || state.showThinking === false;
+    entry.thoughtDetails.classList.toggle("streaming", state.status === "busy" && entry.raw.text === "" && entry.raw.thought !== "");
   }
   renderHeader();
   renderBanner();
@@ -477,10 +639,19 @@ function drawText(entry: MessageEntry): void {
   scrollToEnd();
 }
 
+function drawThoughtText(entry: MessageEntry): void {
+  if (entry.drawnThought === entry.raw.thought) return;
+  entry.drawnThought = entry.raw.thought;
+  entry.thought.textContent = entry.raw.thought;
+  scrollToEnd();
+}
+
 function agentMessage(id: string): MessageEntry {
   let entry = messageEls.get(id);
   if (!entry) {
     const thought = el("details", { class: "thought" }, el("summary", { text: "Thinking" }));
+    const savedOpen = openDetails.get(`thought:${id}`) === true;
+    if (savedOpen) thought.open = true;
     const thoughtBody = el("div", { class: "thought-body" });
     thought.append(thoughtBody);
     thought.hidden = true;
@@ -491,14 +662,25 @@ function agentMessage(id: string): MessageEntry {
     const rootEl = el("article", { class: "msg agent" }, head, thought, text);
     transcript.append(rootEl);
     const created: MessageEntry = {
+      id,
       root: rootEl,
       text,
+      thoughtDetails: thought,
       thought: thoughtBody,
       copyBtn,
       raw: { text: "", thought: "" },
       drawn: "",
+      drawnThought: "",
       draw: throttle(() => drawText(created), DRAW_INTERVAL_MS, scheduler),
+      drawThought: throttle(() => drawThoughtText(created), DRAW_INTERVAL_MS, scheduler),
+      expectedThoughtOpen: savedOpen,
     };
+    thought.addEventListener("toggle", () => {
+      if (thought.open === created.expectedThoughtOpen) return;
+      created.expectedThoughtOpen = thought.open;
+      openDetails.set(`thought:${id}`, thought.open);
+      saveWebviewState();
+    });
     entry = created;
     messageEls.set(id, entry);
   }
@@ -512,51 +694,167 @@ function setAgentText(id: string, text: string, thought: string): void {
   entry.copyBtn.dataset.copy = text;
   entry.copyBtn.hidden = text === "";
   entry.draw.request();
-  const details = entry.thought.parentElement as HTMLElement;
-  details.hidden = thought === "" || state.showThinking === false;
-  details.classList.toggle("streaming", state.status === "busy" && text === "" && thought !== "");
-  entry.thought.textContent = thought;
+  entry.thoughtDetails.hidden = thought === "" || state.showThinking === false;
+  entry.thoughtDetails.classList.toggle("streaming", state.status === "busy" && text === "" && thought !== "");
+  if (text !== "" && entry.drawnThought !== thought) {
+    entry.drawThought.cancel();
+    drawThoughtText(entry);
+  } else {
+    entry.drawThought.request();
+  }
 }
 
 function terminalText(call: ToolCallView): string {
   return call.terminal?.output ?? call.text ?? "";
 }
 
+function drawToolOutput(entry: ToolEntry): void {
+  const body = terminalText(entry.call);
+  if (entry.drawnOutput === body) return;
+  entry.drawnOutput = body;
+  entry.outputPre.textContent = body;
+  entry.outputCopyBtn.dataset.copy = body;
+  if (body !== "") {
+    if (!entry.outputCopyBtn.isConnected) entry.outputBody.append(entry.outputCopyBtn);
+  } else if (entry.outputCopyBtn.isConnected) {
+    entry.outputCopyBtn.remove();
+  }
+  scrollToEnd();
+}
+
+function createToolEntry(call: ToolCallView): ToolEntry {
+  const badge = el("span", { class: `badge ${call.status}`, text: call.status.replace("_", " ") });
+  const titleEl = el("span", { class: "tool-title", text: call.title });
+  const copyBtn = copyButton("", "Copy", "tool-copy", "Copy");
+  const headerLine = el("div", { class: "tool-head" }, badge, titleEl);
+  const outputSummary = el("summary", { text: "Output" });
+  const outputPre = el("pre");
+  const outputCopyBtn = copyButton("", "Copy output", "output-copy", "Copy");
+  const outputBody = el("div", { class: "tool-output-body" }, outputPre);
+  const outputDetails = el("details", { class: "tool-output" }, outputSummary, outputBody);
+  const diffWrap = el("div", { class: "actions" }, button("Show diff", () => send({ type: "showDiff", toolCallId: call.id })));
+  const rootEl = el("article", { class: "tool" }, headerLine);
+
+  const savedOpen = openDetails.get(`tool:${call.id}`);
+  const expectedOpen = savedOpen ?? false;
+  if (savedOpen !== undefined) outputDetails.open = savedOpen;
+
+  const entry: ToolEntry = {
+    id: call.id,
+    root: rootEl,
+    headerLine,
+    badge,
+    titleEl,
+    copyBtn,
+    outputDetails,
+    outputSummary,
+    outputBody,
+    outputPre,
+    outputCopyBtn,
+    diffWrap,
+    call,
+    drawnOutput: "",
+    drawOutput: throttle(() => drawToolOutput(entry), DRAW_INTERVAL_MS, scheduler),
+    userToggled: savedOpen !== undefined,
+    expectedOpen,
+  };
+
+  outputDetails.addEventListener("toggle", () => {
+    if (outputDetails.open === entry.expectedOpen) return;
+    entry.expectedOpen = outputDetails.open;
+    entry.userToggled = true;
+    openDetails.set(`tool:${entry.id}`, outputDetails.open);
+    saveWebviewState();
+  });
+
+  return entry;
+}
+
+function syncToolOutputState(entry: ToolEntry, body: string, hasOutput: boolean): void {
+  if (hasOutput) {
+    const summaryText =
+      entry.call.terminal?.exitCode !== undefined ? `Output (exit code ${entry.call.terminal.exitCode})` : "Output";
+    if (entry.outputSummary.textContent !== summaryText) entry.outputSummary.textContent = summaryText;
+    if (!entry.outputDetails.isConnected) {
+      if (entry.diffWrap.isConnected) entry.root.insertBefore(entry.outputDetails, entry.diffWrap);
+      else entry.root.append(entry.outputDetails);
+    }
+    if (!entry.userToggled) {
+      const nextOpen = entry.call.status === "failed" || body.length < 400;
+      if (entry.outputDetails.open !== nextOpen) {
+        entry.expectedOpen = nextOpen;
+        entry.outputDetails.open = nextOpen;
+      }
+    }
+  } else if (entry.outputDetails.isConnected) {
+    entry.outputDetails.remove();
+  }
+}
+
 function upsertTool(call: ToolCallView): void {
+  let entry = toolEntries.get(call.id);
+  if (!entry) {
+    entry = createToolEntry(call);
+    toolEntries.set(call.id, entry);
+    transcript.append(entry.root);
+  } else {
+    entry.call = call;
+  }
+  entry.root.dataset.status = call.status;
+  entry.root.dataset.kind = call.kind;
+  entry.badge.className = `badge ${call.status}`;
+  entry.badge.textContent = call.status.replace("_", " ");
+  entry.titleEl.textContent = call.title;
+
   const copyInfo = toolCopyText(call);
-  const headerLine = el(
-    "div",
-    { class: "tool-head" },
-    el("span", { class: `badge ${call.status}`, text: call.status.replace("_", " ") }),
-    el("span", { class: "tool-title", text: call.title }),
-    copyInfo.text !== "" ? copyButton(copyInfo.text, copyInfo.label, "tool-copy", "Copy") : null,
-  );
+  if (copyInfo.text !== "") {
+    entry.copyBtn.dataset.copy = copyInfo.text;
+    entry.copyBtn.setAttribute("aria-label", copyInfo.label);
+    entry.copyBtn.title = copyInfo.label;
+    if (!entry.copyBtn.isConnected) entry.headerLine.append(entry.copyBtn);
+  } else if (entry.copyBtn.isConnected) {
+    entry.copyBtn.remove();
+  }
+
   const body = terminalText(call);
-  const parts: (Node | null)[] = [headerLine];
-  if (body !== "" || call.terminal?.exitCode !== undefined) {
-    const outputBody = el("div", { class: "tool-output-body" }, el("pre", { text: body }));
-    if (body !== "") outputBody.append(copyButton(body, "Copy output", "output-copy", "Copy"));
-    const output = el(
-      "details",
-      { class: "tool-output" },
-      el("summary", { text: call.terminal?.exitCode !== undefined ? `Output (exit code ${call.terminal.exitCode})` : "Output" }),
-      outputBody,
-    );
-    if (call.status === "failed" || body.length < 400) output.setAttribute("open", "");
-    parts.push(output);
-  }
+  const hasOutput = body !== "" || call.terminal?.exitCode !== undefined;
+  syncToolOutputState(entry, body, hasOutput);
+
   if (call.canDiff) {
-    parts.push(el("div", { class: "actions" }, button("Show diff", () => send({ type: "showDiff", toolCallId: call.id }))));
+    if (!entry.diffWrap.isConnected) entry.root.append(entry.diffWrap);
+  } else if (entry.diffWrap.isConnected) {
+    entry.diffWrap.remove();
   }
-  let node = toolEls.get(call.id);
-  if (!node) {
-    node = el("article", { class: "tool" });
-    toolEls.set(call.id, node);
-    transcript.append(node);
+
+  if (call.status === "completed" || call.status === "failed") {
+    entry.drawOutput.cancel();
+    drawToolOutput(entry);
+  } else {
+    entry.drawOutput.request();
   }
-  node.dataset.status = call.status;
-  node.dataset.kind = call.kind;
-  node.replaceChildren(...parts.filter((p): p is Node => p !== null));
+}
+
+function appendToolOutput(id: string, delta: string, status: ToolStatus): void {
+  const entry = toolEntries.get(id);
+  if (!entry) return;
+  const nextOutput = (entry.call.terminal?.output ?? entry.call.text ?? "") + delta;
+  const nextTerminal = entry.call.terminal
+    ? { ...entry.call.terminal, output: nextOutput }
+    : { output: nextOutput };
+  const nextCall: ToolCallView = {
+    ...entry.call,
+    status,
+    terminal: nextTerminal,
+  };
+  delete nextCall.text;
+  entry.call = nextCall;
+  if (entry.root.dataset.status !== status) {
+    entry.root.dataset.status = status;
+    entry.badge.className = `badge ${status}`;
+    entry.badge.textContent = status.replace("_", " ");
+  }
+  syncToolOutputState(entry, nextOutput, true);
+  entry.drawOutput.request();
 }
 
 function describeAnswer(done: { outcome: string; optionId?: string }, request: PermissionRequestView): string {
@@ -646,19 +944,53 @@ function renderItem(item: TranscriptItem): void {
 }
 
 function resetTranscript(items: TranscriptItem[]): void {
+  const isInitial = awaitingInitialReset;
+  awaitingInitialReset = false;
   transcript.replaceChildren();
-  for (const entry of messageEls.values()) entry.draw.cancel();
+  for (const entry of messageEls.values()) {
+    entry.draw.cancel();
+    entry.drawThought.cancel();
+  }
+  for (const tool of toolEntries.values()) tool.drawOutput.cancel();
   messageEls.clear();
-  toolEls.clear();
+  toolEntries.clear();
   permissionEls.clear();
   permissionViews.clear();
-  attachments = [];
-  renderChips();
   closePopover();
-  followTail = true;
-  syncJumpBottom();
+  if (!isInitial) {
+    attachments = [];
+    renderChips();
+    openDetails.clear();
+    pendingScrollRestore = undefined;
+    followTail = true;
+  } else {
+    const validDetailKeys = new Set<string>();
+    for (const item of items) {
+      if (item.type === "agent") validDetailKeys.add(`thought:${item.id}`);
+      else if (item.type === "tool") validDetailKeys.add(`tool:${item.toolCall.id}`);
+    }
+    for (const key of [...openDetails.keys()]) {
+      if (!validDetailKeys.has(key)) openDetails.delete(key);
+    }
+  }
   for (const item of items) renderItem(item);
-  scrollToEnd();
+  if (isInitial && pendingScrollRestore) {
+    const restore = pendingScrollRestore;
+    pendingScrollRestore = undefined;
+    if (!restore.followTail && items.length > 0) {
+      followTail = false;
+      transcript.scrollTop = restore.scrollTop;
+    } else {
+      followTail = true;
+    }
+    syncJumpBottom();
+    if (followTail) scrollToEnd();
+  } else {
+    followTail = true;
+    syncJumpBottom();
+    scrollToEnd();
+  }
+  saveWebviewState();
 }
 
 function onHostMessage(message: HostMessage): void {
@@ -683,6 +1015,9 @@ function onHostMessage(message: HostMessage): void {
     case "toolCall":
       upsertTool(message.toolCall);
       break;
+    case "toolCallOutput":
+      appendToolOutput(message.id, message.delta, message.status);
+      break;
     case "permission":
       renderPermission(message);
       break;
@@ -697,6 +1032,17 @@ function onHostMessage(message: HostMessage): void {
       addNotice(message.level, message.text, message.actions);
       break;
     case "turnEnd":
+      for (const entry of messageEls.values()) {
+        entry.draw.cancel();
+        drawText(entry);
+        entry.drawThought.cancel();
+        drawThoughtText(entry);
+      }
+      for (const tool of toolEntries.values()) {
+        tool.drawOutput.cancel();
+        drawToolOutput(tool);
+      }
+      return;
     case "diffState":
       return;
     case "mentionResults":
@@ -876,6 +1222,7 @@ function addAttachment(attachment: MentionAttachment): void {
   if (attachments.length >= MAX_MENTIONS) return;
   attachments.push(attachment);
   renderChips();
+  saveWebviewState();
 }
 
 function removeAttachment(target: MentionAttachment): void {
@@ -883,14 +1230,29 @@ function removeAttachment(target: MentionAttachment): void {
   attachments = attachments.filter((item) => mentionKey(item) !== key);
   input.value = removeMentionToken(input.value, target);
   renderChips();
+  saveWebviewState();
   updateTrigger();
   input.focus();
+}
+
+function syncAttachmentsWithInput(): void {
+  if (attachments.length === 0) return;
+  const next = attachments.filter((item) => containsMentionToken(input.value, item));
+  if (next.length !== attachments.length) {
+    attachments = next;
+    renderChips();
+  }
 }
 
 function dispatchClientCommand(text: string): "dispatched" | "notice" | "none" {
   const resolved = resolveClientSlashCommand(text, state);
   if (!resolved) return "none";
   if (resolved.kind === "message") {
+    if (!canRunClientCommandInStatus(resolved.message, state.status)) {
+      addNotice("info", "Wait until the current action finishes before running this command.");
+      scrollToEnd();
+      return "notice";
+    }
     send(resolved.message);
     return "dispatched";
   }
@@ -1012,18 +1374,22 @@ function acceptMenuItem(index: number, mode: "enter" | "tab"): void {
   if (selected.kind === "slash") {
     const cmd = selected.command;
     if (!cmd.takesArgs && mode === "enter" && prefix.trim() === "" && suffix.trim() === "" && cmd.source === "client") {
-      if (state.status === "ready") {
+      const resolved = resolveClientSlashCommand(`/${cmd.name}`, state);
+      if (resolved?.kind === "message" && canRunClientCommandInStatus(resolved.message, state.status)) {
         closePopover();
         input.value = "";
+        saveWebviewState();
         dispatchClientCommand(`/${cmd.name}`);
       } else {
         replaceTriggerRange(trigger, `/${cmd.name}`);
         closePopover();
+        saveWebviewState();
       }
       return;
     }
     replaceTriggerRange(trigger, `/${cmd.name} `);
     closePopover();
+    saveWebviewState();
     if (cmd.takesArgs) updateTrigger(true);
     return;
   }
@@ -1034,11 +1400,13 @@ function acceptMenuItem(index: number, mode: "enter" | "tab"): void {
       const fullText = prefix + argId;
       closePopover();
       input.value = "";
+      saveWebviewState();
       dispatchClientCommand(fullText);
       return;
     }
     replaceTriggerRange(trigger, mode === "tab" ? `${argId} ` : argId);
     closePopover();
+    saveWebviewState();
     return;
   }
 
@@ -1046,6 +1414,7 @@ function acceptMenuItem(index: number, mode: "enter" | "tab"): void {
   if (item.kind === "folder" && mode === "tab") {
     replaceTriggerRange(trigger, `@${item.path}`);
     dismissedKey = undefined;
+    saveWebviewState();
     updateTrigger(true);
     return;
   }
@@ -1061,16 +1430,21 @@ function acceptMenuItem(index: number, mode: "enter" | "tab"): void {
 }
 
 function submit(): void {
+  syncAttachmentsWithInput();
   const text = input.value;
-  if (text.trim() === "" || state.status !== "ready") return;
+  if (text.trim() === "") return;
   if (attachments.length === 0) {
     const outcome = dispatchClientCommand(text);
     if (outcome !== "none") {
       closePopover();
-      if (outcome === "dispatched") input.value = "";
+      if (outcome === "dispatched") {
+        input.value = "";
+        saveWebviewState();
+      }
       return;
     }
   }
+  if (state.status !== "ready") return;
   closePopover();
   followTail = true;
   syncJumpBottom();
@@ -1080,6 +1454,7 @@ function submit(): void {
   input.value = "";
   attachments = [];
   renderChips();
+  saveWebviewState();
 }
 
 sendButton.addEventListener("click", submit);
@@ -1103,6 +1478,7 @@ mentionTriggerButton.addEventListener("click", () => {
   const nextPos = before.length + insert.length;
   input.setSelectionRange(nextPos, nextPos);
   dismissedKey = undefined;
+  saveStateThrottled.request();
   updateTrigger(true);
 });
 
@@ -1133,6 +1509,7 @@ slashTriggerButton.addEventListener("click", () => {
     input.setSelectionRange(pos, pos);
   }
   dismissedKey = undefined;
+  saveStateThrottled.request();
   updateTrigger(true);
 });
 
@@ -1171,7 +1548,11 @@ document.addEventListener("mousedown", (event) => {
   closePopover();
 });
 
-input.addEventListener("input", () => updateTrigger());
+input.addEventListener("input", () => {
+  syncAttachmentsWithInput();
+  saveStateThrottled.request();
+  updateTrigger();
+});
 input.addEventListener("click", () => updateTrigger());
 input.addEventListener("keyup", (event) => {
   if (event.key === "ArrowLeft" || event.key === "ArrowRight" || event.key === "Home" || event.key === "End") {
@@ -1260,5 +1641,15 @@ transcript.addEventListener("click", (event) => {
 });
 
 window.addEventListener("message", (event: MessageEvent<HostMessage>) => onHostMessage(event.data));
+const restored = loadPersistedState();
+if (restored) {
+  input.value = restored.draft;
+  attachments = restored.attachments;
+  renderChips();
+  for (const [key, value] of Object.entries(restored.openDetails)) {
+    openDetails.set(key, value);
+  }
+  pendingScrollRestore = { followTail: restored.followTail, scrollTop: restored.scrollTop };
+}
 applyState(state);
 send({ type: "ready" });

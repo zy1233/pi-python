@@ -110,6 +110,39 @@ describe("available_commands_update and model switching", () => {
     expect(ofType(messages, "notice").some((n) => n.text === "Model: DeepSeek Chat.")).toBe(true);
     expect(readLog(log)).toContain("session/set_config_option model=deepseek-chat");
   });
+
+  it("clears stale usage on model switch and restores it if switching fails", async () => {
+    restoreEnv = withEnv({
+      FAKE_MODELS: JSON.stringify([
+        { value: "gpt-4o", name: "GPT-4o" },
+        { value: "deepseek-chat", name: "DeepSeek Chat" },
+      ]),
+    });
+    const { controller } = setup();
+    await controller.start();
+
+    await controller.send('usage:{"used":54200,"size":128000}');
+    expect(controller.stateMessage().usage).toEqual({ used: 54200, size: 128000 });
+
+    await controller.applyModel("deepseek-chat");
+    expect(controller.stateMessage().usage).toBeUndefined();
+
+    await controller.send('usage:{"used":1200,"size":64000}');
+    expect(controller.stateMessage().usage).toEqual({ used: 1200, size: 64000 });
+
+    restoreEnv();
+    restoreEnv = withEnv({
+      FAKE_FAIL_SET_MODEL: "1",
+      FAKE_MODELS: JSON.stringify([
+        { value: "gpt-4o", name: "GPT-4o" },
+        { value: "deepseek-chat", name: "DeepSeek Chat" },
+      ]),
+    });
+    await controller.restart();
+    await controller.send('usage:{"used":3000,"size":100000}');
+    await controller.applyModel("deepseek-chat");
+    expect(controller.stateMessage().usage).toEqual({ used: 3000, size: 100000 });
+  });
 });
 
 describe("@ mentions in ChatController", () => {

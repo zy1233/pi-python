@@ -1,5 +1,5 @@
 import { fuzzyScore } from "./mentions.js";
-import type { NoticeLevel, StateMessage, WebviewMessage } from "./protocol.js";
+import type { NoticeLevel, StateMessage, Status, WebviewMessage } from "./protocol.js";
 
 export interface SlashCommandInfo {
   name: string;
@@ -103,7 +103,7 @@ export function buildCommandCatalog(state: CatalogState): ComposerCommand[] {
       description: "Switch permission mode",
       source: "client",
       takesArgs: true,
-      argHint: "ask | auto | always-approve",
+      argHint: state.mode.options.map((o) => o.id).join(" | "),
     });
   }
   if (state.thinking && state.thinking.disabled === undefined) {
@@ -396,4 +396,25 @@ export function resolveClientSlashCommand(
   }
 
   return undefined;
+}
+
+/** Whether a local client command message can run while the controller is in `status`. */
+export function canRunClientCommandInStatus(message: WebviewMessage, status: Status): boolean {
+  switch (message.type) {
+    case "openLog":
+    case "openAgentConfig":
+    case "openGuide":
+      return true;
+    case "restartAgent":
+      return status !== "starting";
+    case "runSetup":
+      return status !== "starting" && status !== "busy" && status !== "cancelling" && status !== "unavailable";
+    case "newChat":
+    case "setMode":
+    case "setThinking":
+    case "setModel":
+      return status === "ready";
+    default:
+      return status === "ready";
+  }
 }
