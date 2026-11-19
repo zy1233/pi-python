@@ -43,8 +43,9 @@ api_key_env = "REAL_LLM_API_KEY" # key for `provider` only; other providers use 
 # reasoning = true
 # Wire format of thinking requests for `provider = "openai"`: "openai" (default; sends
 # `reasoning_effort`) or "gemini" (sends Google's `extra_body.google.thinking_config` with
-# `include_thoughts = true`). Google's own OpenAI-compatible endpoints pick "gemini" automatically;
-# set `thinking_format = "gemini"` when serving Gemini through a gateway or proxy.
+# `include_thoughts = true`). Google's own OpenAI-compatible endpoints pick "gemini" automatically
+# for non-2.5 models (`gemini-2.5*` keeps `reasoning_effort`); set `thinking_format = "gemini"`
+# explicitly when serving Gemini through a gateway or proxy.
 # thinking_format = "gemini"
 # The context window of the model, in tokens (a whole number). With it the agent tells a client how
 # full the context is (ACP `usage_update`; the VS Code extension shows it as a Context row), and

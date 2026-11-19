@@ -458,8 +458,10 @@ class TestGoogleThoughtAndReasoningDetails:
 
 
 class TestThoughtTagSplitter:
-    def _run_chunks(self, chunks: list[tuple[str, bool]]) -> tuple[str, str]:
-        splitter = ThoughtTagSplitter()
+    def _run_chunks(
+        self, chunks: list[tuple[str, bool]], *, parse_tags: bool = True
+    ) -> tuple[str, str]:
+        splitter = ThoughtTagSplitter(parse_tags=parse_tags)
         thoughts: list[str] = []
         texts: list[str] = []
         for text, flag in chunks:
@@ -525,6 +527,29 @@ class TestThoughtTagSplitter:
         )
         assert thought == ""
         assert text == "see <thought> tag"
+
+    def test_parse_tags_false_preserves_literal_thought_tag_unless_google_flagged(self):
+        assert self._run_chunks([("<thought>x</thought>done", False)], parse_tags=False) == (
+            "",
+            "<thought>x</thought>done",
+        )
+        assert self._run_chunks([("<thought>x</thought>done", True)], parse_tags=False) == (
+            "x",
+            "done",
+        )
+        assert self._run_chunks(
+            [("thinking", True), ("answer", False)],
+            parse_tags=False,
+        ) == ("thinking", "answer")
+
+    def test_leading_whitespace_before_thought_tag_and_whitespace_only(self):
+        assert self._run_chunks([("\n<thought>a</thought>x", False)]) == ("a", "x")
+        assert self._run_chunks([("\n", False), ("<thought>a</thought>x", False)]) == ("a", "x")
+        assert self._run_chunks([("   \n", False)]) == ("", "   \n")
+
+    def test_unclosed_and_empty_thought_tags(self):
+        assert self._run_chunks([("<thought>never closes", False)]) == ("never closes", "")
+        assert self._run_chunks([("<thought></thought>answer", False)]) == ("", "answer")
 
 
 def gemini_model(*, thinking_format: str | None = "gemini") -> Model:
@@ -595,7 +620,7 @@ async def test_gemini_wire_json_sends_nested_extra_body_without_reasoning_effort
             "google": {
                 "thinking_config": {
                     "include_thoughts": True,
-                    "thinking_level": "MAX",
+                    "thinking_level": "high",
                 }
             }
         }
@@ -671,3 +696,138 @@ async def test_gemini_thinking_followed_by_tool_call(monkeypatch: pytest.MonkeyP
     assert not [e for e in events if e.type == "text_delta"]
     assert final.content[0] == {"type": "thinking", "thinking": "let me call echo"}
     assert final.content[1]["type"] == "toolCall"
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("thinking_format", "reasoning_cap", "reasoning_level"),
+    [
+        (None, True, "high"),
+        ("openai", True, "high"),
+        ("gemini", False, "high"),
+        ("gemini", True, "off"),
+    ],
+)
+async def test_literal_thought_tag_stays_text_when_tag_splitting_is_gated(
+    monkeypatch: pytest.MonkeyPatch,
+    thinking_format: str | None,
+    reasoning_cap: bool,
+    reasoning_level: str,
+):
+    """Non-Gemini or disabled-thinking OpenAI streams must not swallow literal ``<thought>``."""
+    model = Model(
+        provider="openai",
+        model_id="gpt-4o",
+        base_url=GATEWAY,
+        reasoning=reasoning_cap,
+        thinking_format=thinking_format,  # type: ignore[arg-type]
+    )
+    plain_round = [
+        _chunk({"role": "assistant", "content": "<thought>"}),
+        _chunk({"content": "x</thought>done"}, finish="stop"),
+    ]
+    fake = _FakeCompletions(plain_round)
+    chat = ls_mod.resolve_chat_model(model, "sk-test", reasoning_level)
+    chat.async_client = fake
+    monkeypatch.setattr(ls_mod, "resolve_chat_model", lambda *a, **k: chat)
+
+    stream = await ls_mod.langchain_stream(
+        model,
+        LlmContext(system_prompt=None, messages=[user("hi")]),
+        StreamOptions(reasoning=reasoning_level, api_key="sk-test"),  # type: ignore[arg-type]
+    )
+    events = [e async for e in stream]
+    final = await stream.message_result()
+
+    assert not [e for e in events if e.type.startswith("thinking")]
+    assert final.content == [{"type": "text", "text": "<thought>x</thought>done"}]
+
+
+@pytest.mark.asyncio
+async def test_google_thought_flag_splits_without_tags_or_gemini_format(
+    monkeypatch: pytest.MonkeyPatch,
+):
+    """Stream chunks flagged ``extra_content.google.thought=true`` split even without tags."""
+    model = gateway_model()
+    flagged_round = [
+        _chunk(
+            {
+                "role": "assistant",
+                "content": "reason step",
+                "extra_content": {"google": {"thought": True}},
+            }
+        ),
+        _chunk({"content": "final answer"}, finish="stop"),
+    ]
+    wire_up(monkeypatch, model, flagged_round)
+
+    events, final = await run_turn(model, [user("solve")])
+
+    assert [e.delta for e in events if e.type == "thinking_delta"] == ["reason step"]
+    assert [e.delta for e in events if e.type == "text_delta"] == ["final answer"]
+    assert final.content == [
+        {"type": "thinking", "thinking": "reason step"},
+        {"type": "text", "text": "final answer"},
+    ]
+
+
+@pytest.mark.asyncio
+async def test_partial_close_tag_flushes_before_tool_call_events(
+    monkeypatch: pytest.MonkeyPatch,
+):
+    model = gemini_model(thinking_format="gemini")
+    partial_tag_tool_round = [
+        _chunk(
+            {
+                "role": "assistant",
+                "content": "<thought>check</tho",
+                "extra_content": {"google": {"thought": True}},
+            }
+        ),
+        _chunk(
+            {
+                "tool_calls": [
+                    {
+                        "index": 0,
+                        "id": "call_1",
+                        "type": "function",
+                        "function": {"name": "echo", "arguments": '{"m": "hi"}'},
+                    }
+                ]
+            },
+            finish="tool_calls",
+        ),
+    ]
+    wire_up(monkeypatch, model, partial_tag_tool_round)
+
+    events, final = await run_turn(model, [user("say hi")], tools=[echo_tool()])
+
+    kinds = [e.type for e in events]
+    thinking_deltas = [e.delta for e in events if e.type == "thinking_delta"]
+    last_thinking_idx = max(i for i, k in enumerate(kinds) if k == "thinking_delta")
+    assert last_thinking_idx < kinds.index("toolcall_start")
+    assert thinking_deltas == ["check", "</tho"]
+    assert final.content[0] == {"type": "thinking", "thinking": "check</tho"}
+    assert final.content[1]["type"] == "toolCall"
+
+
+@pytest.mark.asyncio
+async def test_unclosed_and_empty_thought_streams(monkeypatch: pytest.MonkeyPatch):
+    model = gemini_model(thinking_format="gemini")
+
+    wire_up(
+        monkeypatch,
+        model,
+        [_chunk({"role": "assistant", "content": "<thought>cut"}, finish="stop")],
+    )
+    _, unclosed_final = await run_turn(model, [user("cut")])
+    assert unclosed_final.content == [{"type": "thinking", "thinking": "cut"}]
+
+    wire_up(
+        monkeypatch,
+        model,
+        [_chunk({"role": "assistant", "content": "<thought></thought>done"}, finish="stop")],
+    )
+    empty_events, empty_final = await run_turn(model, [user("done")])
+    assert not [e for e in empty_events if e.type.startswith("thinking")]
+    assert empty_final.content == [{"type": "text", "text": "done"}]

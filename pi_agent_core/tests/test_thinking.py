@@ -101,12 +101,12 @@ async def test_mock_thinking_stream_order():
 @pytest.mark.parametrize(
     ("level", "expected"),
     [
-        ("minimal", "LOW"),
-        ("low", "LOW"),
-        ("medium", "MEDIUM"),
-        ("high", "HIGH"),
-        ("xhigh", "XHIGH"),
-        ("max", "MAX"),
+        ("minimal", "minimal"),
+        ("low", "low"),
+        ("medium", "medium"),
+        ("high", "high"),
+        ("xhigh", "high"),
+        ("max", "high"),
     ],
 )
 def test_apply_reasoning_gemini_explicit_format(level: ThinkingLevel, expected: str):
@@ -164,7 +164,7 @@ def test_apply_reasoning_gemini_off_and_disabled():
 def test_apply_reasoning_google_hosts_auto_select_gemini(base_url: str):
     model = Model(
         provider="openai",
-        model_id="gemini-2.5-pro",
+        model_id="gemini-3-pro",
         base_url=base_url,
         reasoning=True,
     )
@@ -172,14 +172,52 @@ def test_apply_reasoning_google_hosts_auto_select_gemini(base_url: str):
     assert "reasoning_effort" not in kwargs
     assert kwargs["extra_body"]["extra_body"]["google"]["thinking_config"] == {
         "include_thoughts": True,
-        "thinking_level": "HIGH",
+        "thinking_level": "high",
+    }
+
+
+@pytest.mark.parametrize(
+    "model_id",
+    [
+        "gemini-2.5-pro",
+        "gemini-2.5-flash",
+        "models/gemini-2.5-pro",
+        "google/gemini-2.5-flash-preview",
+    ],
+)
+def test_apply_reasoning_google_hosts_keep_openai_for_gemini_2_5(model_id: str):
+    """Gemini 2.5 does not take thinking_level, so auto-detect keeps reasoning_effort."""
+    model = Model(
+        provider="openai",
+        model_id=model_id,
+        base_url="https://generativelanguage.googleapis.com/v1beta/openai/",
+        reasoning=True,
+    )
+    kwargs = _apply_reasoning_params({}, model, "high")
+    assert "extra_body" not in kwargs
+    assert kwargs == {"reasoning_effort": "high"}
+
+
+def test_apply_reasoning_explicit_gemini_overrides_gemini_2_5():
+    model = Model(
+        provider="openai",
+        model_id="gemini-2.5-pro",
+        base_url="https://generativelanguage.googleapis.com/v1beta/openai/",
+        reasoning=True,
+        thinking_format="gemini",
+    )
+    kwargs = _apply_reasoning_params({}, model, "xhigh")
+    assert "reasoning_effort" not in kwargs
+    assert kwargs["extra_body"]["extra_body"]["google"]["thinking_config"] == {
+        "include_thoughts": True,
+        "thinking_level": "high",
     }
 
 
 def test_apply_reasoning_explicit_openai_overrides_google_host():
     model = Model(
         provider="openai",
-        model_id="gemini-2.5-pro",
+        model_id="gemini-3-pro",
         base_url="https://generativelanguage.googleapis.com/v1beta/openai/",
         reasoning=True,
         thinking_format="openai",

@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- **Gemini OpenAI-compatible `thinking_format` and `<thought>` stream extraction (`pi-agent-core`, `pi-agent-cli`)**: `Model.thinking_format` (`"openai"` | `"gemini"`, optional) and `[model]` / `[[models]]` key `thinking_format` control thinking requests and stream parsing for `provider = "openai"`. `thinking_format` belongs to one model entry and is never inherited across `[[models]]`; invalid values are dropped with a note at session start. Google's own OpenAI-compatible endpoints (`generativelanguage.googleapis.com` and `*-aiplatform.googleapis.com`) pick `"gemini"` automatically for non-2.5 models while keeping `"openai"` (`reasoning_effort`) for `gemini-2.5*` unless overridden; `"gemini"` sends `extra_body.google.thinking_config` (`include_thoughts = true`, lowercase `thinking_level` `"minimal"` / `"low"` / `"medium"` / `"high"` with `xhigh` and `max` mapped to `"high"`) and omits `reasoning_effort`. Stream parsing (`openai_reasoning`) extracts OpenRouter-style `delta.reasoning_details` and `extra_content.google.thought` / `<thought>...</thought>` blocks (gating `<thought>` tag matching to Gemini thinking streams or Google-flagged chunks so literal tags in non-Gemini answers stay plain text). Verified with local HTTP/mock-transport tests; **not verified** against live Google Gemini or Vertex AI APIs (#138).
+
 ## [1.0.0] - 2026-11-16
 
 This is 1.0.0, the first stable release of zycode. All seven Python packages and the TUI go to 1.0.0.

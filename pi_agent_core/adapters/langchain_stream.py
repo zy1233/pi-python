@@ -89,14 +89,16 @@ _DEEPSEEK_EFFORT: dict[ThinkingLevel, str | None] = {
     "max": "max",
 }
 
+# Google's OpenAI-compatible docs list minimal/low/medium/high (lowercase) for Gemini 3+.
+# Google defines no xhigh or max level, so both map to "high".
 _GEMINI_THINKING_LEVEL: dict[ThinkingLevel, str | None] = {
     "off": None,
-    "minimal": "LOW",
-    "low": "LOW",
-    "medium": "MEDIUM",
-    "high": "HIGH",
-    "xhigh": "XHIGH",
-    "max": "MAX",
+    "minimal": "minimal",
+    "low": "low",
+    "medium": "medium",
+    "high": "high",
+    "xhigh": "high",
+    "max": "high",
 }
 
 _GOOGLE_OPENAI_HOSTS = (
@@ -210,11 +212,19 @@ def _is_google_openai_api(base_url: str | None) -> bool:
     return host.endswith("-aiplatform.googleapis.com")
 
 
+def _is_gemini_2_5_model(model_id: str) -> bool:
+    """True for Gemini 2.5 model ids (e.g. 'gemini-2.5-pro', 'models/gemini-2.5-flash')."""
+    leaf = model_id.strip().lower().rsplit("/", 1)[-1]
+    return leaf.startswith("gemini-2.5") or leaf.startswith("gemini-2-5")
+
+
 def _openai_thinking_format(model: Model) -> ThinkingFormat:
     """Wire format of thinking requests for ``provider == "openai"``."""
     if model.thinking_format is not None:
         return model.thinking_format
-    return "gemini" if _is_google_openai_api(model.base_url) else "openai"
+    if _is_google_openai_api(model.base_url) and not _is_gemini_2_5_model(model.model_id):
+        return "gemini"
+    return "openai"
 
 
 def _apply_gemini_openai_thinking(kwargs: dict[str, Any], level: ThinkingLevel) -> dict[str, Any]:
@@ -689,7 +699,18 @@ async def langchain_stream(
             text_started = False
             thinking_started = False
             thinking_ended = False
-            thought_splitter = ThoughtTagSplitter() if model.provider.lower() == "openai" else None
+            if model.provider.lower() == "openai":
+                allow_tag_split = (
+                    _openai_thinking_format(model) == "gemini"
+                    and model.reasoning
+                    and bool(options.reasoning)
+                    and options.reasoning != "off"
+                )
+                thought_splitter: ThoughtTagSplitter | None = ThoughtTagSplitter(
+                    parse_tags=allow_tag_split
+                )
+            else:
+                thought_splitter = None
 
             stream.push(StartEvent(partial=partial.model_copy(deep=True)))
             stream.set_final_message(partial)
