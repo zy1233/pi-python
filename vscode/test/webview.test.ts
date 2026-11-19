@@ -1002,4 +1002,124 @@ describe.skipIf(!chrome || !built)("webview: slash commands and @ mentions", () 
     });
     expect(String(out.mentionText)).toContain("<img src=x onerror=window.__pwn=3>.ts");
   });
+
+  it("keeps trailing Chinese text when picking mid-sentence @ mentions, preserves draft on client notice or / button, blocks stale Enter while loading, and keeps /mode title readable at 320px", () => {
+    const out = run(`
+      document.body.style.width = "320px";
+      document.getElementById("root").style.width = "320px";
+      ${richState}
+      state({
+        mode: {
+          current: "ask",
+          options: [
+            { id: "ask", name: "Ask" },
+            { id: "auto", name: "Auto" },
+            { id: "always-approve", name: "Always approve" },
+          ],
+        },
+        commands,
+      });
+      const input = document.querySelector("textarea");
+      const menu = document.getElementById("composer-menu");
+      const chips = document.querySelector(".composer-chips");
+      const slashBtn = document.querySelector("[aria-label='Slash commands']");
+
+      // B1: mid-sentence @ mention in Chinese preserves trailing text.
+      input.value = "解释@ma然后改一下这个文件";
+      input.setSelectionRange(5, 5);
+      input.dispatchEvent(new Event("input", { bubbles: true }));
+      const qMa = [...window.__posted].filter((m) => m.type === "queryMentions").at(-1);
+      host({
+        type: "mentionResults",
+        requestId: qMa.requestId,
+        query: qMa.query,
+        items: [{ kind: "file", path: "src/main.ts", label: "main.ts", detail: "src" }],
+      });
+      input.dispatchEvent(new KeyboardEvent("keydown", { key: "Enter", bubbles: true }));
+      const afterMidSentence = input.value;
+      chips.querySelector(".chip-remove").click();
+
+      // NB #1: no-arg client command with trailing words keeps draft in composer.
+      input.value = "/config does not load, please fix";
+      input.dispatchEvent(new Event("input", { bubbles: true }));
+      input.dispatchEvent(new KeyboardEvent("keydown", { key: "Enter", bubbles: true }));
+      const afterConfigNotice = {
+        value: input.value,
+        notice: [...document.querySelectorAll(".notice")].at(-1)?.textContent,
+        sends: window.__posted.filter((m) => m.type === "send").length,
+      };
+
+      // NB #2: stale @ results cannot be accepted on Enter while a newer query is loading.
+      input.value = "@";
+      input.setSelectionRange(1, 1);
+      input.dispatchEvent(new Event("input", { bubbles: true }));
+      const qFirst = [...window.__posted].filter((m) => m.type === "queryMentions").at(-1);
+      host({
+        type: "mentionResults",
+        requestId: qFirst.requestId,
+        query: "",
+        items: [{ kind: "file", path: "a/first.txt", label: "first.txt", detail: "a" }],
+      });
+      input.value = "@zzz";
+      input.setSelectionRange(4, 4);
+      input.dispatchEvent(new Event("input", { bubbles: true }));
+      input.dispatchEvent(new KeyboardEvent("keydown", { key: "Enter", bubbles: true }));
+      const afterStaleEnter = {
+        value: input.value,
+        chipCount: chips.querySelectorAll(".chip").length,
+        sends: window.__posted.filter((m) => m.type === "send").length,
+      };
+
+      // NB #3: / button opens command list without mutating non-slash draft; picking inserts prefix.
+      input.value = "explain this";
+      input.setSelectionRange(12, 12);
+      slashBtn.click();
+      const afterSlashBtn = { hidden: menu.hidden, value: input.value };
+      input.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", bubbles: true }));
+      input.dispatchEvent(new KeyboardEvent("keydown", { key: "Enter", bubbles: true }));
+      const afterEscSend = {
+        value: input.value,
+        sentText: window.__posted.filter((m) => m.type === "send").at(-1)?.text,
+      };
+      input.value = "explain this";
+      input.setSelectionRange(12, 12);
+      slashBtn.click();
+      input.dispatchEvent(new KeyboardEvent("keydown", { key: "Enter", bubbles: true }));
+      const afterPickGoal = { value: input.value, hidden: menu.hidden };
+
+      // NB #11: /mode title does not truncate next to "ask | auto | always-approve" at 320px.
+      input.value = "/mo";
+      input.setSelectionRange(3, 3);
+      input.dispatchEvent(new Event("input", { bubbles: true }));
+      const modeTitle = [...menu.querySelectorAll(".popover-title")].find((el) => el.textContent === "/mode");
+      const modeNotClipped = modeTitle ? modeTitle.scrollWidth <= modeTitle.clientWidth + 1 : false;
+
+      window.__result = {
+        afterMidSentence,
+        afterConfigNotice,
+        afterStaleEnter,
+        afterSlashBtn,
+        afterEscSend,
+        afterPickGoal,
+        modeNotClipped,
+      };`);
+    expect(out).toMatchObject({
+      ok: true,
+      afterMidSentence: "解释@src/main.ts 然后改一下这个文件",
+      afterConfigNotice: {
+        value: "/config does not load, please fix",
+        notice: "/config takes no arguments.",
+        sends: 0,
+      },
+      afterStaleEnter: {
+        value: "@zzz",
+        chipCount: 0,
+        sends: 0,
+      },
+      afterSlashBtn: { hidden: false, value: "explain this" },
+      afterEscSend: { value: "", sentText: "explain this" },
+      afterPickGoal: { value: "/goal explain this", hidden: true },
+      modeNotClipped: true,
+    });
+  });
 });

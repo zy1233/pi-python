@@ -887,16 +887,16 @@ function removeAttachment(target: MentionAttachment): void {
   input.focus();
 }
 
-function dispatchClientCommand(text: string): boolean {
+function dispatchClientCommand(text: string): "dispatched" | "notice" | "none" {
   const resolved = resolveClientSlashCommand(text, state);
-  if (!resolved) return false;
+  if (!resolved) return "none";
   if (resolved.kind === "message") {
     send(resolved.message);
-  } else {
-    addNotice(resolved.level, resolved.text);
-    scrollToEnd();
+    return "dispatched";
   }
-  return true;
+  addNotice(resolved.level, resolved.text);
+  scrollToEnd();
+  return "notice";
 }
 
 function requestMentions(query: string): void {
@@ -969,6 +969,9 @@ function updateTrigger(force = false): void {
   if (wasMentionOpen && prev.kind === "mention" && prev.query === trigger.query && !force) {
     return;
   }
+
+  menuItems = [];
+  activeIndex = 0;
 
   if (!wasMentionOpen || trigger.query === "" || force) {
     requestMentions(trigger.query);
@@ -1060,10 +1063,13 @@ function acceptMenuItem(index: number, mode: "enter" | "tab"): void {
 function submit(): void {
   const text = input.value;
   if (text.trim() === "" || state.status !== "ready") return;
-  if (attachments.length === 0 && dispatchClientCommand(text)) {
-    closePopover();
-    input.value = "";
-    return;
+  if (attachments.length === 0) {
+    const outcome = dispatchClientCommand(text);
+    if (outcome !== "none") {
+      closePopover();
+      if (outcome === "dispatched") input.value = "";
+      return;
+    }
   }
   closePopover();
   followTail = true;
@@ -1114,8 +1120,13 @@ slashTriggerButton.addEventListener("click", () => {
     input.value = "/";
     input.setSelectionRange(1, 1);
   } else if (!/^[ \t]*\//.test(input.value)) {
-    input.value = `/ ${input.value}`;
-    input.setSelectionRange(1, 1);
+    activeTrigger = { kind: "slash", query: "", range: { start: 0, end: 0 } };
+    activeIndex = 0;
+    dismissedKey = undefined;
+    clearMentionTimer();
+    mentionLoading = false;
+    refreshOpenMenu();
+    return;
   } else {
     const firstSpace = input.value.search(/\s/);
     const pos = firstSpace >= 0 ? firstSpace : input.value.length;
@@ -1188,6 +1199,12 @@ input.addEventListener("keydown", (event) => {
       dismissedKey = activeTrigger ? triggerKey(activeTrigger) : undefined;
       closePopover();
       return;
+    }
+    if (activeTrigger?.kind === "mention" && mentionLoading) {
+      if (event.key === "Tab" || (event.key === "Enter" && !event.shiftKey)) {
+        event.preventDefault();
+        return;
+      }
     }
     if (menuItems.length > 0) {
       if (event.key === "ArrowDown") {

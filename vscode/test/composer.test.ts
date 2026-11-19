@@ -108,6 +108,26 @@ describe("detectComposerTrigger", () => {
     expect(detectComposerTrigger("user@example.com", 16)).toBeUndefined();
     expect(detectComposerTrigger("user_1@example.com", 18)).toBeUndefined();
     expect(detectComposerTrigger("@a,next", 2)).toEqual({ kind: "mention", query: "a", range: { start: 0, end: 2 } });
+    expect(detectComposerTrigger("解释@ma然后改一下这个文件", 5)).toEqual({
+      kind: "mention",
+      query: "ma",
+      range: { start: 2, end: 5 },
+    });
+    expect(detectComposerTrigger("(@ma)", 4)).toEqual({
+      kind: "mention",
+      query: "ma",
+      range: { start: 1, end: 4 },
+    });
+    expect(detectComposerTrigger("see @ma.", 7)).toEqual({
+      kind: "mention",
+      query: "ma",
+      range: { start: 4, end: 7 },
+    });
+    expect(detectComposerTrigger("see @a.ts:L1-L5.", 6)).toEqual({
+      kind: "mention",
+      query: "a",
+      range: { start: 4, end: 15 },
+    });
   });
 });
 

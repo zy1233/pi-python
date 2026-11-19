@@ -65,9 +65,10 @@ function buildExcludeGlob(folderUri: vscode.Uri): string {
  */
 export class WorkspaceMentions implements vscode.Disposable {
   private cache: CachedIndex | undefined;
+  private cacheVersion = 0;
   private watcherFolder: string | undefined;
   private watcherDisposables: vscode.Disposable[] = [];
-  private pendingIndex: { folder: string; promise: Promise<CachedIndex> } | undefined;
+  private pendingIndex: { folder: string; version: number; promise: Promise<CachedIndex> } | undefined;
 
   async search(folder: string, query: string, limit = DEFAULT_MENTION_LIMIT): Promise<RankedMention[]> {
     if (!vscode.workspace.isTrusted) return [];
@@ -146,8 +147,13 @@ export class WorkspaceMentions implements vscode.Disposable {
 
   dispose(): void {
     this.disposeWatcher();
-    this.cache = undefined;
+    this.invalidateCache();
     this.pendingIndex = undefined;
+  }
+
+  private invalidateCache(): void {
+    this.cacheVersion++;
+    this.cache = undefined;
   }
 
   private disposeWatcher(): void {
@@ -160,16 +166,16 @@ export class WorkspaceMentions implements vscode.Disposable {
   private ensureWatcher(folder: string): void {
     if (this.watcherFolder === folder) return;
     this.disposeWatcher();
-    this.cache = undefined;
+    this.invalidateCache();
     this.watcherFolder = folder;
     const watcher = vscode.workspace.createFileSystemWatcher(new vscode.RelativePattern(folder, "**/*"));
     this.watcherDisposables.push(
       watcher,
       watcher.onDidCreate(() => {
-        this.cache = undefined;
+        this.invalidateCache();
       }),
       watcher.onDidDelete(() => {
-        this.cache = undefined;
+        this.invalidateCache();
       }),
     );
   }
@@ -179,7 +185,12 @@ export class WorkspaceMentions implements vscode.Disposable {
     if (this.cache && this.cache.folder === folder && Date.now() < this.cache.expiresAt) {
       return this.cache;
     }
-    if (this.pendingIndex && this.pendingIndex.folder === folder) {
+    const buildVersion = this.cacheVersion;
+    if (
+      this.pendingIndex &&
+      this.pendingIndex.folder === folder &&
+      this.pendingIndex.version === buildVersion
+    ) {
       return this.pendingIndex.promise;
     }
 
@@ -208,7 +219,7 @@ export class WorkspaceMentions implements vscode.Disposable {
         folders: deriveFolders(files),
         expiresAt: Date.now() + CACHE_TTL_MS,
       };
-      if (this.watcherFolder === folder) {
+      if (this.watcherFolder === folder && this.cacheVersion === buildVersion) {
         this.cache = index;
       }
       return index;
@@ -218,7 +229,7 @@ export class WorkspaceMentions implements vscode.Disposable {
       }
     });
 
-    this.pendingIndex = { folder, promise: build };
+    this.pendingIndex = { folder, version: buildVersion, promise: build };
     return build;
   }
 }

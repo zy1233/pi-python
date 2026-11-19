@@ -148,6 +148,17 @@ function scanTokenEnd(text: string, from: number, stopPattern: RegExp): number {
   return end;
 }
 
+function scanMentionTokenEnd(text: string, pos: number): number {
+  let end = pos;
+  while (end < text.length && /[A-Za-z0-9_./\\:-]/.test(text[end] ?? "")) {
+    end++;
+  }
+  while (end > pos && (text[end - 1] === "." || text[end - 1] === "-" || text[end - 1] === ":")) {
+    end--;
+  }
+  return end;
+}
+
 export function detectComposerTrigger(text: string, cursor: number): ComposerTrigger | undefined {
   const pos = Math.max(0, Math.min(cursor, text.length));
   const before = text.slice(0, pos);
@@ -190,7 +201,7 @@ export function detectComposerTrigger(text: string, cursor: number): ComposerTri
   if (/[\s,;]/.test(query)) {
     return undefined;
   }
-  const end = scanTokenEnd(text, pos, /[\s,;]/);
+  const end = scanMentionTokenEnd(text, pos);
   return {
     kind: "mention",
     query,
