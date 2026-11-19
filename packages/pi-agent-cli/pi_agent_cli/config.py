@@ -14,7 +14,7 @@ from typing import Any, Literal, get_args
 
 from pi_agent_core.coding_tools.bash import MAX_TIMEOUT_SECONDS
 from pi_agent_core.home import pi_home
-from pi_agent_core.types import ThinkingLevel
+from pi_agent_core.types import ThinkingFormat, ThinkingLevel
 
 PermissionMode = Literal["ask", "auto", "always-approve"]
 # What to do about a project nobody has vouched for: ask the user, leave it alone, or trust it.
@@ -25,6 +25,8 @@ _VALID_DEFAULT_TRUST: set[str] = {"ask", "never", "always"}
 # The levels come from the type, so a level that the core learns is valid here at once.
 _THINKING_LEVELS: tuple[str, ...] = get_args(ThinkingLevel)
 _VALID_THINKING: set[str] = set(_THINKING_LEVELS)
+_THINKING_FORMATS: tuple[str, ...] = get_args(ThinkingFormat)
+_VALID_THINKING_FORMATS: set[str] = set(_THINKING_FORMATS)
 
 # ``pi_home`` (imported above and re-exported from here) is the one place that decides where
 # pi-python keeps its files; the extension loader and the extensions use the same function.
@@ -133,8 +135,8 @@ class ModelChoice:
     In ``[[models]]`` entries unset fields inherit from the default ``[model]`` table, but
     ``base_url`` / ``api_key_env`` / ``supports_images`` are only inherited when ``provider``
     is unset or equals the default provider (credentials never leak across providers).
-    ``context_window`` is never inherited: the size of a context window belongs to one model,
-    and another model of the same provider can have another size.
+    ``context_window`` and ``thinking_format`` are never inherited: both belong to one model,
+    and another model of the same provider or gateway can have another size or protocol.
     """
 
     id: str
@@ -147,6 +149,7 @@ class ModelChoice:
     # Only a model with a value gets a ``usage_update`` (``context_usage``), and only its value
     # reaches ``Model.context_window`` (``factory.model_for_choice``).
     context_window: int | None = None
+    thinking_format: ThinkingFormat | None = None
 
 
 # The largest ``context_window`` that is accepted. It is far above any model that exists. A
@@ -214,6 +217,7 @@ class CliConfig:
     # Whether the model can reason (``Model.reasoning``). ``None``: not set, and then asking
     # for a thinking level is taken as saying so (``model_reasoning``).
     reasoning: bool | None = None
+    thinking_format: ThinkingFormat | None = None
     skills_dirs: tuple[str, ...] = ()
     agent_command: str | None = None
     no_context_files: bool = False
@@ -257,6 +261,7 @@ class CliConfig:
             api_key_env=self.api_key_env,
             supports_images=self.supports_images,
             context_window=self.context_window,
+            thinking_format=self.thinking_format,
         )
 
     def model_choices(self) -> tuple[ModelChoice, ...]:
@@ -284,6 +289,7 @@ class CliConfig:
                     else self.supports_images,
                     # Not inherited, not even from the same provider: see ``ModelChoice``.
                     context_window=item.context_window,
+                    thinking_format=item.thinking_format,
                 )
             )
         return tuple(out)
@@ -430,6 +436,19 @@ def _from_toml(data: dict[str, Any]) -> CliConfig:
         reasoning_raw = data.get("reasoning")
     reasoning = _as_bool(reasoning_raw, False) if reasoning_raw is not None else None
 
+    format_notes: list[str] = []
+
+    def _model_thinking_format(value: object, where: str) -> ThinkingFormat | None:
+        fmt, note = _thinking_format(value, where)
+        if note is not None:
+            format_notes.append(note)
+        return fmt
+
+    thinking_format_raw = model.get("thinking_format")
+    if thinking_format_raw is None:
+        thinking_format_raw = data.get("thinking_format")
+    thinking_format = _model_thinking_format(thinking_format_raw, "[model]")
+
     agent_command = agent.get("command")
     if agent_command is not None:
         agent_command = str(agent_command).strip() or None
@@ -466,13 +485,16 @@ def _from_toml(data: dict[str, Any]) -> CliConfig:
                     context_window=_window(
                         item.get("context_window"), f'the "{model_id}" entry of [[models]]'
                     ),
+                    thinking_format=_model_thinking_format(
+                        item.get("thinking_format"), f'the "{model_id}" entry of [[models]]'
+                    ),
                 )
             )
 
     auto = _auto_config(data.get("auto"))
     leading_notes = [
         note
-        for note in (permission_note, thinking_note, *window_notes, compact_note)
+        for note in (permission_note, thinking_note, *window_notes, *format_notes, compact_note)
         if note is not None
     ]
     if leading_notes:
@@ -490,6 +512,7 @@ def _from_toml(data: dict[str, Any]) -> CliConfig:
         supports_images=supports_images,
         context_window=context_window,
         reasoning=reasoning,
+        thinking_format=thinking_format,
         skills_dirs=skills_dirs,
         agent_command=agent_command,
         no_context_files=bool(prompt.get("no_context_files", False)),
@@ -678,6 +701,17 @@ def _context_window(value: object, where: str) -> tuple[int | None, str | None]:
         f"context_window of {where} must be a whole number of tokens from 1 to "
         f"{MAX_CONTEXT_WINDOW}. The agent ignores it and sends no context size for that model."
     )
+
+
+def _thinking_format(value: object, where: str) -> tuple[ThinkingFormat | None, str | None]:
+    """The ``thinking_format`` of one model (``"openai"`` / ``"gemini"``), or ``(None, note)``."""
+    if value is None:
+        return None, None
+    if isinstance(value, str):
+        normalized = value.strip().lower()
+        if normalized in _VALID_THINKING_FORMATS:
+            return normalized, None  # type: ignore[return-value]
+    return None, f'thinking_format of {where} must be "openai" or "gemini". It is ignored.'
 
 
 def _as_bool(value: object, default: bool) -> bool:

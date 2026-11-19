@@ -9,6 +9,7 @@ import pytest
 from pi_agent_core.adapters.langchain_stream import (
     _ANTHROPIC_BUDGET,
     _DEEPSEEK_EFFORT,
+    _GEMINI_THINKING_LEVEL,
     _OPENAI_EFFORT,
     _apply_reasoning_params,
     _extract_thinking_delta,
@@ -54,7 +55,7 @@ def test_max_needs_the_capability_flag_like_every_level():
 def test_every_thinking_level_has_a_key_in_each_table():
     """A level that a table lacks sends no parameter, so the model silently does not think."""
     levels = set(get_args(ThinkingLevel))
-    for table in (_ANTHROPIC_BUDGET, _OPENAI_EFFORT, _DEEPSEEK_EFFORT):
+    for table in (_ANTHROPIC_BUDGET, _OPENAI_EFFORT, _DEEPSEEK_EFFORT, _GEMINI_THINKING_LEVEL):
         assert set(table) == levels
         assert [level for level, value in table.items() if value is None] == ["off"]
 
@@ -95,3 +96,102 @@ async def test_mock_thinking_stream_order():
     assert len(final.content) >= 2
     assert final.content[0]["type"] == "thinking"
     assert final.content[1]["type"] == "text"
+
+
+@pytest.mark.parametrize(
+    ("level", "expected"),
+    [
+        ("minimal", "LOW"),
+        ("low", "LOW"),
+        ("medium", "MEDIUM"),
+        ("high", "HIGH"),
+        ("xhigh", "XHIGH"),
+        ("max", "MAX"),
+    ],
+)
+def test_apply_reasoning_gemini_explicit_format(level: ThinkingLevel, expected: str):
+    model = Model(
+        provider="openai",
+        model_id="google/models/gemini-4-hydrogen",
+        base_url="http://127.0.0.1:3425/v1",
+        reasoning=True,
+        thinking_format="gemini",
+    )
+    kwargs = _apply_reasoning_params({}, model, level)
+    assert "reasoning_effort" not in kwargs
+    assert kwargs == {
+        "extra_body": {
+            "extra_body": {
+                "google": {
+                    "thinking_config": {
+                        "include_thoughts": True,
+                        "thinking_level": expected,
+                    }
+                }
+            }
+        }
+    }
+
+
+def test_apply_reasoning_gemini_off_and_disabled():
+    model = Model(
+        provider="openai",
+        model_id="google/models/gemini-4-hydrogen",
+        base_url="http://127.0.0.1:3425/v1",
+        reasoning=True,
+        thinking_format="gemini",
+    )
+    assert _apply_reasoning_params({}, model, "off") == {}
+    assert _apply_reasoning_params({}, model, None) == {}
+
+    disabled = Model(
+        provider="openai",
+        model_id="google/models/gemini-4-hydrogen",
+        base_url="http://127.0.0.1:3425/v1",
+        reasoning=False,
+        thinking_format="gemini",
+    )
+    assert _apply_reasoning_params({}, disabled, "high") == {}
+
+
+@pytest.mark.parametrize(
+    "base_url",
+    [
+        "https://generativelanguage.googleapis.com/v1beta/openai/",
+        "https://us-central1-aiplatform.googleapis.com/v1beta1/projects/p/locations/us-central1/endpoints/openapi",
+    ],
+)
+def test_apply_reasoning_google_hosts_auto_select_gemini(base_url: str):
+    model = Model(
+        provider="openai",
+        model_id="gemini-2.5-pro",
+        base_url=base_url,
+        reasoning=True,
+    )
+    kwargs = _apply_reasoning_params({}, model, "high")
+    assert "reasoning_effort" not in kwargs
+    assert kwargs["extra_body"]["extra_body"]["google"]["thinking_config"] == {
+        "include_thoughts": True,
+        "thinking_level": "HIGH",
+    }
+
+
+def test_apply_reasoning_explicit_openai_overrides_google_host():
+    model = Model(
+        provider="openai",
+        model_id="gemini-2.5-pro",
+        base_url="https://generativelanguage.googleapis.com/v1beta/openai/",
+        reasoning=True,
+        thinking_format="openai",
+    )
+    assert _apply_reasoning_params({}, model, "high") == {"reasoning_effort": "high"}
+
+
+def test_apply_reasoning_openrouter_gemini_stays_openai_when_unset():
+    model = Model(
+        provider="openai",
+        model_id="google/gemini-2.5-pro",
+        base_url="https://openrouter.ai/api/v1",
+        reasoning=True,
+    )
+    assert _apply_reasoning_params({}, model, "high") == {"reasoning_effort": "high"}
