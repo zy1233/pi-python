@@ -831,3 +831,30 @@ async def test_unclosed_and_empty_thought_streams(monkeypatch: pytest.MonkeyPatc
     empty_events, empty_final = await run_turn(model, [user("done")])
     assert not [e for e in empty_events if e.type.startswith("thinking")]
     assert empty_final.content == [{"type": "text", "text": "done"}]
+
+
+@pytest.mark.asyncio
+async def test_partial_tags_are_flushed_at_the_end_of_the_stream(
+    monkeypatch: pytest.MonkeyPatch,
+):
+    """A stream that ends inside a tag keeps the held characters: nothing is lost."""
+    model = gemini_model(thinking_format="gemini")
+
+    wire_up(
+        monkeypatch,
+        model,
+        [
+            _chunk({"role": "assistant", "content": "<thought>check</tho"}),
+            _chunk({"content": ""}, finish="stop"),
+        ],
+    )
+    _, close_final = await run_turn(model, [user("cut")])
+    assert close_final.content == [{"type": "thinking", "thinking": "check</tho"}]
+
+    wire_up(
+        monkeypatch,
+        model,
+        [_chunk({"role": "assistant", "content": "<tho"}, finish="stop")],
+    )
+    _, open_final = await run_turn(model, [user("cut")])
+    assert open_final.content == [{"type": "text", "text": "<tho"}]
