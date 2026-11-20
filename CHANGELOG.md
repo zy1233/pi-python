@@ -10,6 +10,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Added
 
 - **Gemini OpenAI-compatible `thinking_format` and `<thought>` stream extraction (`pi-agent-core`, `pi-agent-cli`)**: `Model.thinking_format` (`"openai"` | `"gemini"`, optional) and `[model]` / `[[models]]` key `thinking_format` control thinking requests and stream parsing for `provider = "openai"`. `thinking_format` belongs to one model entry and is never inherited across `[[models]]`; invalid values are dropped with a note at session start. Google's own OpenAI-compatible endpoints (`generativelanguage.googleapis.com` and `*-aiplatform.googleapis.com`) pick `"gemini"` automatically for non-2.5 models while keeping `"openai"` (`reasoning_effort`) for `gemini-2.5*` unless overridden; `"gemini"` sends `extra_body.google.thinking_config` (`include_thoughts = true`, lowercase `thinking_level` `"minimal"` / `"low"` / `"medium"` / `"high"` with `xhigh` and `max` mapped to `"high"`) and omits `reasoning_effort`. Stream parsing (`openai_reasoning`) extracts OpenRouter-style `delta.reasoning_details` and `extra_content.google.thought` / `<thought>...</thought>` blocks (gating `<thought>` tag matching to Gemini thinking streams or Google-flagged chunks so literal tags in non-Gemini answers stay plain text). Verified with local HTTP/mock-transport tests; **not verified** against live Google Gemini or Vertex AI APIs (#138).
+- **`--version` for the agent (`pi-agent-cli`)**: `python -m pi_agent_cli --version` prints one line, `pi-agent-cli <version>`, and exits 0. The name and the version are the values of the ACP `agentInfo`, so they cannot differ. The flag reads no config and no `local.env`, starts no setup and opens no network connection.
+
+### Changed
+
+- **The PyPI page of `pi-agent-core-lc` shows `pi_agent_core/README.md`**: the root `README.md` is now about zycode, so `pyproject.toml` names the core README as the package `readme`.
+
+### Fixed
+
+- **Links in the PyPI pages of `pi-dynamic-workflows-py`, `pi-goal-x-py` and `pi-web-access-py`**: each page had one link to a design record with a relative path (`../../docs/...`), which does not work on PyPI. The links are absolute now. A new test (`scripts/tests/test_package_readmes.py`) fails when a package README has a relative link.
 
 ## [1.0.0] - 2026-11-16
 

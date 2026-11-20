@@ -183,6 +183,8 @@ def test_apply_reasoning_google_hosts_auto_select_gemini(base_url: str):
         "gemini-2.5-flash",
         "models/gemini-2.5-pro",
         "google/gemini-2.5-flash-preview",
+        "gemini-2-5-pro",
+        "models/gemini-2-5-flash",
     ],
 )
 def test_apply_reasoning_google_hosts_keep_openai_for_gemini_2_5(model_id: str):
