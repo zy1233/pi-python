@@ -65,7 +65,7 @@ This record was added later, with the release PR of 1.6.0. The numbers come from
 
 - A release and a pre-release are two lines of the same extension. The version decides which one a user gets. The Marketplace rule: use **even minor numbers for releases** (`1.0.0`, `1.2.0`) and **odd minor numbers for pre-releases** (`1.1.0`, `1.1.1`). A user on the pre-release channel gets the highest version of both lines. A user on the release channel gets the highest release.
 - `1.0.0` is above `0.1.0`, so the pre-release `0.1.0` updates to `1.0.0`. `1.0.0` has no pre-release flag: the VSIX is made without `--pre-release`, the workflow calls `vsce publish` without it, and `scripts/check-vsix.mjs` fails a VSIX that has the flag.
-- The versions in use: `1.0.0`, `1.2.0`, `1.4.0` and `1.6.0` (releases), and `0.1.0` (pre-release). After `1.6.0`, the next pre-release line is `1.7.x`, and the next stable release is `1.8.0` (or `1.6.1` for a fix). A pre-release needs a new input in the workflow and the flag in `scripts/package.mjs` first. Do that in its own pull request.
+- The versions in use: `1.0.0`, `1.2.0`, `1.4.0`, `1.6.0` and `1.8.0` (releases), and `0.1.0` (pre-release). After `1.8.0`, the next pre-release line is `1.9.x`, and the next stable release is `1.10.0` (or `1.8.1` for a fix). A pre-release needs a new input in the workflow and the flag in `scripts/package.mjs` first. Do that in its own pull request.
 - A version cannot be published twice or changed. If a published version is wrong, publish a higher one.
 
 ## Before the run
