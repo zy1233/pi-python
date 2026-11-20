@@ -7,6 +7,7 @@ Standard-ACP agent over `AgentHarness`. Two modes:
 | ACP stdio | `python -m pi_agent_cli` | TUI-spawned agent; `/new` `/resume` `/quit` map to ACP methods |
 | Headless | `python -m pi_agent_cli -p "prompt"` | One-shot turn, prints assistant text, exits; exit status 1 and `error: <reason>` on stderr when the model fails |
 | Setup | `python -m pi_agent_cli --setup` | Asks for a model and an API key in a terminal and writes `agent.toml` and `local.env` (see First run) |
+| Version | `python -m pi_agent_cli --version` | Prints `<name> <version>` (the same values as ACP `agentInfo`) and exits 0. It reads no config and no `local.env`, starts no setup and opens no network connection |
 
 Headless flags: `--system-prompt`, `--append-system-prompt`, `--no-context-files`, `--no-git-context` — see `--help`. `--trust-project-extensions` works in both modes (see Project extensions).
 

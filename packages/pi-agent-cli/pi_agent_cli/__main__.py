@@ -3,6 +3,7 @@
 Default: ACP agent on stdio.
 `python -m pi_agent_cli -p "..."`: one-shot headless turn (no TUI).
 `python -m pi_agent_cli --setup`: choose a model and save its API key, in a terminal.
+`python -m pi_agent_cli --version`: print `<name> <version>` (the ACP `agentInfo`) and exit.
 """
 
 from __future__ import annotations
@@ -19,7 +20,7 @@ from typing import Any
 
 from acp import run_agent
 
-from pi_agent_cli.agent import PiAcpAgent
+from pi_agent_cli.agent import _AGENT_INFO, PiAcpAgent
 from pi_agent_cli.config import load_local_env
 from pi_agent_cli.extension_trust import TRUST_ENV
 from pi_agent_cli.headless import HeadlessPromptOverrides, resolve_print_prompt, run_print
@@ -200,6 +201,11 @@ def _build_parser() -> argparse.ArgumentParser:
             "Writes the [model] table of agent.toml and the key line of local.env."
         ),
     )
+    src.add_argument(
+        "--version",
+        action="store_true",
+        help="Print the name and the version of this agent, then exit.",
+    )
     parser.add_argument(
         "--cwd",
         metavar="PATH",
@@ -279,9 +285,13 @@ def _has_prompt_cli_flags(args: argparse.Namespace) -> bool:
 
 def main() -> None:
     parent_pid = _take_parent_pid()  # first: nothing started from here may inherit the variable
-    load_local_env()
     parser = _build_parser()
     args = parser.parse_args()
+    if args.version:
+        # Before anything reads the home: no config, no `local.env`, no setup, no network.
+        print(f"{_AGENT_INFO.name} {_AGENT_INFO.version}")
+        raise SystemExit(0)
+    load_local_env()
     _apply_trust_flag(args)
     headless = any(
         value is not None for value in (args.print_prompt, args.prompt_json, args.prompt_file)
