@@ -1,5 +1,22 @@
 # Changelog
 
+## 1.8.0 (2026-11-20)
+
+Stable release. It follows 1.6.0 and bundles agent 1.0.1 (1.6.0 had 1.0.0). A user of 1.6.0 gets it as an update.
+
+### New
+
+- **`@` context mentions in the chat composer.** Type `@` (or select the **@** button) to reference workspace files, folders, open tabs, the active file, or the active editor selection (`@path:L10-L20`). Supports smart-case fuzzy search, `Tab` drill-down into folders, attachment chips above the input (automatically pruned when you delete the inline `@` token), and workspace indexing that honors `.gitignore`, `files.exclude`, and `search.exclude` (including brace patterns).
+- **`/` slash command completion.** Type `/` (or select the **/** button) to pick from agent-advertised commands (via standard ACP `available_commands_update`) and client commands (`/new`, `/mode`, `/thinking`, `/model`, `/restart`, `/setup`, `/config`, `/log`, `/guide`), with option completion for `/mode`, `/thinking`, and `/model`. Local commands (`/log`, `/config`, `/guide`, `/restart`) also work while a turn is running.
+- **Model menu in the chat header.** When multiple models are configured in `agent.toml`, a **Model** selector appears in the header so you can switch models in place (also via `/model`). Switching to a model without `context_window` clears the previous model's **Context** row.
+- **Hidden-view permission fallback and status bar alert.** When a permission or project-trust request arrives while the chat view is hidden, VS Code shows a warning dialog with the full command or path, exact agent options, and an **Open chat** action, while the status bar highlights `zycode: approval needed`. Dismissing the dialog leaves the request pending rather than auto-answering it.
+
+### Changed
+
+- **Chat state survives sidebar switches.** The chat view retains its context while hidden and persists unsent drafts, `@` attachments, scroll position, and expanded/collapsed thinking and tool sections via VS Code webview state, avoiding Markdown re-parses when switching between sidebar views.
+- **Incremental, throttled tool output and thinking rendering.** Streaming `bash` output now uses incremental delta updates and 80 ms throttled in-place DOM updates instead of rebuilding the tool card on every chunk, preserving text selections and manual expand/collapse state.
+- **Bundles `zycode-agent` 1.0.1** for `linux-x64`, `linux-arm64`, `darwin-arm64`, `darwin-x64`, and `win32-x64` (was 1.0.0). Agent 1.0.1 adds `thinking_format = "gemini"` and `<thought>` / OpenRouter `reasoning_details` stream extraction for `provider = "openai"` (verified with local HTTP/mock-transport tests; not verified against live Google Gemini or Vertex AI APIs) and `--version`. The full list of agent changes is in the [CHANGELOG of the repository](https://github.com/zy1233/pi-python/blob/main/CHANGELOG.md).
+
 ## 1.6.0 (2026-11-19)
 
 Stable release. It follows 1.4.0 and has the same bundled agent (1.0.0). A user of 1.4.0 gets it as an update. The agent was not changed.
