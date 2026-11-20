@@ -93,8 +93,8 @@
 
 ```bash
 # 方式一：完整独立包（内置 zypi 与 zycode-agent，无需安装 Python）
-# 以下为 Linux x86_64 示例；其他平台为 zycode-linux-aarch64-1.0.0.tar.gz 与 zycode-darwin-aarch64-1.0.0.tar.gz。
-curl -L -o zycode.tar.gz https://github.com/zy1233/pi-python/releases/download/v1.0.0/zycode-linux-x86_64-1.0.0.tar.gz
+# 以下为 Linux x86_64 示例；其他平台为 zycode-linux-aarch64-1.0.1.tar.gz 与 zycode-darwin-aarch64-1.0.1.tar.gz。
+curl -L -o zycode.tar.gz https://github.com/zy1233/pi-python/releases/download/v1.0.1/zycode-linux-x86_64-1.0.1.tar.gz
 tar -xzf zycode.tar.gz
 sudo mv zypi zycode-agent /usr/local/bin/
 
@@ -103,7 +103,7 @@ zypi --setup
 zypi
 ```
 
-独立包文件名带有版本号，因此下载链接需使用具体 tag（`v1.0.0`），而非 `latest`。
+独立包文件名带有版本号，因此下载链接需使用具体 tag（`v1.0.1`），而非 `latest`。
 
 ```bash
 # 方式二：单独使用 zypi 二进制 + pip 安装的 Python 智能体
@@ -240,7 +240,7 @@ cd vscode && npm run check
 
 ## 路线图
 
-核心运行时、`AgentHarness`、编程工具、ACP CLI、`zypi` TUI、VS Code 扩展及扩展包均已发布 `1.0.0` 稳定版（完整演进记录见 [`CHANGELOG.md`](CHANGELOG.md)）。
+核心运行时、`AgentHarness`、编程工具、ACP CLI、`zypi` TUI 及扩展包均已发布 `1.0.1` 稳定版，VS Code 扩展已在 VS Code Marketplace 与 Open VSX 发布稳定版（完整演进记录见 [`CHANGELOG.md`](CHANGELOG.md) 与 [`vscode/CHANGELOG.md`](vscode/CHANGELOG.md)）。
 
 **下一步：**
 

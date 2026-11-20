@@ -7,18 +7,29 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.0.1] - 2026-11-20
+
+This is a patch release. It adds `thinking_format = "gemini"` and `<thought>` / OpenRouter `reasoning_details` stream extraction for `provider = "openai"`, adds `python -m pi_agent_cli --version`, and fixes the PyPI README metadata and links. All seven Python packages and the TUI go to 1.0.1.
+
 ### Added
 
 - **Gemini OpenAI-compatible `thinking_format` and `<thought>` stream extraction (`pi-agent-core`, `pi-agent-cli`)**: `Model.thinking_format` (`"openai"` | `"gemini"`, optional) and `[model]` / `[[models]]` key `thinking_format` control thinking requests and stream parsing for `provider = "openai"`. `thinking_format` belongs to one model entry and is never inherited across `[[models]]`; invalid values are dropped with a note at session start. Google's own OpenAI-compatible endpoints (`generativelanguage.googleapis.com` and `*-aiplatform.googleapis.com`) pick `"gemini"` automatically for non-2.5 models while keeping `"openai"` (`reasoning_effort`) for `gemini-2.5*` unless overridden; `"gemini"` sends `extra_body.google.thinking_config` (`include_thoughts = true`, lowercase `thinking_level` `"minimal"` / `"low"` / `"medium"` / `"high"` with `xhigh` and `max` mapped to `"high"`) and omits `reasoning_effort`. Stream parsing (`openai_reasoning`) extracts OpenRouter-style `delta.reasoning_details` and `extra_content.google.thought` / `<thought>...</thought>` blocks (gating `<thought>` tag matching to Gemini thinking streams or Google-flagged chunks so literal tags in non-Gemini answers stay plain text). Verified with local HTTP/mock-transport tests; **not verified** against live Google Gemini or Vertex AI APIs (#138).
-- **`--version` for the agent (`pi-agent-cli`)**: `python -m pi_agent_cli --version` prints one line, `pi-agent-cli <version>`, and exits 0. The name and the version are the values of the ACP `agentInfo`, so they cannot differ. The flag reads no config and no `local.env`, starts no setup and opens no network connection.
+- **`--version` for the agent (`pi-agent-cli`)**: `python -m pi_agent_cli --version` prints one line, `pi-agent-cli <version>`, and exits 0. The name and the version are the values of the ACP `agentInfo`, so they cannot differ. The flag reads no config and no `local.env`, starts no setup and opens no network connection (#141).
 
 ### Changed
 
+- **New version numbers (all Python packages, TUI)**: all seven Python packages (`pi-agent-core-lc`, `pi-agent-harness-lc`, `pi-agent-cli-lc`, `pi-web-access-py`, `pi-goal-x-py`, `pi-dynamic-workflows-py`, `pi-mcp-py`) and the TUI crates (`pi-pager-bin`, `pi-version`, and `tui/Cargo.lock`) go from 1.0.0 to 1.0.1. `pi-agent-core-lc`, `pi-agent-harness-lc` and `pi-agent-cli-lc` pin each other with `==`, and the four extension packages raise their workspace floors to `>=1.0.1`. The TUI has no code change.
 - **The PyPI page of `pi-agent-core-lc` shows `pi_agent_core/README.md`**: the root `README.md` is now about zycode, so `pyproject.toml` names the core README as the package `readme`.
 
 ### Fixed
 
-- **Links in the PyPI pages of `pi-dynamic-workflows-py`, `pi-goal-x-py` and `pi-web-access-py`**: each page had one link to a design record with a relative path (`../../docs/...`), which does not work on PyPI. The links are absolute now. A new test (`scripts/tests/test_package_readmes.py`) fails when a package README has a relative link.
+- **Links in the PyPI pages of `pi-dynamic-workflows-py`, `pi-goal-x-py` and `pi-web-access-py`**: each page had one link to a design record with a relative path (`../../docs/...`), which does not work on PyPI. The links are absolute now. A new test (`scripts/tests/test_package_readmes.py`) fails when a package README has a relative link (#141).
+
+### Known issues
+
+The known issues of 1.0.0 still hold, with two updates: the VS Code extension 1.4.0+ bundles agent 1.0.0+ and the owner verified the `max` thinking level and Context row on Windows (2026-11-17), and the Omarchy Agent menu patch (`docs/specs/2026-11-15-omarchy-agent-pr.md`) has been fixed, tested against the real 1.0.0 bundle archive with mise, and opened upstream (`omacom/omarchy#19501`).
+
+- **Gemini `thinking_format` and `<thought>` streaming were not verified against live Google Gemini or Vertex AI APIs (`pi-agent-core`, `pi-agent-cli`)**: verified with local HTTP/mock-transport tests only (#138).
 
 ## [1.0.0] - 2026-11-16
 
