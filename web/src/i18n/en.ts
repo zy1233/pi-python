@@ -282,7 +282,7 @@ PI_USE_MOCK=1 python -m pi_agent_cli -p "hello" --cwd .`,
   status: {
     eyebrow: 'Status',
     title: 'The status, as it is.',
-    lead: 'zycode 1.0.0 is stable. This table shows the status of every component.',
+    lead: `zycode ${release.version} is stable. This table shows the status of every component.`,
     columns: { component: 'Component', level: 'Status', role: 'What it does', source: 'Get it from' },
     levels: { stable: 'Stable', beta: 'Beta', alpha: 'Alpha' },
     where: { pypi: 'PyPI', releases: 'GitHub Releases', marketplace: 'VS Code Marketplace', openVsx: 'Open VSX' },

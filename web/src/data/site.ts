@@ -9,7 +9,7 @@ export const repo = 'https://github.com/zy1233/pi-python';
  * The download commands name a tag, not "latest", because the file name holds the version:
  * after the next release, "latest" would point to a release that has no file of that name.
  */
-export const release = { version: '1.0.0', tag: 'v1.0.0' } as const;
+export const release = { version: '1.0.1', tag: 'v1.0.1' } as const;
 
 /** Links that do not change with the language. */
 export const links = {

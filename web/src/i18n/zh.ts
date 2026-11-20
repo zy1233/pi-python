@@ -282,7 +282,7 @@ PI_USE_MOCK=1 python -m pi_agent_cli -p "hello" --cwd .`,
   status: {
     eyebrow: '状态',
     title: '如实的状态。',
-    lead: 'zycode 1.0.0 正式稳定。下表说明各个组件的当前状态。',
+    lead: `zycode ${release.version} 正式稳定。下表说明各个组件的当前状态。`,
     columns: { component: '组件', level: '状态', role: '作用', source: '获取方式' },
     levels: { stable: '稳定', beta: '测试', alpha: '早期' },
     where: { pypi: 'PyPI', releases: 'GitHub Releases', marketplace: 'VS Code Marketplace', openVsx: 'Open VSX' },

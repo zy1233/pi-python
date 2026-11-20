@@ -91,8 +91,8 @@ Download the standalone bundle (contains both `zypi` and `zycode-agent`; no Pyth
 
 ```bash
 # Option 1: Standalone bundle (zypi + zycode-agent; no Python required)
-# Linux x86_64 shown. Other targets: zycode-linux-aarch64-1.0.0.tar.gz, zycode-darwin-aarch64-1.0.0.tar.gz.
-curl -L -o zycode.tar.gz https://github.com/zy1233/pi-python/releases/download/v1.0.0/zycode-linux-x86_64-1.0.0.tar.gz
+# Linux x86_64 shown. Other targets: zycode-linux-aarch64-1.0.1.tar.gz, zycode-darwin-aarch64-1.0.1.tar.gz.
+curl -L -o zycode.tar.gz https://github.com/zy1233/pi-python/releases/download/v1.0.1/zycode-linux-x86_64-1.0.1.tar.gz
 tar -xzf zycode.tar.gz
 sudo mv zypi zycode-agent /usr/local/bin/
 
@@ -101,7 +101,7 @@ zypi --setup
 zypi
 ```
 
-The bundle file name holds the version, so the URL names the tag (`v1.0.0`), not `latest`.
+The bundle file name holds the version, so the URL names the tag (`v1.0.1`), not `latest`.
 
 ```bash
 # Option 2: zypi binary alone with the Python pip package
@@ -238,7 +238,7 @@ For real-LLM regression tests, the weekly provider matrix, and smoke scripts, se
 
 ## Roadmap
 
-Core runtime, `AgentHarness`, coding tools, ACP CLI, `zypi` TUI, VS Code extension, and extension packages are all released at `1.0.0` (see [`CHANGELOG.md`](CHANGELOG.md) for the full history).
+Core runtime, `AgentHarness`, coding tools, ACP CLI, `zypi` TUI, and extension packages are released at `1.0.1`, and the VS Code extension is stable on VS Code Marketplace and Open VSX (see [`CHANGELOG.md`](CHANGELOG.md) and [`vscode/CHANGELOG.md`](vscode/CHANGELOG.md) for the full history).
 
 **Next:**
 
