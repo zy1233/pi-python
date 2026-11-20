@@ -39,7 +39,7 @@ This is a process boundary with resource limits, **not a security boundary again
 written to break out**: the in-process audit hook that refuses `open`, `os.*`, `socket.*`,
 `subprocess.*` and `ctypes.*` is Python and can be undone by Python. What a script can still do
 then, per platform, is in
-[`docs/specs/2026-10-01-workflow-sandbox-design.md`](../../docs/specs/2026-10-01-workflow-sandbox-design.md)
+[`docs/specs/2026-10-01-workflow-sandbox-design.md`](https://github.com/zy1233/pi-python/blob/main/docs/specs/2026-10-01-workflow-sandbox-design.md)
 (section 9); run the agent in a container if scripts cannot be trusted. Sub-agents' tool calls
 still go through the session's permission policy.
 

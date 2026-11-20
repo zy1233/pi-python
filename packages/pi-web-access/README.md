@@ -34,4 +34,4 @@ The URL comes from the model, which may have read it on a page somebody else wro
 - At most 5 MiB of body is read, and the whole call takes at most 30 s. Output is cut at 2000 lines / 50 KB, and the result says so.
 - There is no setting to allow private addresses.
 
-Details: [Phase 7 spec, section 5.3](../../docs/specs/2026-09-22-phase7-extension-api-design.md).
+Details: [Phase 7 spec, section 5.3](https://github.com/zy1233/pi-python/blob/main/docs/specs/2026-09-22-phase7-extension-api-design.md).
