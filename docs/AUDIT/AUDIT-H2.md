@@ -204,10 +204,14 @@ H2 骨架忠实:§4.4 三条持久化时序不变量(message_end 先落盘后广
 - [x] **已修复(2026-07-29)** · `_create_user_message` 纯文本时 `content` 改为
   `[{"type":"text","text":...}]` 块数组(对齐 pi)。回归测试 ×1
   (`test_prompt_persists_user_message_as_text_block_array`)。
-- [ ]（H3 范围)`navigate_tree` 的 `editor_text` 只处理 user 消息目标,不处理
+- [x] **已修复(核对于 2026-11-20)**（H3 范围)`navigate_tree` 的 `editor_text` 只处理 user 消息目标,不处理
   `custom_message`(pi 两者都处理);`fromHook` 判定用 `hook_result is not None`
   过宽——hook 只返回 label 而摘要来自 LLM 时会误标 `fromHook=True`(pi 判
   `hookResult?.summary !== undefined`)。
+  证据(`main` 的代码):`agent_harness.py` 的 `_editor_text_for_target` 处理
+  `CustomMessageEntry`(字符串或文本块列表);`_navigate_tree_internal` 里
+  `summary_from_hook = hook_summary is not None`,`hook_summary` 只取 hook 结果的
+  `summary` 字段,与 pi 一致。
 - [x] **已更新(2026-07-29)** · `AGENTS.md` 状态段:H2 审计收尾 + 测试数 293。
 
 ---
