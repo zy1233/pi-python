@@ -318,11 +318,40 @@ describe("chat", () => {
     expect(ofType(messages, "turnEnd").at(-1)).toEqual({ type: "turnEnd", stopReason: "cancelled" });
   });
 
-  it("notes unsaved files", async () => {
-    const { controller, messages } = setup({ dirty: ["/p/a.ts", "/p/b.ts"] });
+  it("notes unsaved files with a Save all action, and delegates saveAll and openFile to the host", async () => {
+    const { controller, messages, host } = setup({ dirty: ["/p/a.ts", "/p/b.ts"] });
     await controller.start();
     await controller.send("hello");
-    expect(ofType(messages, "notice").some((n) => n.text.startsWith("2 files have unsaved changes"))).toBe(true);
+    const dirtyNotice = ofType(messages, "notice").find((n) => n.text.startsWith("2 files have unsaved changes"));
+    expect(dirtyNotice?.actions).toEqual([{ id: "saveAll", label: "Save all" }]);
+    await controller.saveAll();
+    expect(host.savedAllCount).toBe(1);
+    await controller.openFile("./src\\app.ts", 15);
+    await controller.openFile("../outside.ts");
+    expect(host.openedFiles).toEqual([{ folder: host.sessionFolder()!, relPath: "src/app.ts", line: 15 }]);
+  });
+
+  it("forwards configured mcpServers on session/new and image attachments on session/prompt", async () => {
+    const log = path.join(tempDir(dirs, "log-"), "agent.log");
+    restoreEnv = withEnv({ FAKE_LOG: log });
+    const mcpServers = [{ name: "fs", command: "npx", args: ["-y", "mcp-fs"], env: [] }];
+    const { controller } = setup({ settings: { mcpServers } });
+    await controller.start();
+    expect(
+      await controller.send("describe this", [], [{ mimeType: "image/png", data: "iVBORw0KGgo=", name: "shot.png" }]),
+    ).toBe(true);
+    expect(controller.transcript()[0]).toMatchObject({
+      type: "user",
+      text: "[Image: shot.png]\n\ndescribe this",
+    });
+    expect(await controller.send("", [], [{ mimeType: "image/jpeg", data: "AAAA" }])).toBe(true);
+    expect(controller.transcript()[2]).toMatchObject({
+      type: "user",
+      text: "[Image: image/jpeg]",
+    });
+    const lines = readLog(log);
+    expect(lines).toContain(`session/mcp ${JSON.stringify(mcpServers)}`);
+    expect(lines).toContain(`session/prompt_images ${JSON.stringify([{ mimeType: "image/png", data: "iVBORw0KGgo=" }])}`);
   });
 
   it("shows a refusal as a notice", async () => {

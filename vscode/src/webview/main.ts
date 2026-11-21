@@ -23,15 +23,20 @@ import {
   type MentionAttachment,
   type RankedMention,
 } from "../core/mentions.js";
-import type {
-  HostMessage,
-  NoticeAction,
-  PermissionRequestView,
-  StateMessage,
-  ToolCallView,
-  ToolStatus,
-  TranscriptItem,
-  WebviewMessage,
+import {
+  ALLOWED_IMAGE_MIMES,
+  MAX_IMAGES,
+  MAX_IMAGE_DATA_CHARS,
+  type HostMessage,
+  type ImageAttachment,
+  type ImageMimeType,
+  type NoticeAction,
+  type PermissionRequestView,
+  type StateMessage,
+  type ToolCallView,
+  type ToolStatus,
+  type TranscriptItem,
+  type WebviewMessage,
 } from "../core/protocol.js";
 import { describeContext, folderName, formatCost, formatDuration } from "../core/status-row.js";
 import { throttle, type Scheduler, type Throttled } from "../core/throttle.js";
@@ -209,6 +214,12 @@ let mentionSeq = 0;
 let mentionTimer: number | undefined;
 let mentionLoadingTimer: number | undefined;
 let attachments: MentionAttachment[] = [];
+let imageAttachments: ImageAttachment[] = [];
+
+const MAX_HISTORY = 50;
+const sentHistory: string[] = [];
+let historyIndex = -1;
+let historyDraft = "";
 
 function isPlainRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value);
@@ -910,6 +921,7 @@ const NOTICE_MESSAGE: Record<NoticeAction["id"], WebviewMessage> = {
   openGuide: { type: "openGuide" },
   openAgentConfig: { type: "openAgentConfig" },
   openLog: { type: "openLog" },
+  saveAll: { type: "saveAll" },
 };
 
 function addNotice(level: string, text: string, actions?: NoticeAction[]): void {
@@ -962,6 +974,7 @@ function resetTranscript(items: TranscriptItem[]): void {
   closePopover();
   if (!isInitial) {
     attachments = [];
+    imageAttachments = [];
     renderChips();
     openDetails.clear();
     pendingScrollRestore = undefined;
@@ -1056,6 +1069,23 @@ function onHostMessage(message: HostMessage): void {
       activeIndex = 0;
       renderPopover();
       return;
+    case "insertMention": {
+      const item = message.item;
+      const token = formatMentionToken(item);
+      const cursor = input.selectionStart ?? input.value.length;
+      const before = input.value.slice(0, cursor);
+      const after = input.value.slice(cursor);
+      const leadSpace = before.length > 0 && !/\s$/.test(before) ? " " : "";
+      const trailSpace = after.startsWith(" ") ? "" : " ";
+      const inserted = `${leadSpace}${token}${trailSpace}`;
+      input.value = before + inserted + after;
+      const nextPos = before.length + inserted.length;
+      input.setSelectionRange(nextPos, nextPos);
+      addAttachment(item);
+      saveWebviewState();
+      input.focus();
+      return;
+    }
   }
   scrollToEnd();
 }
@@ -1218,7 +1248,7 @@ function renderPopover(): void {
 
 function renderChips(): void {
   chipsBar.replaceChildren();
-  chipsBar.hidden = attachments.length === 0;
+  chipsBar.hidden = attachments.length === 0 && imageAttachments.length === 0;
   for (const att of attachments) {
     const label = mentionLabel(att);
     const title =
@@ -1243,6 +1273,63 @@ function renderChips(): void {
       ),
     );
   }
+  imageAttachments.forEach((img, index) => {
+    const label = `[Image: ${img.name ?? img.mimeType}]`;
+    const removeBtn = el("button", {
+      class: "chip-remove",
+      type: "button",
+      text: "×",
+      ariaLabel: `Remove ${label}`,
+      title: `Remove ${label}`,
+    });
+    removeBtn.addEventListener("click", () => {
+      imageAttachments.splice(index, 1);
+      renderChips();
+      input.focus();
+    });
+    chipsBar.append(
+      el(
+        "div",
+        { class: "chip image-chip", role: "listitem", title: label },
+        el("span", { class: "chip-label", text: label }),
+        removeBtn,
+      ),
+    );
+  });
+}
+
+function addImageAttachment(mimeType: string, base64Data: string, name?: string): void {
+  if (input.disabled) return;
+  if (!(ALLOWED_IMAGE_MIMES as readonly string[]).includes(mimeType)) return;
+  if (imageAttachments.length >= MAX_IMAGES) {
+    addNotice("warning", `At most ${MAX_IMAGES} images can be attached to a message.`);
+    scrollToEnd();
+    return;
+  }
+  if (base64Data === "" || base64Data.length > MAX_IMAGE_DATA_CHARS || !/^[A-Za-z0-9+/=]+$/.test(base64Data)) {
+    addNotice("warning", "Image is empty or too large (limit 5 MB).");
+    scrollToEnd();
+    return;
+  }
+  const cleanName = name && name.trim() !== "" ? name.trim().slice(0, 128) : undefined;
+  imageAttachments.push({
+    mimeType: mimeType as ImageMimeType,
+    data: base64Data,
+    ...(cleanName ? { name: cleanName } : {}),
+  });
+  renderChips();
+}
+
+function readImageFile(file: File): void {
+  if (!(ALLOWED_IMAGE_MIMES as readonly string[]).includes(file.type)) return;
+  const reader = new FileReader();
+  reader.addEventListener("load", () => {
+    if (typeof reader.result !== "string") return;
+    const comma = reader.result.indexOf(",");
+    if (comma < 0) return;
+    addImageAttachment(file.type, reader.result.slice(comma + 1), file.name);
+  });
+  reader.readAsDataURL(file);
 }
 
 function addAttachment(attachment: MentionAttachment): void {
@@ -1416,6 +1503,7 @@ function acceptMenuItem(index: number, mode: "enter" | "tab"): void {
         if (!openedViaButtonOnDraft || cmd.name === "new") {
           input.value = "";
           attachments = [];
+          if (cmd.name === "new") imageAttachments = [];
           renderChips();
         }
         saveWebviewState();
@@ -1476,36 +1564,94 @@ function acceptMenuItem(index: number, mode: "enter" | "tab"): void {
   closePopover();
 }
 
+function recordHistory(text: string): void {
+  if (text.trim() === "") return;
+  if (sentHistory.at(-1) !== text) {
+    sentHistory.push(text);
+    if (sentHistory.length > MAX_HISTORY) sentHistory.shift();
+  }
+  historyIndex = -1;
+  historyDraft = "";
+}
+
 function submit(): void {
   syncAttachmentsWithInput();
   const text = input.value;
-  if (text.trim() === "") return;
-  const outcome = dispatchClientCommand(text);
-  if (outcome !== "none") {
-    closePopover();
-    if (outcome === "dispatched") {
-      input.value = "";
-      attachments = [];
-      renderChips();
-      saveWebviewState();
+  if (text.trim() === "" && imageAttachments.length === 0) return;
+  if (text.trim() !== "") {
+    const outcome = dispatchClientCommand(text);
+    if (outcome !== "none") {
+      closePopover();
+      if (outcome === "dispatched") {
+        recordHistory(text);
+        input.value = "";
+        attachments = [];
+        imageAttachments = [];
+        renderChips();
+        saveWebviewState();
+      }
+      return;
     }
-    return;
   }
   if (state.status !== "ready") return;
   closePopover();
   followTail = true;
   syncJumpBottom();
-  const payload: WebviewMessage =
-    attachments.length > 0 ? { type: "send", text, mentions: [...attachments] } : { type: "send", text };
+  recordHistory(text);
+  const payload: WebviewMessage = {
+    type: "send",
+    text,
+    ...(attachments.length > 0 ? { mentions: [...attachments] } : {}),
+    ...(imageAttachments.length > 0 ? { images: [...imageAttachments] } : {}),
+  };
   send(payload);
   input.value = "";
   attachments = [];
+  imageAttachments = [];
   renderChips();
   saveWebviewState();
 }
 
 sendButton.addEventListener("click", submit);
 stopButton.addEventListener("click", () => send({ type: "cancel" }));
+
+input.addEventListener("paste", (event) => {
+  if (input.disabled) return;
+  const items = event.clipboardData?.items;
+  if (!items) return;
+  let handledImage = false;
+  for (const item of Array.from(items)) {
+    if ((ALLOWED_IMAGE_MIMES as readonly string[]).includes(item.type)) {
+      const file = item.getAsFile();
+      if (file) {
+        handledImage = true;
+        readImageFile(file);
+      }
+    }
+  }
+  if (handledImage) event.preventDefault();
+});
+
+composer.addEventListener("dragover", (event) => {
+  if (input.disabled) return;
+  if (event.dataTransfer?.types.includes("Files")) {
+    event.preventDefault();
+  }
+});
+
+composer.addEventListener("drop", (event) => {
+  if (input.disabled) return;
+  const files = event.dataTransfer?.files;
+  if (!files || files.length === 0) return;
+  let hasImage = false;
+  for (const file of Array.from(files)) {
+    if ((ALLOWED_IMAGE_MIMES as readonly string[]).includes(file.type)) {
+      hasImage = true;
+      readImageFile(file);
+    }
+  }
+  if (hasImage) event.preventDefault();
+});
 
 mentionTriggerButton.addEventListener("click", () => {
   if (input.disabled) return;
@@ -1597,6 +1743,7 @@ document.addEventListener("mousedown", (event) => {
 });
 
 input.addEventListener("input", () => {
+  historyIndex = -1;
   syncAttachmentsWithInput();
   saveStateThrottled.request();
   updateTrigger();
@@ -1658,6 +1805,51 @@ input.addEventListener("keydown", (event) => {
         acceptMenuItem(activeIndex, "enter");
         return;
       }
+    }
+  }
+
+  if (event.key === "Escape" && state.status === "busy") {
+    event.preventDefault();
+    send({ type: "cancel" });
+    return;
+  }
+
+  const noModifiers = !event.shiftKey && !event.ctrlKey && !event.altKey && !event.metaKey;
+  if (event.key === "ArrowUp" && noModifiers && sentHistory.length > 0) {
+    const cursor = input.selectionStart ?? 0;
+    const onFirstLine = !input.value.slice(0, cursor).includes("\n");
+    if (onFirstLine) {
+      event.preventDefault();
+      if (historyIndex === -1) {
+        historyDraft = input.value;
+        historyIndex = sentHistory.length - 1;
+      } else if (historyIndex > 0) {
+        historyIndex--;
+      }
+      input.value = sentHistory[historyIndex]!;
+      input.setSelectionRange(input.value.length, input.value.length);
+      syncAttachmentsWithInput();
+      saveStateThrottled.request();
+      return;
+    }
+  }
+
+  if (event.key === "ArrowDown" && noModifiers && historyIndex >= 0) {
+    const cursor = input.selectionEnd ?? input.value.length;
+    const onLastLine = !input.value.slice(cursor).includes("\n");
+    if (onLastLine) {
+      event.preventDefault();
+      if (historyIndex < sentHistory.length - 1) {
+        historyIndex++;
+        input.value = sentHistory[historyIndex]!;
+      } else {
+        historyIndex = -1;
+        input.value = historyDraft;
+      }
+      input.setSelectionRange(input.value.length, input.value.length);
+      syncAttachmentsWithInput();
+      saveStateThrottled.request();
+      return;
     }
   }
 

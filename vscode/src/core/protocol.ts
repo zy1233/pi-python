@@ -163,7 +163,18 @@ export interface PermissionRequestView {
 
 export type PermissionOutcome = "selected" | "cancelled";
 
-export type NoticeActionId = "runSetup" | "openGuide" | "openAgentConfig" | "openLog";
+export const MAX_IMAGES = 4;
+export const MAX_IMAGE_DATA_CHARS = 7_000_000;
+export const ALLOWED_IMAGE_MIMES = ["image/png", "image/jpeg", "image/gif", "image/webp"] as const;
+export type ImageMimeType = (typeof ALLOWED_IMAGE_MIMES)[number];
+
+export interface ImageAttachment {
+  mimeType: ImageMimeType;
+  data: string;
+  name?: string;
+}
+
+export type NoticeActionId = "runSetup" | "openGuide" | "openAgentConfig" | "openLog" | "saveAll";
 
 export interface NoticeAction {
   id: NoticeActionId;
@@ -192,11 +203,12 @@ export type HostMessage =
   | { type: "notice"; level: NoticeLevel; text: string; actions?: NoticeAction[] }
   | { type: "turnEnd"; stopReason: string }
   | { type: "diffState"; toolCallId: string; available: boolean }
-  | { type: "mentionResults"; requestId: number; query: string; items: RankedMention[] };
+  | { type: "mentionResults"; requestId: number; query: string; items: RankedMention[] }
+  | { type: "insertMention"; item: MentionAttachment };
 
 export type WebviewMessage =
   | { type: "ready" }
-  | { type: "send"; text: string; mentions?: MentionAttachment[] }
+  | { type: "send"; text: string; mentions?: MentionAttachment[]; images?: ImageAttachment[] }
   | { type: "cancel" }
   | { type: "newChat" }
   | { type: "permissionAnswer"; requestId: string; optionId: string }
@@ -210,11 +222,15 @@ export type WebviewMessage =
   | { type: "openAgentConfig" }
   | { type: "restartAgent" }
   | { type: "openLog" }
+  | { type: "saveAll" }
+  | { type: "openFile"; path: string; line?: number }
   | { type: "openLink"; url: string };
 
 const MAX_PROMPT_CHARS = 200_000;
 const MAX_ID_CHARS = 512;
 const MAX_URL_CHARS = 4096;
+const MAX_IMAGE_NAME_CHARS = 128;
+const BASE64_PATTERN = /^[A-Za-z0-9+/=]+$/;
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value);
@@ -266,6 +282,34 @@ function parseMentions(value: unknown): MentionAttachment[] | undefined {
   return out;
 }
 
+function isAllowedImageMime(value: unknown): value is ImageMimeType {
+  return typeof value === "string" && (ALLOWED_IMAGE_MIMES as readonly string[]).includes(value);
+}
+
+function parseImages(value: unknown): ImageAttachment[] | undefined {
+  if (!Array.isArray(value) || value.length > MAX_IMAGES) return undefined;
+  const out: ImageAttachment[] = [];
+  for (const entry of value) {
+    if (!isRecord(entry)) return undefined;
+    if (!isAllowedImageMime(entry.mimeType)) return undefined;
+    if (
+      typeof entry.data !== "string" ||
+      entry.data.length === 0 ||
+      entry.data.length > MAX_IMAGE_DATA_CHARS ||
+      !BASE64_PATTERN.test(entry.data)
+    ) {
+      return undefined;
+    }
+    if (entry.name !== undefined) {
+      if (!shortString(entry.name, MAX_IMAGE_NAME_CHARS)) return undefined;
+      out.push({ mimeType: entry.mimeType, data: entry.data, name: entry.name });
+    } else {
+      out.push({ mimeType: entry.mimeType, data: entry.data });
+    }
+  }
+  return out;
+}
+
 /** The message, if `value` is a well-formed message of the webview. Unknown types give `undefined`. */
 export function parseWebviewMessage(value: unknown): WebviewMessage | undefined {
   if (!isRecord(value) || typeof value.type !== "string") return undefined;
@@ -278,14 +322,28 @@ export function parseWebviewMessage(value: unknown): WebviewMessage | undefined 
     case "openAgentConfig":
     case "restartAgent":
     case "openLog":
+    case "saveAll":
       return { type: value.type };
     case "send": {
-      if (typeof value.text !== "string") return undefined;
-      if (value.text.trim() === "" || value.text.length > MAX_PROMPT_CHARS) return undefined;
-      if (value.mentions === undefined) return { type: "send", text: value.text };
-      const mentions = parseMentions(value.mentions);
-      if (!mentions) return undefined;
-      return mentions.length > 0 ? { type: "send", text: value.text, mentions } : { type: "send", text: value.text };
+      if (typeof value.text !== "string" || value.text.length > MAX_PROMPT_CHARS) return undefined;
+      let mentions: MentionAttachment[] | undefined;
+      if (value.mentions !== undefined) {
+        mentions = parseMentions(value.mentions);
+        if (!mentions) return undefined;
+      }
+      let images: ImageAttachment[] | undefined;
+      if (value.images !== undefined) {
+        images = parseImages(value.images);
+        if (!images) return undefined;
+      }
+      const hasImages = images !== undefined && images.length > 0;
+      if (value.text.trim() === "" && !hasImages) return undefined;
+      return {
+        type: "send",
+        text: value.text,
+        ...(mentions && mentions.length > 0 ? { mentions } : {}),
+        ...(hasImages ? { images } : {}),
+      };
     }
     case "permissionAnswer":
       if (!shortString(value.requestId, MAX_ID_CHARS) || !shortString(value.optionId, MAX_ID_CHARS)) {
@@ -325,6 +383,18 @@ export function parseWebviewMessage(value: unknown): WebviewMessage | undefined 
         return undefined;
       }
       return { type: "queryMentions", requestId: value.requestId, query: value.query };
+    case "openFile": {
+      if (typeof value.path !== "string") return undefined;
+      const normalized = normalizeRelativePath(value.path, "file");
+      if (!normalized) return undefined;
+      if (value.line !== undefined) {
+        if (typeof value.line !== "number" || !Number.isSafeInteger(value.line) || value.line < 1) {
+          return undefined;
+        }
+        return { type: "openFile", path: normalized, line: value.line };
+      }
+      return { type: "openFile", path: normalized };
+    }
     case "openLink":
       if (!shortString(value.url, MAX_URL_CHARS)) return undefined;
       return { type: "openLink", url: value.url };

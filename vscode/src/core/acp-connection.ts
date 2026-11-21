@@ -1,5 +1,8 @@
 import * as acp from "@agentclientprotocol/sdk";
 
+import type { McpServerConfig } from "./host.js";
+import type { ImageAttachment } from "./protocol.js";
+
 export type {
   InitializeResponse,
   ListSessionsResponse,
@@ -78,9 +81,9 @@ export class AcpConnection {
   }
 
   /** Opens a session. Throws `AuthRequiredError` when the agent needs the terminal login first. */
-  async newSession(cwd: string): Promise<acp.NewSessionResponse> {
+  async newSession(cwd: string, mcpServers: McpServerConfig[] = []): Promise<acp.NewSessionResponse> {
     try {
-      return await this.connection.agent.request(acp.methods.agent.session.new, { cwd, mcpServers: [] });
+      return await this.connection.agent.request(acp.methods.agent.session.new, { cwd, mcpServers });
     } catch (error) {
       const methodIds = authMethodIds(error);
       if (methodIds) throw new AuthRequiredError(methodIds, error instanceof Error ? error.message : "");
@@ -94,8 +97,8 @@ export class AcpConnection {
   }
 
   /** `session/load`: the agent replays the history as `session/update` notifications with `_meta.isReplay`. */
-  loadSession(cwd: string, sessionId: string): Promise<acp.LoadSessionResponse> {
-    return this.connection.agent.request(acp.methods.agent.session.load, { cwd, sessionId, mcpServers: [] });
+  loadSession(cwd: string, sessionId: string, mcpServers: McpServerConfig[] = []): Promise<acp.LoadSessionResponse> {
+    return this.connection.agent.request(acp.methods.agent.session.load, { cwd, sessionId, mcpServers });
   }
 
   /**
@@ -115,10 +118,14 @@ export class AcpConnection {
     return this.connection.agent.notify("_pi/yolo_mode_changed", { permission_mode: mode });
   }
 
-  async prompt(sessionId: string, text: string): Promise<acp.StopReason> {
+  async prompt(sessionId: string, text: string, images?: readonly ImageAttachment[]): Promise<acp.StopReason> {
+    const imageBlocks: acp.ContentBlock[] =
+      images?.map((img) => ({ type: "image" as const, mimeType: img.mimeType, data: img.data })) ?? [];
+    const textBlocks: acp.ContentBlock[] =
+      text !== "" || imageBlocks.length === 0 ? [{ type: "text" as const, text }] : [];
     const response = await this.connection.agent.request(acp.methods.agent.session.prompt, {
       sessionId,
-      prompt: [{ type: "text", text }],
+      prompt: [...imageBlocks, ...textBlocks],
     });
     return response.stopReason;
   }

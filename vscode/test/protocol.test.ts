@@ -1,10 +1,11 @@
 import { describe, expect, it } from "vitest";
 
+import { parseMcpServers } from "../src/core/host.js";
 import { isSafeLink, parseWebviewMessage } from "../src/core/protocol.js";
 
 describe("parseWebviewMessage", () => {
   it("accepts the simple messages", () => {
-    for (const type of ["ready", "cancel", "newChat", "runSetup", "restartAgent", "openLog", "openGuide", "openAgentConfig"]) {
+    for (const type of ["ready", "cancel", "newChat", "runSetup", "restartAgent", "openLog", "openGuide", "openAgentConfig", "saveAll"]) {
       expect(parseWebviewMessage({ type })).toEqual({ type });
     }
   });
@@ -48,6 +49,33 @@ describe("parseWebviewMessage", () => {
     });
   });
 
+  it("accepts send with valid images even when text is empty", () => {
+    expect(
+      parseWebviewMessage({
+        type: "send",
+        text: "",
+        images: [{ mimeType: "image/png", data: "iVBORw0KGgo=", name: "screen.png" }],
+      }),
+    ).toEqual({
+      type: "send",
+      text: "",
+      images: [{ mimeType: "image/png", data: "iVBORw0KGgo=", name: "screen.png" }],
+    });
+    expect(parseWebviewMessage({ type: "send", text: "hi", images: [] })).toEqual({ type: "send", text: "hi" });
+  });
+
+  it("accepts openFile with normalized path and optional line", () => {
+    expect(parseWebviewMessage({ type: "openFile", path: "./src\\app.ts" })).toEqual({
+      type: "openFile",
+      path: "src/app.ts",
+    });
+    expect(parseWebviewMessage({ type: "openFile", path: "src/app.ts", line: 42 })).toEqual({
+      type: "openFile",
+      path: "src/app.ts",
+      line: 42,
+    });
+  });
+
   it("accepts setModel and queryMentions", () => {
     expect(parseWebviewMessage({ type: "setModel", value: "gpt-4o", extra: true })).toEqual({
       type: "setModel",
@@ -70,6 +98,7 @@ describe("parseWebviewMessage", () => {
       { type: "unknown" },
       { type: "send" },
       { type: "send", text: "   " },
+      { type: "send", text: "   ", images: [] },
       { type: "send", text: "x".repeat(200_001) },
       { type: "send", text: "hi", mentions: "bad" },
       { type: "send", text: "hi", mentions: [{ kind: "file", path: "../secret.txt" }] },
@@ -79,6 +108,10 @@ describe("parseWebviewMessage", () => {
       { type: "send", text: "hi", mentions: [{ kind: "selection", path: "a.ts", range: { startLine: 5, endLine: 2 } }] },
       { type: "send", text: "hi", mentions: [{ kind: "selection", path: "a.ts", range: { startLine: 0, endLine: 2 } }] },
       { type: "send", text: "hi", mentions: Array.from({ length: 21 }, (_, i) => ({ kind: "file", path: `f${i}.ts` })) },
+      { type: "send", text: "hi", images: [{ mimeType: "image/svg+xml", data: "AAAA" }] },
+      { type: "send", text: "hi", images: [{ mimeType: "image/png", data: "not base64!" }] },
+      { type: "send", text: "hi", images: [{ mimeType: "image/png", data: "" }] },
+      { type: "send", text: "hi", images: Array.from({ length: 5 }, () => ({ mimeType: "image/png", data: "AAAA" })) },
       { type: "permissionAnswer", requestId: "r" },
       { type: "permissionAnswer", requestId: "", optionId: "o" },
       { type: "showDiff", toolCallId: 5 },
@@ -87,6 +120,10 @@ describe("parseWebviewMessage", () => {
       { type: "queryMentions", requestId: -1, query: "" },
       { type: "queryMentions", requestId: 1.5, query: "" },
       { type: "queryMentions", requestId: 1, query: "q".repeat(257) },
+      { type: "openFile", path: "../secret.txt" },
+      { type: "openFile", path: "/etc/passwd" },
+      { type: "openFile", path: "src/a.ts", line: 0 },
+      { type: "openFile", path: "src/a.ts", line: -3 },
       { type: "openLink", url: "" },
     ];
     for (const value of bad) expect(parseWebviewMessage(value)).toBeUndefined();
@@ -95,6 +132,30 @@ describe("parseWebviewMessage", () => {
   it("accepts the two modes", () => {
     expect(parseWebviewMessage({ type: "setMode", value: "auto" })).toEqual({ type: "setMode", value: "auto" });
     expect(parseWebviewMessage({ type: "setMode", value: "ask" })).toEqual({ type: "setMode", value: "ask" });
+  });
+});
+
+describe("parseMcpServers", () => {
+  it("normalizes stdio, http, and sse entries and skips invalid configs", () => {
+    expect(parseMcpServers(null)).toEqual([]);
+    expect(
+      parseMcpServers([
+        { name: " local-fs ", command: " npx ", args: ["-y", "mcp-fs"], env: [{ name: "ROOT", value: "/tmp" }] },
+        { type: "stdio", name: "git", command: "uvx" },
+        { type: "http", name: "remote-http", url: "https://mcp.example.com/http", headers: [{ name: "Authorization", value: "Bearer x" }] },
+        { type: "sse", name: "remote-sse", url: "https://mcp.example.com/sse" },
+        { name: "", command: "bad" },
+        { name: "no-cmd" },
+        { type: "http", name: "no-url" },
+        { name: "bad-args", command: "node", args: [123] },
+        { name: "bad-env", command: "node", env: [{ name: "", value: "1" }] },
+      ]),
+    ).toEqual([
+      { name: "local-fs", command: "npx", args: ["-y", "mcp-fs"], env: [{ name: "ROOT", value: "/tmp" }] },
+      { name: "git", command: "uvx", args: [], env: [] },
+      { type: "http", name: "remote-http", url: "https://mcp.example.com/http", headers: [{ name: "Authorization", value: "Bearer x" }] },
+      { type: "sse", name: "remote-sse", url: "https://mcp.example.com/sse", headers: [] },
+    ]);
   });
 });
 

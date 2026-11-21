@@ -13,7 +13,7 @@ import { AgentProcess, type StopTimings } from "./agent-process.js";
 import { parseAvailableCommandsUpdate, sameSlashCommands, type SlashCommandInfo } from "./composer.js";
 import { DiffTracker, type DiffInfo } from "./diff-tracker.js";
 import { classifyAuthRequired, classifyTurnFailure, failureNotice, setupText } from "./first-run.js";
-import type { Host } from "./host.js";
+import type { Host, McpServerConfig } from "./host.js";
 import {
   prepareBundledBinary,
   resolveAgentCommand,
@@ -22,12 +22,14 @@ import {
 import {
   DEFAULT_MENTION_LIMIT,
   formatPromptWithMentions,
+  normalizeRelativePath,
   type MentionAttachment,
   type RankedMention,
 } from "./mentions.js";
 import {
   ALWAYS_APPROVE,
   type HostMessage,
+  type ImageAttachment,
   type ModeState,
   type ModelState,
   type NoticeAction,
@@ -542,6 +544,10 @@ export class ChatController {
     await this.loadSessionInto(id);
   }
 
+  private mcpServers(): McpServerConfig[] {
+    return this.host.isTrusted() ? (this.host.settings().mcpServers ?? []) : [];
+  }
+
   private async openSession(): Promise<void> {
     const conn = this.conn;
     const cwd = this.cwd;
@@ -552,7 +558,7 @@ export class ChatController {
     this.agentCommands = [];
     let response: NewSessionResponse;
     try {
-      response = await conn.newSession(cwd);
+      response = await conn.newSession(cwd, this.mcpServers());
     } catch (error) {
       this.opening = false;
       if (generation !== this.generation) return;
@@ -817,29 +823,41 @@ export class ChatController {
   // ----- chat
 
   /** Sends a prompt. Returns `false` if it was not sent (the view should not offer it). */
-  async send(text: string, mentions: readonly MentionAttachment[] = []): Promise<boolean> {
+  async send(
+    text: string,
+    mentions: readonly MentionAttachment[] = [],
+    images: readonly ImageAttachment[] = [],
+  ): Promise<boolean> {
     const conn = this.conn;
     const sessionId = this.sessionId;
     const promptText = formatPromptWithMentions(text, mentions);
-    if (this.status !== "ready" || !conn || !sessionId || promptText.trim() === "") return false;
+    const hasImages = images.length > 0;
+    if (this.status !== "ready" || !conn || !sessionId || (promptText.trim() === "" && !hasImages)) return false;
     const dirty = this.cwd !== undefined ? this.host.dirtyFiles(this.cwd) : [];
     if (dirty.length > 0) {
       this.pushNotice(
         "info",
         `${dirty.length} file${dirty.length === 1 ? " has" : "s have"} unsaved changes. The agent reads the files on disk.`,
+        [{ id: "saveAll", label: "Save all" }],
       );
     }
     this.segmentId = undefined;
     const id = this.nextId("user");
-    this.items.push({ type: "user", id, text: promptText });
+    const imageLabels = hasImages ? images.map((img) => `[Image: ${img.name ?? img.mimeType}]`).join(" ") : "";
+    const displayText = hasImages
+      ? promptText.trim() !== ""
+        ? `${imageLabels}\n\n${promptText}`
+        : imageLabels
+      : promptText;
+    this.items.push({ type: "user", id, text: displayText });
     this.turnStart = this.items.length;
     this.turnStartedAt = this.now();
     this.lastTurnMs = undefined;
-    this.emit({ type: "userMessage", id, text: promptText });
+    this.emit({ type: "userMessage", id, text: displayText });
     this.setStatus("busy");
     const generation = this.generation;
     try {
-      const stopReason = await conn.prompt(sessionId, promptText);
+      const stopReason = await conn.prompt(sessionId, promptText, hasImages ? images : undefined);
       if (generation !== this.generation) return true;
       this.finishTurn(stopReason);
     } catch (error) {
@@ -850,6 +868,29 @@ export class ChatController {
       }
     }
     return true;
+  }
+
+  /** Saves all dirty files in the workspace. */
+  async saveAll(): Promise<void> {
+    if (!this.host.saveAll) return;
+    try {
+      await this.host.saveAll();
+    } catch (error) {
+      this.host.log.warn(`saveAll failed: ${messageOf(error)}`);
+    }
+  }
+
+  /** Opens a workspace-relative file in the host editor, optionally at `line` (1-based). */
+  async openFile(relPath: string, line?: number): Promise<void> {
+    const folder = this.cwd ?? this.host.sessionFolder();
+    if (folder === undefined || !this.host.openFile) return;
+    const normalized = normalizeRelativePath(relPath, "file");
+    if (!normalized) return;
+    try {
+      await this.host.openFile(folder, normalized, line);
+    } catch (error) {
+      this.host.log.warn(`openFile failed: ${messageOf(error)}`);
+    }
   }
 
   /** Searches workspace files, folders, and active editor context for `@` mention completion. */
@@ -1163,7 +1204,7 @@ export class ChatController {
     await this.closeSessionQuietly(previous);
     let response: Awaited<ReturnType<AcpConnection["loadSession"]>>;
     try {
-      response = await conn.loadSession(cwd, id);
+      response = await conn.loadSession(cwd, id, this.mcpServers());
     } catch (error) {
       this.opening = false;
       this.earlyUpdates = [];

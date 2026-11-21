@@ -111,6 +111,16 @@
         "title": "Delete chat",
         "category": "zycode",
         "icon": "$(trash)"
+      },
+      {
+        "command": "zycode.addSelectionToChat",
+        "title": "Add selection to chat",
+        "category": "zycode"
+      },
+      {
+        "command": "zycode.addFileToChat",
+        "title": "Add to chat context",
+        "category": "zycode"
       }
     ],
     "configuration": {
@@ -150,6 +160,12 @@
           "default": true,
           "scope": "window",
           "description": "Show the thinking blocks of the model in the chat (collapsed)."
+        },
+        "zycode.mcpServers": {
+          "type": "array",
+          "default": [],
+          "scope": "application",
+          "markdownDescription": "MCP servers forwarded to the agent in `session/new` and `session/load`. Each entry is either a stdio server (`{ \"name\": \"...\", \"command\": \"...\", \"args\": [], \"env\": [{ \"name\": \"...\", \"value\": \"...\" }] }`) or an HTTP/SSE server (`{ \"type\": \"http\" | \"sse\", \"name\": \"...\", \"url\": \"...\", \"headers\": [{ \"name\": \"...\", \"value\": \"...\" }] }`). Application-scoped so workspace settings cannot inject executables."
         }
       }
     },
@@ -187,6 +203,19 @@
         {
           "command": "zycode.deleteSession",
           "when": "false"
+        }
+      ],
+      "editor/context": [
+        {
+          "command": "zycode.addSelectionToChat",
+          "when": "editorTextFocus",
+          "group": "z_commands"
+        }
+      ],
+      "explorer/context": [
+        {
+          "command": "zycode.addFileToChat",
+          "group": "z_commands"
         }
       ],
       "view/title": [

@@ -244,6 +244,9 @@ const app = acp
   })
   .onRequest(acp.methods.agent.session.new, (ctx) => {
     record("session/new " + ctx.params.cwd);
+    if (ctx.params.mcpServers && ctx.params.mcpServers.length > 0) {
+      record("session/mcp " + JSON.stringify(ctx.params.mcpServers));
+    }
     if (env.FAKE_AUTH_MARKER && !existsSync(env.FAKE_AUTH_MARKER)) {
       throw new acp.RequestError(
         -32000,
@@ -290,6 +293,9 @@ const app = acp
   })
   .onRequest(acp.methods.agent.session.load, async (ctx) => {
     record(`session/load ${ctx.params.sessionId} ${ctx.params.cwd}`);
+    if (ctx.params.mcpServers && ctx.params.mcpServers.length > 0) {
+      record("session/mcp " + JSON.stringify(ctx.params.mcpServers));
+    }
     const entry = store.get(ctx.params.sessionId);
     if (!entry) throw new acp.RequestError(-32602, "unknown session");
     cwds.set(entry.id, ctx.params.cwd);
@@ -320,6 +326,10 @@ const app = acp
   })
   .onRequest(acp.methods.agent.session.prompt, async (ctx) => {
     const sessionId = ctx.params.sessionId;
+    const images = ctx.params.prompt.filter((block) => block.type === "image");
+    if (images.length > 0) {
+      record("session/prompt_images " + JSON.stringify(images.map((b) => ({ mimeType: b.mimeType, data: b.data }))));
+    }
     const prompt = ctx.params.prompt.map((block) => (block.type === "text" ? block.text : "")).join("");
     record("session/prompt " + prompt);
     remember(sessionId, "user", prompt);
