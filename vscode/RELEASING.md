@@ -4,6 +4,15 @@ This file is the checklist for a release. How the files are made is in `PACKAGIN
 
 ## Release record
 
+### 1.8.0 (2026-11-20)
+
+- The pull requests are #139 (merge commit `d94816e`, `@` context mentions and `/` slash command completion), #140 (merge commit `49d38a9`, optimization plan and P0 reliability/UX fixes), and #143 (merge commit `72fcda4`, version `1.8.0`, bundled agent moved from `1.0.0` to `1.0.1` from Release `v1.0.1`, CHANGELOG and README updates). 1.8.0 follows 1.6.0 and is a stable release (even minor, no pre-release flag).
+- Before the publish: the checks of all three pull requests were green (`vscode-extension.yml`, including `npm run check`, `linux-x64` VSIX build, `check-vsix.mjs`, and `smoke-vsix.mjs` starting the bundled `1.0.1` agent). #139 and #140 were reviewed and re-reviewed before merge, with blocking findings fixed on branch.
+- Published by the workflow: run `44754977146` on `main`, commit `72fcda4` (created `2026-11-20T14:35:48Z`; the `Publish` job `136363604587` ran from `14:56:30Z` to `14:58:09Z` and finished green after `zy1233` approval in `vscode-publish`).
+- Open VSX and the Marketplace accepted the five platform VSIX files (`darwin-arm64`, `darwin-x64`, `linux-arm64`, `linux-x64`, `win32-x64`) via OIDC Trusted Publishing with `--skip-duplicate` and no token.
+- The `sha256sum` values from the Publish log: `darwin-arm64` `f31c1efd21cec8614f9a5923731d8415e5ff25d2230e3dea59dcf8a9d1e036dd`, `darwin-x64` `a3f17e35c6cddafcc118ecbaf94d0fedb2035f81dfa5c1c5f8c7f7f50f06a29b`, `linux-arm64` `fbf6ecd6c49755c45f1a2bf2e072d3910bb703982c1221cc41bcda9d29e07824`, `linux-x64` `04b0485e32c1af4bbbc7ea4db6b8ebb303cc03d364c49321fd94d72557d3dd9a`, `win32-x64` `2040a84455c26ce9fa0f5808649529f91dea27f54a83ebd3c0d05fbe1d674dce`.
+- Not verified: live VS Code window testing of the 1.8.0 UI additions (`PermissionFallback` modal `showWarningMessage`, `StatusBar` approval warning, `WorkspaceMentions` live `FileSystemWatcher`, `retainContextWhenHidden` on real sidebar tab switches), and live Google Gemini / Vertex AI API calls for `thinking_format = "gemini"` in bundled agent `1.0.1`.
+
 ### 1.6.0 (2026-11-19)
 
 - The pull requests are #135 (merge commit `7dd6ee8`, chat styling and the copy buttons) and #136 (merge commit `25b1e3e`, the version, the CHANGELOG entry, the 1.2.0 release record). 1.6.0 follows 1.4.0 and bundles the same agent (1.0.0). It is a stable release (even minor, no pre-release flag). The owner chose the version.
