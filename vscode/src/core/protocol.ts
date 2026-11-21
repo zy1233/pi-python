@@ -224,6 +224,7 @@ export type WebviewMessage =
   | { type: "openLog" }
   | { type: "saveAll" }
   | { type: "openFile"; path: string; line?: number }
+  | { type: "copy"; text: string }
   | { type: "openLink"; url: string };
 
 const MAX_PROMPT_CHARS = 200_000;
@@ -395,6 +396,9 @@ export function parseWebviewMessage(value: unknown): WebviewMessage | undefined 
       }
       return { type: "openFile", path: normalized };
     }
+    case "copy":
+      if (!shortString(value.text, MAX_PROMPT_CHARS)) return undefined;
+      return { type: "copy", text: value.text };
     case "openLink":
       if (!shortString(value.url, MAX_URL_CHARS)) return undefined;
       return { type: "openLink", url: value.url };

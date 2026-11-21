@@ -153,6 +153,9 @@ export class ChatViewProvider implements vscode.WebviewViewProvider, vscode.Disp
       case "openFile":
         await controller.openFile(message.path, message.line);
         return;
+      case "copy":
+        await vscode.env.clipboard.writeText(message.text);
+        return;
       case "openLink":
         if (isSafeLink(message.url)) await vscode.env.openExternal(vscode.Uri.parse(message.url, true));
         return;

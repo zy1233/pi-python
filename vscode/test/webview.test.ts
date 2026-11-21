@@ -1615,4 +1615,35 @@ describe.skipIf(!chrome || !built)("webview: P1 images, insertMention, saveAll, 
       ],
     });
   });
+
+  it("tokenizes code blocks into tok-kw, tok-str, tok-num, and tok-com spans without altering textContent and posts copy to host", () => {
+    const code = 'const count = 42; // answer\nconst label = "hi";';
+    const out = run(`${mockClipboard}
+      ${state}
+      state({});
+      host({ type: "agentText", messageId: "a", text: ${lit("```ts\n" + code + "\n```")} });
+      const codeEl = document.querySelector("pre.code code");
+      const kws = [...codeEl.querySelectorAll(".tok-kw")].map((n) => n.textContent);
+      const nums = [...codeEl.querySelectorAll(".tok-num")].map((n) => n.textContent);
+      const strs = [...codeEl.querySelectorAll(".tok-str")].map((n) => n.textContent);
+      const coms = [...codeEl.querySelectorAll(".tok-com")].map((n) => n.textContent);
+      document.querySelector(".code-copy").click();
+      window.__result = {
+        fullText: codeEl.textContent,
+        kws,
+        nums,
+        strs,
+        coms,
+        copyPosted: window.__posted.filter((m) => m.type === "copy"),
+      };`);
+    expect(out).toMatchObject({
+      ok: true,
+      fullText: code,
+      kws: ["const", "const"],
+      nums: ["42"],
+      strs: ['"hi"'],
+      coms: ["// answer"],
+      copyPosted: [{ type: "copy", text: code }],
+    });
+  });
 });

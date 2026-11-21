@@ -360,6 +360,7 @@ function legacyCopy(text: string): boolean {
 
 async function writeClipboard(text: string): Promise<boolean> {
   (window as unknown as { __copied?: string }).__copied = text;
+  if (text !== "") send({ type: "copy", text });
   try {
     await navigator.clipboard.writeText(text);
     return true;

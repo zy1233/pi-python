@@ -51,12 +51,45 @@ const mockState = vi.hoisted(() => {
     configExcludes: {} as Record<string, Record<string, boolean>>,
     watcherHandlers: { create: [], delete: [], change: [] } as WatcherHandlers,
     configChangeHandlers: [] as ((ev: { affectsConfiguration(section: string): boolean }) => void)[],
+    clipboardText: "",
+    treeViewVisible: false,
   };
 });
 
 vi.mock("vscode", () => {
   class ThemeColor {
     constructor(public readonly id: string) {}
+  }
+
+  class ThemeIcon {
+    constructor(public readonly id: string) {}
+  }
+
+  class TreeItem {
+    id?: string;
+    description?: string;
+    iconPath?: unknown;
+    tooltip?: string;
+    contextValue?: string;
+    command?: unknown;
+    constructor(
+      public readonly label: string,
+      public readonly collapsibleState: number,
+    ) {}
+  }
+
+  class EventEmitter<T> {
+    private readonly listeners = new Set<(e: T) => void>();
+    readonly event = (fn: (e: T) => void) => {
+      this.listeners.add(fn);
+      return { dispose: () => this.listeners.delete(fn) };
+    };
+    fire(e: T): void {
+      for (const fn of this.listeners) fn(e);
+    }
+    dispose(): void {
+      this.listeners.clear();
+    }
   }
 
   class RelativePattern {
@@ -81,7 +114,11 @@ vi.mock("vscode", () => {
 
   return {
     StatusBarAlignment: { Left: 1, Right: 2 },
+    TreeItemCollapsibleState: { None: 0 },
     ThemeColor,
+    ThemeIcon,
+    TreeItem,
+    EventEmitter,
     RelativePattern,
     TabInputText,
     Uri,
@@ -92,6 +129,11 @@ vi.mock("vscode", () => {
     },
     env: {
       openExternal: vi.fn(async () => true),
+      clipboard: {
+        writeText: vi.fn(async (text: string) => {
+          mockState.clipboardText = text;
+        }),
+      },
     },
     window: {
       get activeTextEditor() {
@@ -100,6 +142,13 @@ vi.mock("vscode", () => {
       get tabGroups() {
         return { all: mockState.tabGroups };
       },
+      createTreeView: vi.fn(() => ({
+        message: undefined as string | undefined,
+        get visible() {
+          return mockState.treeViewVisible;
+        },
+        dispose() {},
+      })),
       createStatusBarItem: vi.fn(() => {
         const item = {
           text: "",
@@ -170,6 +219,7 @@ vi.mock("vscode", () => {
 });
 
 import { ChatViewProvider } from "../src/ui/chat-view.js";
+import { SessionsView } from "../src/ui/sessions-view.js";
 import { StatusBar } from "../src/ui/status-bar.js";
 import { WorkspaceMentions } from "../src/ui/workspace-mentions.js";
 
@@ -191,6 +241,8 @@ beforeEach(() => {
   mockState.configExcludes = {};
   mockState.watcherHandlers = { create: [], delete: [], change: [] };
   mockState.configChangeHandlers.length = 0;
+  mockState.clipboardText = "";
+  mockState.treeViewVisible = false;
 });
 
 describe("StatusBar UI wiring", () => {
@@ -361,5 +413,70 @@ describe("WorkspaceMentions UI wiring", () => {
     expect(mockState.findFilesCalls).toHaveLength(3);
 
     mentions.dispose();
+  });
+});
+
+describe("ChatViewProvider host clipboard & SessionsView timer polish", () => {
+  it("writes copy messages to vscode.env.clipboard and skips SessionsView timer refresh when hidden or empty", async () => {
+    let receiveMessage: ((raw: unknown) => void) | undefined;
+    const controller = {
+      onMessage: () => ({ dispose() {} }),
+      onSessionsChanged: () => ({ dispose() {} }),
+      sessions: { kind: "ready", rows: [{ id: "s1", cwd: "/p", title: "Chat 1", updatedAt: 1000 }], truncated: false },
+      currentSessionId: "s1",
+      canDeleteSessions: true,
+    } as unknown as ChatController;
+
+    const provider = new ChatViewProvider(makeUri("/ext") as never, controller, {
+      showLog() {},
+      async showDiff() {},
+      notify() {},
+      openGuide() {},
+      openAgentConfig() {},
+    });
+    provider.resolveWebviewView({
+      visible: true,
+      show: vi.fn(),
+      webview: {
+        options: {},
+        html: "",
+        cspSource: "vscode-webview:",
+        asWebviewUri: (u: unknown) => u,
+        postMessage: vi.fn(async () => true),
+        onDidReceiveMessage: (fn: (raw: unknown) => void) => {
+          receiveMessage = fn;
+          return { dispose() {} };
+        },
+      },
+      onDidDispose: () => ({ dispose() {} }),
+    } as never);
+
+    receiveMessage?.({ type: "copy", text: "copied from webview" });
+    await Promise.resolve();
+    expect(mockState.clipboardText).toBe("copied from webview");
+    provider.dispose();
+
+    vi.useFakeTimers();
+    try {
+      const sessions = new SessionsView(controller);
+      let changes = 0;
+      sessions.onDidChangeTreeData(() => {
+        changes++;
+      });
+
+      // Hidden view: timer does not fire tree data refresh.
+      mockState.treeViewVisible = false;
+      vi.advanceTimersByTime(60_000);
+      expect(changes).toBe(0);
+
+      // Visible view with rows: timer fires refresh.
+      mockState.treeViewVisible = true;
+      vi.advanceTimersByTime(60_000);
+      expect(changes).toBe(1);
+
+      sessions.dispose();
+    } finally {
+      vi.useRealTimers();
+    }
   });
 });

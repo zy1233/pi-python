@@ -73,7 +73,8 @@
       {
         "command": "zycode.restartAgent",
         "title": "Restart agent",
-        "category": "zycode"
+        "category": "zycode",
+        "icon": "$(refresh)"
       },
       {
         "command": "zycode.runSetup",
@@ -88,7 +89,8 @@
       {
         "command": "zycode.openAgentConfig",
         "title": "Open agent.toml",
-        "category": "zycode"
+        "category": "zycode",
+        "icon": "$(gear)"
       },
       {
         "command": "zycode.showLog",
@@ -219,6 +221,21 @@
         }
       ],
       "view/title": [
+        {
+          "command": "zycode.newChat",
+          "when": "view == zycode.chat",
+          "group": "navigation@1"
+        },
+        {
+          "command": "zycode.restartAgent",
+          "when": "view == zycode.chat",
+          "group": "navigation@2"
+        },
+        {
+          "command": "zycode.openAgentConfig",
+          "when": "view == zycode.chat",
+          "group": "navigation@3"
+        },
         {
           "command": "zycode.newChat",
           "when": "view == zycode.sessions",

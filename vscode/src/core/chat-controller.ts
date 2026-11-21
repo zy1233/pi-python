@@ -60,6 +60,7 @@ import {
 } from "./session-list.js";
 import { readUsageUpdate, sameUsage } from "./status-row.js";
 import {
+  MAX_LEVEL_SINCE,
   isThinkingLevel,
   noThinkingReason,
   readThinking,
@@ -68,7 +69,7 @@ import {
   type ThinkingRead,
 } from "./thinking.js";
 import { ToolCallStore, summarizeInput } from "./tool-calls.js";
-import { checkAgentIdentity } from "./version.js";
+import { agentVersionAtLeast, checkAgentIdentity } from "./version.js";
 
 export const TRUST_NOTE =
   "This is the zycode agent's own question about this project. It is not the VS Code Workspace Trust " +
@@ -157,6 +158,7 @@ export class ChatController {
   private segmentId: string | undefined;
   private modeNoticeShown = false;
   private stuckModeNoticeShown = false;
+  private contextHintShown = false;
   private setupInfo: SetupInfo | undefined;
   private settingUp = false;
   private projectTrustRefused = false;
@@ -916,6 +918,20 @@ export class ChatController {
     }
     if (stopReason !== "end_turn" && stopReason !== "cancelled" && stopReason !== "error") {
       this.pushNotice("info", `The turn ended: ${stopReason}.`);
+    }
+    if (
+      stopReason === "end_turn" &&
+      this.usage === undefined &&
+      !this.contextHintShown &&
+      this.command?.source === "bundled" &&
+      agentVersionAtLeast(this.initResult?.agentInfo?.version, MAX_LEVEL_SINCE)
+    ) {
+      this.contextHintShown = true;
+      this.pushNotice(
+        "info",
+        "Tip: set context_window in agent.toml to show the Context usage bar in the header.",
+        [{ id: "openAgentConfig", label: "Open agent.toml" }],
+      );
     }
     this.noteTurnFailure();
     this.emit({ type: "turnEnd", stopReason });

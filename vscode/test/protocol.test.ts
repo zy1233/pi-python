@@ -64,7 +64,7 @@ describe("parseWebviewMessage", () => {
     expect(parseWebviewMessage({ type: "send", text: "hi", images: [] })).toEqual({ type: "send", text: "hi" });
   });
 
-  it("accepts openFile with normalized path and optional line", () => {
+  it("accepts openFile with normalized path and optional line, and copy with non-empty text", () => {
     expect(parseWebviewMessage({ type: "openFile", path: "./src\\app.ts" })).toEqual({
       type: "openFile",
       path: "src/app.ts",
@@ -74,6 +74,11 @@ describe("parseWebviewMessage", () => {
       path: "src/app.ts",
       line: 42,
     });
+    expect(parseWebviewMessage({ type: "copy", text: "const x = 1;" })).toEqual({
+      type: "copy",
+      text: "const x = 1;",
+    });
+    expect(parseWebviewMessage({ type: "copy", text: "" })).toBeUndefined();
   });
 
   it("accepts setModel and queryMentions", () => {

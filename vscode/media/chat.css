@@ -311,8 +311,7 @@ pre.code code {
 .code-line {
   display: flex;
   align-items: center;
-  justify-content: space-between;
-  gap: 12px;
+  justify-content: flex-start;
   padding: 1px 10px;
   min-height: 1.5em;
   white-space: pre;
@@ -320,6 +319,19 @@ pre.code code {
 }
 .code-line:hover {
   background: color-mix(in srgb, var(--vscode-list-hoverBackground, rgba(128, 128, 128, 0.14)) 75%, transparent);
+}
+.tok-com {
+  color: var(--vscode-debugTokenExpression-name, var(--vscode-descriptionForeground));
+  font-style: italic;
+}
+.tok-str {
+  color: var(--vscode-debugTokenExpression-string, var(--vscode-terminal-ansiGreen, #ce9178));
+}
+.tok-kw {
+  color: var(--vscode-debugTokenExpression-type, var(--vscode-terminal-ansiMagenta, #569cd6));
+}
+.tok-num {
+  color: var(--vscode-debugTokenExpression-number, var(--vscode-terminal-ansiCyan, #b5cea8));
 }
 
 .copy-btn {
