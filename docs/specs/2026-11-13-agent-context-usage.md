@@ -31,7 +31,7 @@ The extension reads `usage_update` when an agent sends it (design section 7d). U
 | 4 | Does the agent know the size of the window? | No. `Model.context_window` has the default 128,000 (`pi_agent_core/types.py`), and `model_for_choice` (`pi_agent_cli/factory.py`) does not set it. `agent.toml` has no key for it: `ModelChoice` has `id`, `name`, `provider`, `base_url`, `api_key_env` and `supports_images`. So 128,000 is a placeholder for every model, and a percent from it is wrong for a model with another window. |
 | 5 | Does the agent know the cost? | No. `Usage.cost` exists, but nothing fills it. Only the benchmark script (`benchmarks/evaluator.py`) has a price table. In the 21 messages of row 3, `cost.total` is 0 in all. |
 | 6 | Where is the window used today? | Only for compaction. `should_compact` is true when the count is above `context_window - reserve_tokens` (128,000 - 16,384 = 111,616 today). `auto_compact` is off by default. `factory.py` turns it on when `max_turns >= 30`. |
-| 7 | Do other clients read `usage_update`? | The pager `zypi` does not: no Rust file under `tui/` names it. The pager reads `_meta.totalTokens`, and the agent does not send it (registry section 5). The decision of 2026-10-13 (PR #19) says the same: the pager shows no context and no cost, and no number is invented. |
+| 7 | Do other clients read `usage_update`? | At investigation time (2026-11-13), the pager `zypi` did not: no Rust file under `tui/` named it; the pager read `_meta.totalTokens`, which the agent does not send (registry section 5), per the decision of 2026-10-13 (PR #19). *(Updated 2026-11-21: `zypi` now consumes `usage_update` for both the context bar and `[ui.status_line]`.)* |
 
 ## 4. What the agent does now (built 2026-11-16, Plan A)
 
@@ -59,7 +59,7 @@ The change follows the proposal of the first version of this record. The differe
 - **Gateways.** A gateway that sends no usage gives no update. The agent does not show an estimate that has no number of a provider behind it.
 - **A window that is too small.** A user who writes a window under the real one can see more than 100 %. The agent sends the number as it is.
 - **A change to a model with no window.** The client keeps the old numbers (section 4, item 3).
-- **Clients.** Only the extension shows `usage_update`. `zypi` reads the message and ignores it. Its crate `agent-client-protocol` 0.10.4 parses `usage_update` only with the feature `unstable`, and `tui/Cargo.toml` turns that feature on. A check of 2026-11-16 used a small Rust program with the same crate versions (from `tui/Cargo.lock`) and the message of the probe: the message parses, and the same program without the feature fails with `unknown variant usage_update`. After the parse, the pager has a catch-all arm for the variants that it does not use (`acp/tracker.rs`), so it does nothing with the update. Do not remove that feature without a new check. To show the update in `zypi`, the pager needs a Rust change. A client that cannot read `usage_update` gets it only when the user wrote a `context_window`.
+- **Clients.** Both the extension and `zypi` consume `usage_update` (updated 2026-11-21: `zypi` handles `acp::SessionUpdate::UsageUpdate` in `acp_handler/mod.rs`, updating `context_state`, `override_context_window`, `usage_cost_usd`, and `[ui.status_line]` via `ClientOwnedFields`). Its crate `agent-client-protocol` 0.10.4 parses `usage_update` only with the feature `unstable`, and `tui/Cargo.toml` turns that feature on. A check of 2026-11-16 used a small Rust program with the same crate versions (from `tui/Cargo.lock`) and the message of the probe: the message parses, and the same program without the feature fails with `unknown variant usage_update`. Do not remove that feature without a new check. A client that cannot read `usage_update` gets it only when the user wrote a `context_window`.
 
 ## 6. Release path
 
@@ -72,7 +72,7 @@ At the extension release, change the sentences that say that the bundled agent s
 1. Change the agent? **Yes** (the user, 2026-11-16). It is built, and it is released in agent 1.0.0.
 2. The source of the window size: **A** (section 4, item 1).
 3. Compaction by the real window, in the same change? **Yes.** It follows from setting `Model.context_window`. It has its own test, and a guard for small windows (section 4, item 5).
-4. Teach the pager to read `usage_update`? **Open.** Not decided, not built.
+4. Teach the pager to read `usage_update`? **Yes (built 2026-11-21).** `zypi` consumes `acp::SessionUpdate::UsageUpdate` for both the context bar and `[ui.status_line]`.
 
 ## 8. What the extension does today
 

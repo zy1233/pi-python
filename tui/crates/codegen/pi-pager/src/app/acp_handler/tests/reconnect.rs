@@ -41,6 +41,32 @@
     }
 
     #[test]
+    fn handle_updates_context_and_cost_from_usage_update() {
+        let mut app = make_app_with_agent("sess-1");
+        let (tx, _rx) = tokio::sync::oneshot::channel();
+        let usage = acp::UsageUpdate::new(42_000, 100_000).cost(acp::Cost::new(1.25, "USD"));
+        let request = acp::SessionNotification::new(
+            acp::SessionId::new("sess-1"),
+            acp::SessionUpdate::UsageUpdate(usage),
+        );
+        let affected = handle(
+            AcpClientMessage::SessionNotification(pi_acp_lib::AcpArgs {
+                request,
+                response_tx: tx,
+            }),
+            &mut app,
+        );
+        assert!(affected, "live usage_update on active agent must trigger redraw");
+        let agent = app.agents.get(&AgentId(0)).unwrap();
+        let ctx = agent.context_state.as_ref().expect("context_state populated");
+        assert_eq!(ctx.used, 42_000);
+        assert_eq!(ctx.total, 100_000);
+        assert_eq!(ctx.usage_pct, 42);
+        assert_eq!(agent.session.models.get_context_window(), Some(100_000));
+        assert_eq!(agent.usage_cost_usd, Some(1.25));
+    }
+
+    #[test]
     fn duplicate_event_id_is_dropped_and_highwater_advances() {
         // Each session/update carries a monotonic eventId; live + replay of the
         // same event share it. A client that receives an event twice must render

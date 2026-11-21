@@ -237,6 +237,7 @@ impl AppView {
             return ClientOwnedFields::default();
         };
         let session = &agent.session;
+        let context = agent.context_state.as_ref().filter(|c| c.total > 0);
         ClientOwnedFields {
             session_name: agent
                 .display_name
@@ -246,6 +247,10 @@ impl AppView {
             session_id: session.session_id.as_ref().map(|id| id.0.to_string()),
             model_id: session.models.current_model_id_str().map(str::to_owned),
             model_name: session.models.current_model_name(),
+            context_window_size: context.map(|c| c.total),
+            context_tokens: context.map(|c| c.used),
+            used_percentage: context.map(|c| c.usage_pct),
+            total_cost_usd_bits: agent.usage_cost_usd.map(f64::to_bits),
             turn_running: agent.turn_started_at.is_some(),
         }
     }

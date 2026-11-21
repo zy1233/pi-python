@@ -249,6 +249,48 @@ fn builtin_row_has_no_context_or_cost_to_show_without_a_status_from_the_agent() 
 }
 
 #[test]
+fn usage_update_populates_builtin_context_and_cost_and_script_payload() {
+    let mut now = Instant::now();
+    let mut app =
+        builtin_app_without_agent_status(vec![StatusLineItem::Context, StatusLineItem::Cost]);
+    app.refresh_status_line_now_at(now);
+    assert!(app.status_line.display().is_none());
+
+    let (tx, _rx) = tokio::sync::oneshot::channel();
+    let usage = acp::UsageUpdate::new(42_000, 100_000).cost(acp::Cost::new(1.25, "USD"));
+    let request = acp::SessionNotification::new(
+        acp::SessionId::new("test-session"),
+        acp::SessionUpdate::UsageUpdate(usage),
+    );
+    let affected = crate::app::acp_handler::handle(
+        pi_acp_lib::AcpClientMessage::SessionNotification(pi_acp_lib::AcpArgs {
+            request,
+            response_tx: tx,
+        }),
+        &mut app,
+    );
+    assert!(affected);
+    assert_eq!(
+        app.status_line_tick_demand_at(now),
+        TickDemand::Slow,
+        "new usage_update facts mark the settled status line stale"
+    );
+    app.update_status_line_at(now);
+    now += MIN_REFRESH_INTERVAL_MS;
+    app.update_status_line_at(now);
+    assert_eq!(row_texts(&app), ["42% ctx", "$1.25"]);
+
+    app.current_ui.status_line = command_row(StatusLineType::Command).into_config();
+    app.refresh_status_line_now_at(now + EVENT_DEBOUNCE);
+    let ctx = context_of_first_run(&app);
+    assert_eq!(ctx.context_window.context_window_size, Some(100_000));
+    assert_eq!(ctx.context_window.context_tokens, Some(42_000));
+    assert_eq!(ctx.context_window.used_percentage, Some(42));
+    assert_eq!(ctx.context_window.remaining_percentage, Some(58));
+    assert_eq!(ctx.cost.total_cost_usd, Some(1.25));
+}
+
+#[test]
 fn the_status_the_agent_sent_wins_over_what_the_client_knows() {
     let now = Instant::now();
     let mut app =
