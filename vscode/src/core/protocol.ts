@@ -135,7 +135,7 @@ export interface ToolCallView {
   kind: string;
   status: ToolStatus;
   rawInput?: unknown;
-  /** The last text block of the latest update. For `bash` it is the whole output so far. */
+  /** The last text block of the latest update. Omitted when live terminal output is present on `terminal`. */
   text?: string;
   terminal?: { output: string; exitCode?: number };
   /** The host can show a diff for this call (`showDiff` with `id`). */

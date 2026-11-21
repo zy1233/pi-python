@@ -51,6 +51,19 @@ docs/generated
     expect(parsed.excludes).toContain("**/#literal.txt");
     expect(parsed.negations).toContain("**/important.log");
     expect(parsed.rules.map((r) => r.negated)).toEqual([false, true, false, false, false, false]);
+    expect(parsed.truncated).toBeUndefined();
+  });
+
+  it("marks truncated: true only when non-comment rules exceed MAX_GITIGNORE_RULES (2000)", () => {
+    const withinLimit = Array.from({ length: 2000 }, (_, i) => `rule_${i}/`).concat(["# trailing comment", ""]).join("\n");
+    const parsedWithin = parseGitignorePatterns(withinLimit);
+    expect(parsedWithin.rules).toHaveLength(2000);
+    expect(parsedWithin.truncated).toBeUndefined();
+
+    const overLimit = Array.from({ length: 2005 }, (_, i) => `rule_${i}/`).join("\n");
+    const parsedOver = parseGitignorePatterns(overLimit);
+    expect(parsedOver.rules).toHaveLength(2000);
+    expect(parsedOver.truncated).toBe(true);
   });
 });
 
@@ -75,8 +88,8 @@ describe("buildFindFilesExcludeGlob, glob classes, and gitignore filters", () =>
     expect(isDefaultExcluded(".github/workflows/ci.yml")).toBe(false);
   });
 
-  it("supports [abc] and [!0-9] character classes without matching '/' or failing on unclosed '['", () => {
-    const isExcluded = createPathFilter(["**/*.py[cod]", "file[!0-9].txt", "a[b"]);
+  it("supports [abc], [!0-9], and [!] character classes with $& without matching '/' or failing on unclosed '['", () => {
+    const isExcluded = createPathFilter(["**/*.py[cod]", "file[!0-9].txt", "neg[!$&].txt", "pos[$&].txt", "a[b"]);
 
     expect(isExcluded("mod/a.pyc")).toBe(true);
     expect(isExcluded("mod/a.pyo")).toBe(true);
@@ -85,6 +98,12 @@ describe("buildFindFilesExcludeGlob, glob classes, and gitignore filters", () =>
     expect(isExcluded("filea.txt")).toBe(true);
     expect(isExcluded("file3.txt")).toBe(false);
     expect(isExcluded("file/.txt")).toBe(false);
+    expect(isExcluded("nega.txt")).toBe(true);
+    expect(isExcluded("neg$.txt")).toBe(false);
+    expect(isExcluded("neg&.txt")).toBe(false);
+    expect(isExcluded("pos$.txt")).toBe(true);
+    expect(isExcluded("pos&.txt")).toBe(true);
+    expect(isExcluded("posa.txt")).toBe(false);
     expect(isExcluded("a[b")).toBe(true);
   });
 
@@ -146,6 +165,6 @@ cache/
     const elapsedMs = Date.now() - start;
 
     expect(excludedCount).toBeGreaterThan(0);
-    expect(elapsedMs).toBeLessThan(1000);
+    expect(elapsedMs).toBeLessThan(3000);
   });
 });

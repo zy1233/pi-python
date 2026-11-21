@@ -1441,12 +1441,47 @@ describe.skipIf(!chrome || !built)("webview: P0 state restore, streaming tools, 
         newPosted: window.__posted.some((m) => m.type === "newChat"),
         notices,
       };`);
-    expect(out).toMatchObject({
+      expect(out).toMatchObject({
       ok: true,
       afterLog: { value: "", posted: [{ type: "openLog" }] },
       afterNewValue: "/new",
       newPosted: false,
       notices: ["Wait until the current action finishes before running this command."],
+    });
+  });
+
+  it("throttles rapid agentThought and toolCallOutput updates and flushes them immediately on turnEnd", () => {
+    const out = run(`${state}
+      state({ status: "busy", showThinking: true });
+      host({ type: "agentThought", messageId: "a1", text: "step 1" });
+      host({ type: "toolCall", toolCall: { id: "t1", title: "bash", kind: "execute", status: "in_progress", terminal: { output: "line 1\\n" } } });
+      const thoughtEl = document.querySelector(".thought-body");
+      const toolPre = document.querySelector(".tool-output pre");
+      const afterFirst = {
+        thought: thoughtEl.textContent,
+        tool: toolPre.textContent,
+      };
+
+      // Immediate second delta within the 80ms throttle window stays buffered before turnEnd.
+      host({ type: "agentThought", messageId: "a1", text: " + step 2" });
+      host({ type: "toolCallOutput", id: "t1", delta: "line 2\\n", status: "in_progress" });
+      const whileThrottled = {
+        thought: thoughtEl.textContent,
+        tool: toolPre.textContent,
+      };
+
+      // turnEnd cancels pending timers and flushes both immediately.
+      host({ type: "turnEnd", stopReason: "end_turn" });
+      const afterTurnEnd = {
+        thought: thoughtEl.textContent,
+        tool: toolPre.textContent,
+      };
+      window.__result = { afterFirst, whileThrottled, afterTurnEnd };`);
+    expect(out).toMatchObject({
+      ok: true,
+      afterFirst: { thought: "step 1", tool: "line 1\n" },
+      whileThrottled: { thought: "step 1", tool: "line 1\n" },
+      afterTurnEnd: { thought: "step 1 + step 2", tool: "line 1\nline 2\n" },
     });
   });
 });

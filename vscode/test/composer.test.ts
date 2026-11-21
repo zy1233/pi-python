@@ -176,7 +176,8 @@ describe("catalog, ranking, and client slash command resolution", () => {
     expect(canRunClientCommandInStatus({ type: "openGuide" }, "needs-setup")).toBe(true);
     expect(canRunClientCommandInStatus({ type: "restartAgent" }, "busy")).toBe(true);
     expect(canRunClientCommandInStatus({ type: "restartAgent" }, "starting")).toBe(false);
-    expect(canRunClientCommandInStatus({ type: "runSetup" }, "needs-setup")).toBe(true);
+    expect(canRunClientCommandInStatus({ type: "runSetup" }, "ready")).toBe(true);
+    expect(canRunClientCommandInStatus({ type: "runSetup" }, "needs-setup")).toBe(false);
     expect(canRunClientCommandInStatus({ type: "runSetup" }, "busy")).toBe(false);
     expect(canRunClientCommandInStatus({ type: "newChat" }, "busy")).toBe(false);
     expect(canRunClientCommandInStatus({ type: "newChat" }, "ready")).toBe(true);
