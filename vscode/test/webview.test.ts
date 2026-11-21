@@ -1104,7 +1104,7 @@ describe.skipIf(!chrome || !built)("webview: slash commands and @ mentions", () 
         afterPickGoal,
         modeNotClipped,
       };`);
-    expect(out).toMatchObject({
+      expect(out).toMatchObject({
       ok: true,
       afterMidSentence: "解释@src/main.ts 然后改一下这个文件",
       afterConfigNotice: {
@@ -1121,6 +1121,111 @@ describe.skipIf(!chrome || !built)("webview: slash commands and @ mentions", () 
       afterEscSend: { value: "", sentText: "explain this" },
       afterPickGoal: { value: "/goal explain this", hidden: true },
       modeNotClipped: true,
+    });
+  });
+
+  it("handles / button no-arg client commands on a draft, client commands with @ chips, Shift+Tab, secret badge, and mention loading timeout", () => {
+    const out = run(`${richState}
+      const input = document.querySelector("textarea");
+      const menu = document.getElementById("composer-menu");
+      const chips = document.querySelector(".composer-chips");
+      const slashBtn = document.querySelector("[aria-label='Slash commands']");
+      const lastQuery = () => [...window.__posted].filter((m) => m.type === "queryMentions").at(-1);
+
+      // 1. Attach an @ chip with a secret badge, verify "may hold secrets" badge and Shift+Tab does not accept.
+      input.value = "explain @env";
+      input.setSelectionRange(12, 12);
+      input.dispatchEvent(new Event("input", { bubbles: true }));
+      const qEnv = lastQuery();
+      host({
+        type: "mentionResults",
+        requestId: qEnv.requestId,
+        query: qEnv.query,
+        items: [{ kind: "file", path: ".env", label: ".env", detail: "", badge: "secret" }],
+      });
+      const secretBadgeText = menu.querySelector(".popover-badge.secret")?.textContent;
+      const shiftTabEv = new KeyboardEvent("keydown", { key: "Tab", shiftKey: true, cancelable: true, bubbles: true });
+      input.dispatchEvent(shiftTabEv);
+      const afterShiftTab = {
+        defaultPrevented: shiftTabEv.defaultPrevented,
+        value: input.value,
+        menuHidden: menu.hidden,
+      };
+      input.dispatchEvent(new KeyboardEvent("keydown", { key: "Enter", bubbles: true }));
+      const afterAttachSecret = {
+        value: input.value,
+        chipCount: chips.querySelectorAll(".chip").length,
+      };
+
+      // 2. Click / button on non-empty draft ("explain @.env ") and pick /log (no-arg client command):
+      // executes openLog immediately while keeping the user's draft and attached chip intact.
+      slashBtn.click();
+      const logIdx = [...menu.querySelectorAll("[role='option'] .popover-title")].findIndex((n) => n.textContent === "/log");
+      menu.querySelectorAll("[role='option']")[logIdx].click();
+      const afterSlashBtnLog = {
+        value: input.value,
+        chipCount: chips.querySelectorAll(".chip").length,
+        openLogCount: window.__posted.filter((m) => m.type === "openLog").length,
+      };
+
+      // 3. Click / button on non-empty draft with attached chip and pick /new:
+      // executes newChat and clears both the draft and the attached chip.
+      slashBtn.click();
+      const newIdx = [...menu.querySelectorAll("[role='option'] .popover-title")].findIndex((n) => n.textContent === "/new");
+      menu.querySelectorAll("[role='option']")[newIdx].click();
+      const afterSlashBtnNew = {
+        value: input.value,
+        chipCount: chips.querySelectorAll(".chip").length,
+        chipsHidden: chips.hidden,
+        newChatCount: window.__posted.filter((m) => m.type === "newChat").length,
+      };
+
+      // 4. mentionLoading times out after 1000ms if host never answers queryMentions, unblocking Enter to submit.
+      input.value = "hello @unanswered";
+      input.setSelectionRange(input.value.length, input.value.length);
+      input.dispatchEvent(new Event("input", { bubbles: true }));
+      const statusBeforeTimeout = menu.querySelector(".popover-empty")?.textContent;
+      setTimeout(() => {
+        const statusAfterTimeout = menu.querySelector(".popover-empty")?.textContent;
+        input.dispatchEvent(new KeyboardEvent("keydown", { key: "Enter", bubbles: true }));
+        document.getElementById("result").textContent = JSON.stringify({
+          ok: true,
+          secretBadgeText,
+          afterShiftTab,
+          afterAttachSecret,
+          afterSlashBtnLog,
+          afterSlashBtnNew,
+          statusBeforeTimeout,
+          statusAfterTimeout,
+          sends: window.__posted.filter((m) => m.type === "send"),
+        });
+      }, 1100);`);
+    expect(out).toMatchObject({
+      ok: true,
+      secretBadgeText: "may hold secrets",
+      afterShiftTab: {
+        defaultPrevented: false,
+        value: "explain @env",
+        menuHidden: false,
+      },
+      afterAttachSecret: {
+        value: "explain @.env ",
+        chipCount: 1,
+      },
+      afterSlashBtnLog: {
+        value: "explain @.env ",
+        chipCount: 1,
+        openLogCount: 1,
+      },
+      afterSlashBtnNew: {
+        value: "",
+        chipCount: 0,
+        chipsHidden: true,
+        newChatCount: 1,
+      },
+      statusBeforeTimeout: "Searching workspace…",
+      statusAfterTimeout: "No matching files or folders",
+      sends: [{ type: "send", text: "hello @unanswered" }],
     });
   });
 });

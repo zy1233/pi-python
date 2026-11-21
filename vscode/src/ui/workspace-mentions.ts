@@ -14,6 +14,7 @@ import {
 import {
   DEFAULT_MENTION_LIMIT,
   deriveFolders,
+  isLikelySecretPath,
   mentionDetail,
   mentionLabel,
   normalizeRelativePath,
@@ -121,12 +122,14 @@ export class WorkspaceMentions implements vscode.Disposable {
     }
 
     for (const [filePath, badge] of seenFiles) {
+      const effectiveBadge: MentionBadge | undefined =
+        badge === "active" ? "active" : isLikelySecretPath(filePath) ? "secret" : badge;
       candidates.push({
         kind: "file",
         path: filePath,
         label: mentionLabel({ kind: "file", path: filePath }),
         detail: mentionDetail({ kind: "file", path: filePath }),
-        ...(badge ? { badge } : {}),
+        ...(effectiveBadge ? { badge: effectiveBadge } : {}),
       });
     }
 
@@ -147,6 +150,7 @@ export class WorkspaceMentions implements vscode.Disposable {
         path: filePath,
         label: mentionLabel({ kind: "file", path: filePath }),
         detail: mentionDetail({ kind: "file", path: filePath }),
+        ...(isLikelySecretPath(filePath) ? { badge: "secret" } : {}),
       });
     }
 

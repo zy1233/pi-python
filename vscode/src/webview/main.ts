@@ -197,6 +197,8 @@ type MenuItem =
   | { kind: "slash-arg"; command: SlashArgCommand; option: SlashArgOption; labelMatches?: number[] }
   | { kind: "mention"; item: RankedMention };
 
+const MENTION_LOADING_TIMEOUT_MS = 1000;
+
 let activeTrigger: ComposerTrigger | undefined;
 let menuItems: MenuItem[] = [];
 let activeIndex = 0;
@@ -205,6 +207,7 @@ let mentionLoading = false;
 let dismissedKey: string | undefined;
 let mentionSeq = 0;
 let mentionTimer: number | undefined;
+let mentionLoadingTimer: number | undefined;
 let attachments: MentionAttachment[] = [];
 
 function isPlainRecord(value: unknown): value is Record<string, unknown> {
@@ -1047,6 +1050,7 @@ function onHostMessage(message: HostMessage): void {
       return;
     case "mentionResults":
       if (message.requestId !== mentionSeq || activeTrigger?.kind !== "mention") return;
+      clearMentionLoadingTimer();
       mentionLoading = false;
       menuItems = message.items.map((item) => ({ kind: "mention", item }));
       activeIndex = 0;
@@ -1063,6 +1067,25 @@ function clearMentionTimer(): void {
   }
 }
 
+function clearMentionLoadingTimer(): void {
+  if (mentionLoadingTimer !== undefined) {
+    window.clearTimeout(mentionLoadingTimer);
+    mentionLoadingTimer = undefined;
+  }
+}
+
+function startMentionLoading(): void {
+  mentionLoading = true;
+  clearMentionLoadingTimer();
+  mentionLoadingTimer = window.setTimeout(() => {
+    mentionLoadingTimer = undefined;
+    if (mentionLoading) {
+      mentionLoading = false;
+      renderPopover();
+    }
+  }, MENTION_LOADING_TIMEOUT_MS);
+}
+
 function syncComboboxAria(): void {
   input.setAttribute("aria-expanded", menuOpen ? "true" : "false");
   if (menuOpen && menuItems.length > 0 && activeIndex >= 0 && activeIndex < menuItems.length) {
@@ -1074,6 +1097,7 @@ function syncComboboxAria(): void {
 
 function closePopover(): void {
   clearMentionTimer();
+  clearMentionLoadingTimer();
   mentionLoading = false;
   activeTrigger = undefined;
   menuItems = [];
@@ -1173,7 +1197,12 @@ function renderPopover(): void {
         el("span", { class: "popover-title" }, ...highlightedText(item.label, item.labelMatches)),
       );
       if (item.badge) {
-        top.append(el("span", { class: `popover-badge ${item.badge}`, text: item.badge }));
+        top.append(
+          el("span", {
+            class: `popover-badge ${item.badge}`,
+            text: item.badge === "secret" ? "may hold secrets" : item.badge,
+          }),
+        );
       }
       row.append(top);
       if (item.detail !== "") {
@@ -1264,7 +1293,7 @@ function dispatchClientCommand(text: string): "dispatched" | "notice" | "none" {
 function requestMentions(query: string): void {
   clearMentionTimer();
   const requestId = ++mentionSeq;
-  mentionLoading = true;
+  startMentionLoading();
   send({ type: "queryMentions", requestId, query });
 }
 
@@ -1323,6 +1352,7 @@ function updateTrigger(force = false): void {
 
   if (trigger.kind === "slash" || trigger.kind === "slash-arg") {
     clearMentionTimer();
+    clearMentionLoadingTimer();
     mentionLoading = false;
     refreshOpenMenu();
     return;
@@ -1340,7 +1370,7 @@ function updateTrigger(force = false): void {
     renderPopover();
   } else {
     clearMentionTimer();
-    mentionLoading = true;
+    startMentionLoading();
     renderPopover();
     const query = trigger.query;
     mentionTimer = window.setTimeout(() => {
@@ -1373,17 +1403,32 @@ function acceptMenuItem(index: number, mode: "enter" | "tab"): void {
 
   if (selected.kind === "slash") {
     const cmd = selected.command;
-    if (!cmd.takesArgs && mode === "enter" && prefix.trim() === "" && suffix.trim() === "" && cmd.source === "client") {
+    const openedViaButtonOnDraft = trigger.range.start === 0 && trigger.range.end === 0 && suffix.trim() !== "";
+    if (
+      !cmd.takesArgs &&
+      mode === "enter" &&
+      cmd.source === "client" &&
+      ((prefix.trim() === "" && suffix.trim() === "") || openedViaButtonOnDraft)
+    ) {
       const resolved = resolveClientSlashCommand(`/${cmd.name}`, state);
       if (resolved?.kind === "message" && canRunClientCommandInStatus(resolved.message, state.status)) {
         closePopover();
-        input.value = "";
+        if (!openedViaButtonOnDraft || cmd.name === "new") {
+          input.value = "";
+          attachments = [];
+          renderChips();
+        }
         saveWebviewState();
         dispatchClientCommand(`/${cmd.name}`);
       } else {
-        replaceTriggerRange(trigger, `/${cmd.name}`);
+        if (!openedViaButtonOnDraft) {
+          replaceTriggerRange(trigger, `/${cmd.name}`);
+        }
         closePopover();
         saveWebviewState();
+        if (openedViaButtonOnDraft) {
+          dispatchClientCommand(`/${cmd.name}`);
+        }
       }
       return;
     }
@@ -1400,6 +1445,8 @@ function acceptMenuItem(index: number, mode: "enter" | "tab"): void {
       const fullText = prefix + argId;
       closePopover();
       input.value = "";
+      attachments = [];
+      renderChips();
       saveWebviewState();
       dispatchClientCommand(fullText);
       return;
@@ -1433,16 +1480,16 @@ function submit(): void {
   syncAttachmentsWithInput();
   const text = input.value;
   if (text.trim() === "") return;
-  if (attachments.length === 0) {
-    const outcome = dispatchClientCommand(text);
-    if (outcome !== "none") {
-      closePopover();
-      if (outcome === "dispatched") {
-        input.value = "";
-        saveWebviewState();
-      }
-      return;
+  const outcome = dispatchClientCommand(text);
+  if (outcome !== "none") {
+    closePopover();
+    if (outcome === "dispatched") {
+      input.value = "";
+      attachments = [];
+      renderChips();
+      saveWebviewState();
     }
+    return;
   }
   if (state.status !== "ready") return;
   closePopover();
@@ -1500,6 +1547,7 @@ slashTriggerButton.addEventListener("click", () => {
     activeIndex = 0;
     dismissedKey = undefined;
     clearMentionTimer();
+    clearMentionLoadingTimer();
     mentionLoading = false;
     refreshOpenMenu();
     return;
@@ -1582,7 +1630,7 @@ input.addEventListener("keydown", (event) => {
       return;
     }
     if (activeTrigger?.kind === "mention" && mentionLoading) {
-      if (event.key === "Tab" || (event.key === "Enter" && !event.shiftKey)) {
+      if ((event.key === "Tab" && !event.shiftKey) || (event.key === "Enter" && !event.shiftKey)) {
         event.preventDefault();
         return;
       }
@@ -1600,7 +1648,7 @@ input.addEventListener("keydown", (event) => {
         syncActiveOption();
         return;
       }
-      if (event.key === "Tab") {
+      if (event.key === "Tab" && !event.shiftKey) {
         event.preventDefault();
         acceptMenuItem(activeIndex, "tab");
         return;

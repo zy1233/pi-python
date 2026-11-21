@@ -6,6 +6,7 @@ import {
   formatMentionToken,
   formatPromptWithMentions,
   fuzzyScore,
+  isLikelySecretPath,
   mentionDetail,
   mentionKey,
   mentionLabel,
@@ -153,13 +154,56 @@ describe("mention formatting and prompt assembly", () => {
     expect(formatMentionToken(folder)).toBe("@src/core/");
   });
 
-  it("avoids duplicating inline tokens and prepends only missing attachments", () => {
+  it("avoids duplicating inline tokens, prepends only missing attachments, and leaves /slash commands unprefixed", () => {
     const a = { kind: "file" as const, path: "src/a.ts" };
     const b = { kind: "file" as const, path: "src/b.ts" };
 
     expect(formatPromptWithMentions("Inspect @src/a.ts", [a, a])).toBe("Inspect @src/a.ts");
     expect(formatPromptWithMentions("Inspect @src/a.ts", [a, b])).toBe("Referenced context: @src/b.ts\n\nInspect @src/a.ts");
     expect(formatPromptWithMentions("Explain", [a, b])).toBe("Referenced context: @src/a.ts @src/b.ts\n\nExplain");
+    expect(formatPromptWithMentions("/mcp", [a])).toBe("/mcp");
+    expect(formatPromptWithMentions("  /goal inspect @src/a.ts", [a, b])).toBe("  /goal inspect @src/a.ts");
+  });
+
+  it("identifies secret-looking paths while excluding safe templates", () => {
+    for (const secretPath of [
+      ".env",
+      ".env.local",
+      "config/prod.env",
+      "certs/server.pem",
+      "certs/private.key",
+      "bundle.p12",
+      "cert.pfx",
+      "store.jks",
+      "app.keystore",
+      "keys/id_rsa",
+      "keys/id_rsa.bak",
+      "keys/id_ed25519",
+      "keys/id_ecdsa.key",
+      "keys/id_dsa",
+      ".npmrc",
+      ".pypirc",
+      ".netrc",
+      "config/credentials.json",
+      "secrets.json",
+      "secrets.yaml",
+      "secrets.yml",
+    ]) {
+      expect(isLikelySecretPath(secretPath), secretPath).toBe(true);
+    }
+
+    for (const safePath of [
+      ".env.example",
+      ".env.sample",
+      ".env.template",
+      ".env.dist",
+      "local.env.example",
+      "docs/secrets.md",
+      "src/app.ts",
+      "package.json",
+    ]) {
+      expect(isLikelySecretPath(safePath), safePath).toBe(false);
+    }
   });
 
   it("removes mention tokens cleanly without eating unrelated tokens or newlines", () => {
