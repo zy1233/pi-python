@@ -546,6 +546,12 @@ class TestThoughtTagSplitter:
         assert self._run_chunks([("\n<thought>a</thought>x", False)]) == ("a", "x")
         assert self._run_chunks([("\n", False), ("<thought>a</thought>x", False)]) == ("a", "x")
         assert self._run_chunks([("   \n", False)]) == ("", "   \n")
+        assert self._run_chunks([(" " * 24 + "<thought>a</thought>x", False)]) == ("a", "x")
+        assert self._run_chunks([("\n" * 20 + "<tho", False), ("ught>a</thought>x", False)]) == (
+            "a",
+            "x",
+        )
+        assert self._run_chunks([(" " * 20, False), ("plain", False)]) == ("", " " * 20 + "plain")
 
     def test_unclosed_and_empty_thought_tags(self):
         assert self._run_chunks([("<thought>never closes", False)]) == ("never closes", "")

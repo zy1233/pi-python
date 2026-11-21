@@ -668,6 +668,10 @@ pre.code code {
   color: var(--vscode-textLink-foreground, var(--vscode-focusBorder));
   border-color: color-mix(in srgb, var(--vscode-textLink-foreground, var(--vscode-focusBorder)) 55%, transparent);
 }
+.popover-badge.secret {
+  color: var(--vscode-editorWarning-foreground, var(--vscode-notificationsWarningIcon-foreground, #cca700));
+  border-color: color-mix(in srgb, currentColor 40%, transparent);
+}
 .popover-detail {
   font-size: 0.82em;
   color: var(--vscode-descriptionForeground);

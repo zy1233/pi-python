@@ -408,7 +408,6 @@ export function canRunClientCommandInStatus(message: WebviewMessage, status: Sta
     case "restartAgent":
       return status !== "starting";
     case "runSetup":
-      return status !== "starting" && status !== "busy" && status !== "cancelling" && status !== "unavailable";
     case "newChat":
     case "setMode":
     case "setThinking":

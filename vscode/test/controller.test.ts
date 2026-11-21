@@ -157,6 +157,41 @@ describe("chat", () => {
     expect(transcript[1]).toMatchObject({ type: "agent", text: "Hello", thought: "Thinking. " });
   });
 
+  it("separates consecutive out-of-turn agent_message_chunk notices with a blank line while leaving replay chunks untouched", async () => {
+    const { controller, messages } = setup();
+    await controller.start();
+    const feed = (text: string, isReplay = false) =>
+      (controller as unknown as { onUpdate(n: unknown): void }).onUpdate({
+        sessionId: "fake-1",
+        update: {
+          sessionUpdate: "agent_message_chunk",
+          content: { type: "text", text },
+          ...(isReplay ? { _meta: { isReplay: true } } : {}),
+        },
+      });
+
+    feed("Auto mode is on for this session.");
+    feed("Settings in agent.toml that are not used: foo");
+
+    expect(ofType(messages, "agentText").map((m) => m.text)).toEqual([
+      "Auto mode is on for this session.",
+      "\n\nSettings in agent.toml that are not used: foo",
+    ]);
+    expect(controller.transcript()).toEqual([
+      {
+        type: "agent",
+        id: "agent-1",
+        text: "Auto mode is on for this session.\n\nSettings in agent.toml that are not used: foo",
+        thought: "",
+      },
+    ]);
+
+    feed(" + replayed tail", true);
+    expect(controller.transcript()[0]).toMatchObject({
+      text: "Auto mode is on for this session.\n\nSettings in agent.toml that are not used: foo + replayed tail",
+    });
+  });
+
   it("does not send an empty prompt or a prompt when the agent is not ready", async () => {
     const { controller } = setup();
     expect(await controller.send("hi")).toBe(false);

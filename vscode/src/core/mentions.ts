@@ -4,7 +4,7 @@ export const MAX_MENTION_QUERY_CHARS = 256;
 export const DEFAULT_MENTION_LIMIT = 30;
 
 export type MentionKind = "file" | "folder" | "selection";
-export type MentionBadge = "selection" | "active" | "open" | "folder";
+export type MentionBadge = "selection" | "active" | "open" | "folder" | "secret";
 
 export interface MentionRange {
   startLine: number;
@@ -387,8 +387,42 @@ export function rankMentions(
   return scored.slice(0, limit).map((entry) => entry.item);
 }
 
+const SAFE_SECRET_SUFFIXES = [".example", ".sample", ".template", ".dist", ".md"];
+const SECRET_EXACT_NAMES = new Set([
+  ".env",
+  ".npmrc",
+  ".pypirc",
+  ".netrc",
+  "credentials.json",
+  "secrets.json",
+  "secrets.yaml",
+  "secrets.yml",
+  "id_rsa",
+  "id_ed25519",
+  "id_ecdsa",
+  "id_dsa",
+]);
+const SECRET_EXTENSIONS = [".env", ".pem", ".key", ".p12", ".pfx", ".jks", ".keystore"];
+const SECRET_PREFIXES = [".env.", "id_rsa.", "id_ed25519.", "id_ecdsa.", "id_dsa."];
+
+/**
+ * Returns whether a workspace-relative path looks like a credential or secret file
+ * that should be badged in the `@` mention picker.
+ */
+export function isLikelySecretPath(relPath: string): boolean {
+  const name = basename(relPath.replace(/\\/g, "/")).toLowerCase();
+  if (name === "") return false;
+  if (SAFE_SECRET_SUFFIXES.some((suffix) => name.endsWith(suffix))) {
+    return false;
+  }
+  if (SECRET_EXACT_NAMES.has(name)) return true;
+  if (SECRET_EXTENSIONS.some((ext) => name.endsWith(ext))) return true;
+  if (SECRET_PREFIXES.some((prefix) => name.startsWith(prefix))) return true;
+  return false;
+}
+
 export function formatPromptWithMentions(text: string, mentions: readonly MentionAttachment[]): string {
-  if (mentions.length === 0) return text;
+  if (mentions.length === 0 || text.trimStart().startsWith("/")) return text;
   const seen = new Set<string>();
   const missing: string[] = [];
   for (const item of mentions) {

@@ -1257,7 +1257,7 @@ export class ChatController {
         return;
       case "agent_message_chunk":
       case "agent_thought_chunk":
-        this.onChunk(update, update.sessionUpdate === "agent_thought_chunk");
+        this.onChunk(update, update.sessionUpdate === "agent_thought_chunk", replay);
         return;
       case "tool_call":
       case "tool_call_update":
@@ -1310,7 +1310,7 @@ export class ChatController {
     }
   }
 
-  private onChunk(update: Record<string, unknown>, thought: boolean): void {
+  private onChunk(update: Record<string, unknown>, thought: boolean, replay = false): void {
     const content = update.content;
     if (!isRecord(content) || content.type !== "text" || typeof content.text !== "string" || content.text === "") return;
     const text = content.text;
@@ -1326,8 +1326,12 @@ export class ChatController {
       item.thought += text;
       this.emit({ type: "agentThought", messageId: item.id, text });
     } else {
-      item.text += text;
-      this.emit({ type: "agentText", messageId: item.id, text });
+      const chunkText =
+        !replay && this.status !== "busy" && item.text !== "" && !item.text.endsWith("\n") && !text.startsWith("\n")
+          ? `\n\n${text}`
+          : text;
+      item.text += chunkText;
+      this.emit({ type: "agentText", messageId: item.id, text: chunkText });
     }
   }
 
