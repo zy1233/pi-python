@@ -171,6 +171,8 @@ _AGENT_INFO = Implementation(
 
 # ACP Session Config Option id for the model selector (``session/set_config_option``).
 MODEL_CONFIG_ID = "model"
+THINKING_LEVEL_CONFIG_ID = "thinking_level"
+_THINKING_LEVELS: tuple[str, ...] = ("off", "minimal", "low", "medium", "high", "xhigh", "max")
 
 
 @dataclass
@@ -561,10 +563,23 @@ class PiAcpAgent(Agent):
     async def set_config_option(
         self, config_id: str, session_id: str, value: str | bool, **kwargs: Any
     ) -> SetSessionConfigOptionResponse | None:
-        """``session/set_config_option``: the ``model`` selector and the ``mode`` selector."""
+        """``session/set_config_option``: ``model``, ``mode``, and ``thinking_level``."""
         harness = self._require_harness(session_id)
         if config_id == MODE_CONFIG_ID:
             await self._select_mode(session_id, value, {"configId": config_id, "value": value})
+            return SetSessionConfigOptionResponse(config_options=self._config_options(session_id))
+        if config_id == THINKING_LEVEL_CONFIG_ID:
+            if not isinstance(value, str) or value not in _THINKING_LEVELS:
+                raise RequestError.invalid_params(
+                    {"configId": config_id, "value": value, "reason": "unknown thinking level"}
+                )
+            await harness.set_thinking_level(value)  # type: ignore[arg-type]
+            choice = self._current_choice(session_id)
+            reasoning = (
+                self._config.reasoning if self._config.reasoning is not None else (value != "off")
+            )
+            if harness.model.reasoning != reasoning:
+                await harness.set_model(model_for_choice(choice, reasoning=reasoning))
             return SetSessionConfigOptionResponse(config_options=self._config_options(session_id))
         if config_id != MODEL_CONFIG_ID:
             raise RequestError.invalid_params(
@@ -575,7 +590,12 @@ class PiAcpAgent(Agent):
             raise RequestError.invalid_params(
                 {"configId": config_id, "value": value, "reason": "unknown model"}
             )
-        await harness.set_model(model_for_choice(choice, reasoning=self._config.model_reasoning))
+        reasoning = (
+            self._config.reasoning
+            if self._config.reasoning is not None
+            else (harness.thinking_level != "off")
+        )
+        await harness.set_model(model_for_choice(choice, reasoning=reasoning))
         # Whether the agent compacts by itself, and the limits of compaction, depend on the
         # window of the model (``auto_compact_enabled``, ``compaction_settings``).
         harness.compaction = compaction_settings(

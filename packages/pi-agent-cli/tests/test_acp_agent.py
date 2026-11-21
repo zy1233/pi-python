@@ -1160,3 +1160,55 @@ async def test_a_workflow_cannot_send_a_subagent_outside_the_workspace(tmp_path,
 
     assert client.asked_about() == ["workflow"]  # no sub-agent ever got as far as a write
     assert not (elsewhere / "note.txt").exists()
+
+
+@pytest.mark.asyncio
+async def test_set_config_option_thinking_level_updates_harness_live(tmp_path):
+    agent = _agent(tmp_path)
+    agent.on_connect(FakeClient())
+    created = await agent.new_session(cwd=str(tmp_path.resolve()))
+    harness = agent._harnesses[created.session_id]
+    assert harness.thinking_level == "off"
+
+    await agent.set_config_option(
+        config_id="thinking_level", session_id=created.session_id, value="high"
+    )
+    assert harness.thinking_level == "high"
+    assert harness.model.reasoning is True
+
+    with pytest.raises(RequestError):
+        await agent.set_config_option(
+            config_id="thinking_level", session_id=created.session_id, value="invalid"
+        )
+
+
+def test_project_event_edit_structured_old_and_new_text():
+    from pi_agent_core.types import (
+        AgentToolResult,
+        ToolExecutionEndEvent,
+        ToolExecutionStartEvent,
+    )
+
+    start_ev = ToolExecutionStartEvent(
+        tool_call_id="edit_1",
+        tool_name="edit",
+        args={"path": "src/app.py"},
+    )
+    assert len(list(project_event(start_ev))) == 1
+
+    ev = ToolExecutionEndEvent(
+        tool_call_id="edit_1",
+        tool_name="edit",
+        result=AgentToolResult(
+            content=[{"type": "text", "text": "Edited src/app.py"}],
+            details={"old_text": "a = 1\n", "new_text": "a = 2\n"},
+        ),
+        is_error=False,
+    )
+    updates = list(project_event(ev))
+    assert len(updates) == 1
+    diff_block = updates[0].content[0]
+    assert diff_block.type == "diff"
+    assert diff_block.path == "src/app.py"
+    assert diff_block.old_text == "a = 1\n"
+    assert diff_block.new_text == "a = 2\n"

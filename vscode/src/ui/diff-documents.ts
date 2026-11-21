@@ -28,7 +28,7 @@ export class DiffDocuments implements vscode.TextDocumentContentProvider {
   }
 
   async open(info: DiffInfo): Promise<void> {
-    const fileName = path.posix.basename(info.title.replace(/ \(.*\)$/, "")) || "file";
+    const fileName = path.posix.basename(info.title.replace(/ \(.*\)$/, "").replace(/\\/g, "/")) || "file";
     const before = documentUri(info.key, "before", fileName);
     const after = documentUri(info.key, "after", fileName);
     await vscode.commands.executeCommand("vscode.diff", before, after, `zycode: ${info.title}`, { preview: true });

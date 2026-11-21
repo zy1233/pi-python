@@ -172,6 +172,7 @@ export class ChatController {
   private thinkingText: ThinkingText | undefined;
   /** What that text says for the agent that runs. It is set after `initialize`: it needs the version. */
   private thinkingFile: ThinkingRead | undefined;
+  private liveThinkingLevel: ThinkingLevel | undefined;
   private reopenId: string | undefined;
   private changingThinking = false;
   private readonly sessionListeners = new Set<() => void>();
@@ -262,10 +263,16 @@ export class ChatController {
    * started: the agent reads it at its start and has no way to change it while it runs.
    */
   private thinkingState(): ThinkingState | undefined {
-    const file = this.thinkingFile;
-    if (!file) return undefined;
     if (this.status !== "ready" && this.status !== "busy" && this.status !== "cancelling") return undefined;
     const levels = [...this.thinkingLevels()];
+    if (this.liveThinkingLevel !== undefined) {
+      const state: ThinkingState = { current: this.liveThinkingLevel, levels };
+      if (this.status !== "ready") state.disabled = "Wait until the answer ends.";
+      else if (!this.sessionId) state.disabled = "No chat is open.";
+      return state;
+    }
+    const file = this.thinkingFile;
+    if (!file) return undefined;
     if (!file.ok) return { levels, disabled: file.reason };
     const state: ThinkingState = { current: file.value.level, levels };
     if (file.value.invalidLevel !== undefined) {
@@ -303,9 +310,9 @@ export class ChatController {
   }
 
   /**
-   * Sets the thinking level. The agent has no live setting (v0.9.1), so this edits `thinking_level`
-   * in `agent.toml`, restarts the agent, and opens this chat again with `session/load`. It asks first,
-   * because it writes a file of the user.
+   * Sets the thinking level. When the agent advertises a `thinking_level` config option, switches it
+   * live via `session/set_config_option`; otherwise edits `thinking_level` in `agent.toml`, restarts
+   * the agent, and opens this chat again with `session/load`.
    */
   async applyThinkingLevel(level: ThinkingLevel): Promise<void> {
     if (this.changingThinking) return;
@@ -318,6 +325,18 @@ export class ChatController {
       return;
     }
     if (level === state.current) return;
+    if (this.liveThinkingLevel !== undefined && this.conn && this.sessionId && this.status === "ready") {
+      try {
+        const options = await this.conn.setConfigOption(this.sessionId, "thinking_level", level);
+        if (options.length > 0) this.readConfigOptions(options);
+        else this.liveThinkingLevel = level;
+        this.pushNotice("info", `Thinking level: ${level}.`);
+        this.emit(this.stateMessage());
+      } catch (error) {
+        this.pushNotice("warning", `Could not set the thinking level: ${messageOf(error)}`);
+      }
+      return;
+    }
     const sessionId = this.sessionId;
     const generation = this.generation;
     const path = this.host.agentConfigPath();
@@ -589,6 +608,7 @@ export class ChatController {
   private readConfigOptions(options: SessionConfigOption[], modesCurrent?: string): void {
     this.mode = undefined;
     this.models = undefined;
+    this.liveThinkingLevel = undefined;
     for (const option of options) {
       if (option.type !== "select") continue;
       const flat = flattenSelect(option);
@@ -599,6 +619,11 @@ export class ChatController {
         const current = flat.find((choice) => choice.id === currentId);
         this.model = current?.name ?? currentId;
         this.models = { current: currentId, options: flat };
+      } else if (option.id === "thinking_level") {
+        const currentVal = String(option.currentValue);
+        if (isThinkingLevel(currentVal, this.thinkingLevels())) {
+          this.liveThinkingLevel = currentVal;
+        }
       }
     }
     if (!this.mode && modesCurrent !== undefined) {

@@ -37,6 +37,7 @@ _KIND: dict[str, str] = {
 }
 
 _terminal_stream_offsets: dict[str, int] = {}
+_tool_call_args: dict[str, Any] = {}
 
 
 def tool_title(name: str, args: Any = None) -> str:
@@ -126,7 +127,9 @@ def project_event(event: AgentEvent, cwd: str | None = None) -> Iterator[Session
         title = tool_title(name, event.args)
         field_meta: dict[str, Any] | None = None
         content: list[Any] | None = None
-        if name == "bash":
+        if name in {"edit", "write"} and isinstance(event.args, dict):
+            _tool_call_args[event.tool_call_id] = event.args
+        elif name == "bash":
             _terminal_stream_offsets[event.tool_call_id] = 0
             term_info: dict[str, Any] = {"terminal_id": event.tool_call_id}
             if cwd:
@@ -182,7 +185,7 @@ def project_event(event: AgentEvent, cwd: str | None = None) -> Iterator[Session
     if etype == "tool_execution_end":
         name = event.tool_name
         status = "failed" if event.is_error else "completed"
-        args = getattr(event, "args", None)
+        args = getattr(event, "args", None) or _tool_call_args.pop(event.tool_call_id, None)
         field_meta: dict[str, Any] | None = None
         if name == "bash":
             text = _text_from_result(event.result)
@@ -249,11 +252,14 @@ def _result_content(tool_name: str, args: Any, result: Any) -> list[Any] | None:
     if path is None and isinstance(details, dict):
         path = details.get("path")
     if tool_name in {"edit", "write"} and path:
-        patch = None
         if isinstance(details, dict):
+            old_text = details.get("old_text", details.get("oldText"))
+            new_text = details.get("new_text", details.get("newText"))
+            if isinstance(new_text, str) and (old_text is None or isinstance(old_text, str)):
+                return [tool_diff_content(str(path), new_text, old_text)]
             patch = details.get("diff") or details.get("patch")
-        if patch:
-            return [tool_diff_content(str(path), str(patch))]
+            if patch:
+                return [tool_diff_content(str(path), str(patch))]
         text = _text_from_result(result)
         if text:
             return [tool_diff_content(str(path), text)]

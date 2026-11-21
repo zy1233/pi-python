@@ -105,6 +105,12 @@ vi.mock("vscode", () => {
 
   const Uri = {
     file: (fsPath: string) => ({ scheme: "file", fsPath, toString: () => `file://${fsPath}` }),
+    from: (components: { scheme: string; path: string }) => ({
+      scheme: components.scheme,
+      path: components.path,
+      fsPath: components.path,
+      toString: () => `${components.scheme}:${components.path}`,
+    }),
     joinPath: (base: { fsPath: string }, ...segments: string[]) => {
       const joined = path.join(base.fsPath, ...segments);
       return { scheme: "file", fsPath: joined, toString: () => `file://${joined}` };
@@ -123,8 +129,10 @@ vi.mock("vscode", () => {
     TabInputText,
     Uri,
     commands: {
-      executeCommand: vi.fn(async (cmd: string) => {
-        mockState.executedCommands.push(cmd);
+      executeCommand: vi.fn(async (cmd: string, ...args: unknown[]) => {
+        mockState.executedCommands.push(
+          args.length > 0 ? `${cmd}:${args.map((a) => String((a as { path?: string })?.path ?? a)).join(",")}` : cmd,
+        );
       }),
     },
     env: {
@@ -218,7 +226,9 @@ vi.mock("vscode", () => {
   };
 });
 
+import { DiffStore } from "../src/core/diff-store.js";
 import { ChatViewProvider } from "../src/ui/chat-view.js";
+import { DiffDocuments } from "../src/ui/diff-documents.js";
 import { SessionsView } from "../src/ui/sessions-view.js";
 import { StatusBar } from "../src/ui/status-bar.js";
 import { WorkspaceMentions } from "../src/ui/workspace-mentions.js";
@@ -478,5 +488,11 @@ describe("ChatViewProvider host clipboard & SessionsView timer polish", () => {
     } finally {
       vi.useRealTimers();
     }
+
+    const docs = new DiffDocuments(() => new DiffStore());
+    await docs.open({ key: "call-1:result", title: "src\\core\\app.ts (edited)" });
+    expect(mockState.executedCommands.at(-1)).toContain("/call-1%3Aresult/before/app.ts");
+    expect(mockState.executedCommands.at(-1)).toContain("/call-1%3Aresult/after/app.ts");
+    docs.dispose();
   });
 });

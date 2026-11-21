@@ -2,7 +2,9 @@ import { readFileSync } from "node:fs";
 import { describe, expect, it } from "vitest";
 
 import { DiffStore } from "../src/core/diff-store.js";
+import { DiffTracker } from "../src/core/diff-tracker.js";
 import { applyEdits, parsePatch, readEdits, reversePatch } from "../src/core/diff.js";
+import { RecordingLog } from "./helpers.js";
 
 // Patches made by Python's difflib in the form of pi_agent_core's `generate_unified_patch` (n=4).
 const patches = JSON.parse(readFileSync(new URL("./fixtures/patches.json", import.meta.url), "utf8")) as {
@@ -119,5 +121,34 @@ describe("DiffStore", () => {
     store.put("a", "1", "1");
     expect(store.totalBytes).toBe(2);
     expect(store.size).toBe(1);
+  });
+});
+
+describe("DiffTracker structured diff fallback", () => {
+  it("uses structured oldText and newText from a diff content block when pre-image reading was unavailable", async () => {
+    const tracker = new DiffTracker(
+      {
+        log: new RecordingLog(),
+        readFile: async () => undefined,
+      },
+      () => "/workspace/proj",
+    );
+
+    tracker.observe({
+      toolCallId: "tc-struct-1",
+      kind: "edit",
+      rawInput: { path: "src/app.ts", edits: [{ oldText: "old\n", newText: "new\n" }] },
+    });
+    tracker.observe({
+      toolCallId: "tc-struct-1",
+      content: [{ type: "diff", path: "src/app.ts", oldText: "line 1\r\nold\r\n", newText: "line 1\r\nnew\r\n" }],
+    });
+
+    const available = await tracker.finish("tc-struct-1", "completed", {});
+    expect(available).toBe(true);
+    const info = tracker.info("tc-struct-1");
+    expect(info?.title).toBe("src/app.ts (edited)");
+    expect(tracker.store.get(info!.key, "before")).toBe("line 1\nold\n");
+    expect(tracker.store.get(info!.key, "after")).toBe("line 1\nnew\n");
   });
 });
