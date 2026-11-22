@@ -334,12 +334,30 @@ function loadPersistedState(): PersistedWebviewState | undefined {
   };
 }
 
+/**
+ * `setState` serializes the whole state at each call, and the throttled call runs while the user types.
+ * Images beyond this total are not kept, so that a key press costs a few milliseconds at most (4 images of
+ * 7,000,000 characters cost 20 to 160 ms).
+ */
+const IMAGE_STATE_MAX_CHARS = 2_000_000;
+
+function imagesForState(): ImageAttachment[] {
+  const kept: ImageAttachment[] = [];
+  let total = 0;
+  for (const img of imageAttachments) {
+    total += img.data.length;
+    if (total > IMAGE_STATE_MAX_CHARS) break;
+    kept.push({ ...img });
+  }
+  return kept;
+}
+
 function saveWebviewState(): void {
   try {
     vscode.setState?.({
       draft: input.value,
       attachments: cloneAttachments(attachments),
-      images: imageAttachments.map((img) => ({ ...img })),
+      images: imagesForState(),
       followTail,
       scrollTop: Math.max(0, transcript.scrollTop),
       openDetails: Object.fromEntries(openDetails),
@@ -1435,6 +1453,13 @@ function addImageAttachment(mimeType: string, base64Data: string, name?: string)
   });
   renderChips();
   saveWebviewState();
+  if (imagesForState().length < imageAttachments.length) {
+    addNotice(
+      "info",
+      "Large images are not kept when this view reloads. Send the message first, or attach the image again after a reload.",
+    );
+    scrollToEnd();
+  }
 }
 
 function readImageFile(file: File): void {

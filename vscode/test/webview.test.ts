@@ -1973,4 +1973,44 @@ describe.skipIf(!chrome || !built)("webview: P1 images, insertMention, saveAll, 
       ],
     });
   });
+
+  it("keeps large images out of the saved state, tells the user, and still sends them", () => {
+    const mockFileReader = `window.FileReader = class {
+      constructor() { this._listeners = []; this.result = ""; }
+      addEventListener(type, fn) { if (type === "load") this._listeners.push(fn); }
+      readAsDataURL(file) {
+        this.result = "data:" + file.type + ";base64," + file.__base64;
+        for (const fn of this._listeners) fn();
+      }
+    };`;
+    const out = run(
+      `${state}
+      state({});
+      const input = document.querySelector("textarea");
+      const paste = (name, chars) => {
+        const ev = new Event("paste", { bubbles: true, cancelable: true });
+        Object.defineProperty(ev, "clipboardData", { value: { items: [{ type: "image/png", getAsFile: () => ({ type: "image/png", name, __base64: "A".repeat(chars) }) }] } });
+        input.dispatchEvent(ev);
+      };
+      const notices = () => [...document.querySelectorAll(".notice")].map((n) => n.textContent);
+      paste("small.png", 1_200_000);
+      const afterSmall = { saved: window.__webviewState.images.map((i) => i.name), notices: notices().length };
+      paste("big.png", 1_200_000);
+      const afterBig = { saved: window.__webviewState.images.map((i) => i.name), notices: notices().length, size: JSON.stringify(window.__webviewState).length };
+      input.value = "typing goes on";
+      input.dispatchEvent(new Event("input", { bubbles: true }));
+      input.value = "typing goes on";
+      input.dispatchEvent(new KeyboardEvent("keydown", { key: "Enter", bubbles: true }));
+      const sent = window.__posted.filter((m) => m.type === "send");
+      window.__result = { afterSmall, afterBig, sentImages: sent[0].images.map((i) => i.name) };`,
+      mockFileReader,
+    );
+    expect(out).toMatchObject({
+      ok: true,
+      afterSmall: { saved: ["small.png"], notices: 0 },
+      afterBig: { saved: ["small.png"], notices: 1 },
+      sentImages: ["small.png", "big.png"],
+    });
+    expect((out.afterBig as { size: number }).size).toBeLessThan(2_100_000);
+  });
 });
