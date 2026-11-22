@@ -26,6 +26,8 @@ permission = "ask" # ask | auto | always-approve
 
 # The level of a new chat and of a chat with no saved level. A chat that you changed with the
 # `thinking_level` option keeps that level when you open it again, whatever this line says.
+# The exception is `reasoning = false` (in `[model]`, below): the option is then not offered,
+# a saved level is not used, and every chat starts at this line.
 thinking_level = "off" # off | minimal | low | medium | high | xhigh | max
 # The most model calls that one prompt may make. It stops a loop that does not end, and it does
 # not limit the size of the context. Unset: no limit.

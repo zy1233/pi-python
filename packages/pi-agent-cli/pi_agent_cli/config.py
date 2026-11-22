@@ -206,6 +206,7 @@ class CliConfig:
     base_url: str | None = None
     # The level of a new session and of a session with no saved level: ``session/load`` and
     # ``session/resume`` start a chat at the level saved in it (``_restored_thinking_level``).
+    # With ``reasoning = false`` no saved level is used, and every session starts at this one.
     thinking_level: ThinkingLevel = "off"
     max_turns: int | None = None
     # Whether the agent compacts the context by itself. ``None``: not set, and then
