@@ -123,6 +123,8 @@ export interface StateMessage {
   canRestart: boolean;
   /** `zycode.showThinking`: show the thinking blocks (collapsed). */
   showThinking?: boolean;
+  /** Whether the agent advertised `promptCapabilities.image`. Absent before `initialize`. */
+  supportsImages?: boolean;
   /** Number of pending permission/trust questions waiting for user input. Omitted when 0. */
   pendingPermissions?: number;
 }

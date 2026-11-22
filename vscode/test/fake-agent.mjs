@@ -18,6 +18,9 @@
 //   FAKE_TOML=<file>        like the real agent, read thinking_level from this file once, at the start (not later)
 //   FAKE_LIVE_THINKING=1    advertise and handle a live `thinking_level` config option
 //   FAKE_LOAD_CWD=<dir>     session/load says in _meta["pi/cwd"] that the session belongs to this folder
+//   FAKE_NO_IMAGES=1        advertise promptCapabilities.image = false
+//   FAKE_NO_MCP_HTTP=1      advertise mcpCapabilities.http = false
+//   FAKE_NO_MCP_SSE=1       advertise mcpCapabilities.sse = false
 import { existsSync, appendFileSync, readFileSync, writeFileSync } from "node:fs";
 import path from "node:path";
 import { Readable, Writable } from "node:stream";
@@ -271,7 +274,12 @@ const app = acp
     return {
       protocolVersion: 1,
       agentInfo: { name: env.FAKE_AGENT_NAME ?? "pi-agent-cli", title: "fake", version: env.FAKE_AGENT_VERSION ?? "0.8.0" },
-      agentCapabilities: { loadSession: true, sessionCapabilities: { close: {}, ...(env.FAKE_NO_LIST ? {} : { list: {} }) } },
+      agentCapabilities: {
+        loadSession: true,
+        promptCapabilities: { image: env.FAKE_NO_IMAGES !== "1" },
+        mcpCapabilities: { http: env.FAKE_NO_MCP_HTTP !== "1", sse: env.FAKE_NO_MCP_SSE !== "1" },
+        sessionCapabilities: { close: {}, ...(env.FAKE_NO_LIST ? {} : { list: {} }) },
+      },
       authMethods: terminal && env.FAKE_AUTH_MARKER
         ? [{ id: "pi-setup", name: "Set up", description: "setup", type: "terminal", args: ["--setup"], env: { FAKE_SETUP: "1" } }]
         : [],

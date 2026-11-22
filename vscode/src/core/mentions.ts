@@ -387,22 +387,51 @@ export function rankMentions(
   return scored.slice(0, limit).map((entry) => entry.item);
 }
 
-const SAFE_SECRET_SUFFIXES = [".example", ".sample", ".template", ".dist", ".md"];
+const SAFE_EXACT_NAMES = new Set(["ca.pem", "cacert.pem", "root-ca.pem"]);
+const SAFE_SECRET_SUFFIXES = [".example", ".sample", ".template", ".dist", ".md", ".pub", ".d.ts", ".bak"];
 const SECRET_EXACT_NAMES = new Set([
   ".env",
+  ".envrc",
   ".npmrc",
   ".pypirc",
   ".netrc",
+  "credentials",
   "credentials.json",
+  ".git-credentials",
+  "service-account.json",
+  "serviceaccountkey.json",
+  "client_secret.json",
+  ".htpasswd",
   "secrets.json",
   "secrets.yaml",
   "secrets.yml",
+  "secrets.toml",
+  ".secrets",
+  "secret.txt",
+  "kubeconfig",
+  ".pgpass",
+  ".dockercfg",
+  "terraform.tfvars",
+  "terraform.tfstate",
   "id_rsa",
   "id_ed25519",
   "id_ecdsa",
   "id_dsa",
 ]);
-const SECRET_EXTENSIONS = [".env", ".pem", ".key", ".p12", ".pfx", ".jks", ".keystore"];
+const SECRET_EXTENSIONS = [
+  ".env",
+  ".pem",
+  ".key",
+  ".p12",
+  ".pfx",
+  ".jks",
+  ".keystore",
+  ".ppk",
+  ".tfvars",
+  ".tfstate",
+  ".secrets",
+  ".keys",
+];
 const SECRET_PREFIXES = [".env.", "id_rsa.", "id_ed25519.", "id_ecdsa.", "id_dsa."];
 
 /**
@@ -410,10 +439,24 @@ const SECRET_PREFIXES = [".env.", "id_rsa.", "id_ed25519.", "id_ecdsa.", "id_dsa
  * that should be badged in the `@` mention picker.
  */
 export function isLikelySecretPath(relPath: string): boolean {
-  const name = basename(relPath.replace(/\\/g, "/")).toLowerCase();
+  const normalizedPath = relPath
+    .replace(/\\/g, "/")
+    .replace(/^\.\//, "")
+    .replace(/^\/+/, "")
+    .replace(/\/+$/, "")
+    .toLowerCase();
+  const name = basename(normalizedPath);
   if (name === "") return false;
-  if (SAFE_SECRET_SUFFIXES.some((suffix) => name.endsWith(suffix))) {
+  if (SAFE_EXACT_NAMES.has(name) || SAFE_SECRET_SUFFIXES.some((suffix) => name.endsWith(suffix))) {
     return false;
+  }
+  if (
+    normalizedPath === ".aws/credentials" ||
+    normalizedPath.endsWith("/.aws/credentials") ||
+    normalizedPath === ".docker/config.json" ||
+    normalizedPath.endsWith("/.docker/config.json")
+  ) {
+    return true;
   }
   if (SECRET_EXACT_NAMES.has(name)) return true;
   if (SECRET_EXTENSIONS.some((ext) => name.endsWith(ext))) return true;

@@ -1653,7 +1653,7 @@ describe.skipIf(!chrome || !built)("webview: P1 images, insertMention, saveAll, 
 
   it("posts openFile when clicking a file or selection @ chip label and a tool card Open button", () => {
     const out = run(`${state}
-      state({});
+      state({ cwd: "/workspace/proj" });
       host({ type: "insertMention", item: { kind: "selection", path: "src/app.ts", range: { startLine: 10, endLine: 20 } } });
       host({ type: "insertMention", item: { kind: "file", path: "src/util.ts" } });
       host({ type: "insertMention", item: { kind: "folder", path: "src/" } });
@@ -1679,9 +1679,19 @@ describe.skipIf(!chrome || !built)("webview: P1 images, insertMention, saveAll, 
       host({ type: "toolCall", toolCall: { id: "t-open", title: "read src/app.ts", kind: "read", status: "completed", rawInput: { path: "./src\\\\app.ts" } } });
       host({ type: "toolCall", toolCall: { id: "t-unsafe", title: "read ../secret.txt", kind: "read", status: "completed", rawInput: { path: "../secret.txt" } } });
       host({ type: "toolCall", toolCall: { id: "t-both", title: "edit src/app.ts", kind: "edit", status: "completed", rawInput: { path: "src/app.ts" }, canDiff: true } });
+      host({ type: "toolCall", toolCall: { id: "t-abs-in", title: "read /workspace/proj/src/abs.ts", kind: "read", status: "completed", rawInput: { path: "/workspace/proj/src/abs.ts" } } });
+      host({ type: "toolCall", toolCall: { id: "t-abs-out", title: "read /other/proj/src/abs.ts", kind: "read", status: "completed", rawInput: { path: "/other/proj/src/abs.ts" } } });
+      host({ type: "toolCall", toolCall: { id: "t-abs-sibling", title: "read /workspace/proj-2/src/abs.ts", kind: "read", status: "completed", rawInput: { path: "/workspace/proj-2/src/abs.ts" } } });
+
+      // Windows drive-letter case-insensitive prefix matching.
+      state({ cwd: "C:\\\\Workspace\\\\Proj" });
+      host({ type: "toolCall", toolCall: { id: "t-win-in", title: "read win", kind: "read", status: "completed", rawInput: { path: "c:\\\\workspace\\\\proj\\\\src\\\\win.ts" } } });
+      host({ type: "toolCall", toolCall: { id: "t-win-out", title: "read win out", kind: "read", status: "completed", rawInput: { path: "D:\\\\Workspace\\\\Proj\\\\src\\\\win.ts" } } });
 
       const openButtons = [...document.querySelectorAll(".tool-open-btn")];
       openButtons[0].click();
+      openButtons[2].click();
+      openButtons[3].click();
 
       const bothButtons = [...document.querySelectorAll(".tool")][2].querySelectorAll(".actions button");
       window.__result = {
@@ -1700,13 +1710,76 @@ describe.skipIf(!chrome || !built)("webview: P1 images, insertMention, saveAll, 
         folderRole: null,
       },
       remainingChips: 2,
-      openButtonCount: 2,
+      openButtonCount: 4,
       bothButtonLabels: ["Open", "Show diff"],
       openFiles: [
         { type: "openFile", path: "src/app.ts", line: 10 },
         { type: "openFile", path: "src/util.ts" },
         { type: "openFile", path: "src/app.ts" },
+        { type: "openFile", path: "src/abs.ts" },
+        { type: "openFile", path: "src/win.ts" },
       ],
+    });
+  });
+
+  it("refuses pasted and dropped images with a warning notice when supportsImages is false", () => {
+    const out = run(
+      `${state}
+      state({ supportsImages: false });
+      const input = document.querySelector("textarea");
+      const composer = document.querySelector(".composer");
+      const chips = document.querySelector(".composer-chips");
+
+      const pasteEvent = new Event("paste", { bubbles: true, cancelable: true });
+      Object.defineProperty(pasteEvent, "clipboardData", {
+        value: {
+          items: [
+            {
+              type: "image/png",
+              getAsFile: () => ({ type: "image/png", name: "clip.png", __base64: "iVBORw0KGgo=" }),
+            },
+          ],
+        },
+      });
+      input.dispatchEvent(pasteEvent);
+
+      const dropEvent = new Event("drop", { bubbles: true, cancelable: true });
+      Object.defineProperty(dropEvent, "dataTransfer", {
+        value: {
+          files: [{ type: "image/jpeg", name: "drop.jpg", __base64: "AAAA" }],
+        },
+      });
+      composer.dispatchEvent(dropEvent);
+
+      const notices = [...document.querySelectorAll(".notice.warning")].map((n) => n.textContent);
+      window.__result = {
+        pastePrevented: pasteEvent.defaultPrevented,
+        dropPrevented: dropEvent.defaultPrevented,
+        chipCount: chips.querySelectorAll(".chip").length,
+        chipsHidden: chips.hidden,
+        notices,
+        sends: window.__posted.filter((m) => m.type === "send"),
+      };`,
+      `window.FileReader = class {
+        constructor() { this._listeners = []; this.result = ""; }
+        addEventListener(type, fn) { if (type === "load") this._listeners.push(fn); }
+        readAsDataURL(file) {
+          this.result = "data:" + file.type + ";base64," + (file.__base64 || "iVBORw0KGgo=");
+          for (const fn of this._listeners) fn();
+        }
+      };`,
+    );
+    expect(out).toMatchObject({
+      ok: true,
+      pastePrevented: true,
+      dropPrevented: true,
+      chipCount: 0,
+      chipsHidden: true,
+      notices: [
+        "This agent does not support image attachments.",
+        "This agent does not support image attachments.",
+      ],
+      sends: [],
     });
   });
 

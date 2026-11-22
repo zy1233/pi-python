@@ -103,12 +103,15 @@ export function activate(context: vscode.ExtensionContext): void {
     }),
     vscode.commands.registerCommand("zycode.addSelectionToChat", async () => {
       const editor = vscode.window.activeTextEditor;
-      const folder = host.sessionFolder();
+      const folder = chat.currentCwd ?? host.sessionFolder();
       if (!editor || editor.document.uri.scheme !== "file" || !folder) return;
       const rel = path.relative(folder, editor.document.uri.fsPath);
       const isSelection = !editor.selection.isEmpty;
       const normalized = normalizeRelativePath(rel, isSelection ? "selection" : "file");
-      if (!normalized) return;
+      if (!normalized) {
+        host.notify("info", "zycode: this file is outside the current chat folder.");
+        return;
+      }
       if (isSelection) {
         const startLine = editor.selection.start.line + 1;
         const endLine =
@@ -122,7 +125,7 @@ export function activate(context: vscode.ExtensionContext): void {
     }),
     vscode.commands.registerCommand("zycode.addFileToChat", async (uri?: vscode.Uri) => {
       const targetUri = uri ?? vscode.window.activeTextEditor?.document.uri;
-      const folder = host.sessionFolder();
+      const folder = chat.currentCwd ?? host.sessionFolder();
       if (!targetUri || targetUri.scheme !== "file" || !folder) return;
       let isDir = false;
       try {
@@ -132,7 +135,10 @@ export function activate(context: vscode.ExtensionContext): void {
       }
       const kind = isDir ? "folder" : "file";
       const normalized = normalizeRelativePath(path.relative(folder, targetUri.fsPath), kind);
-      if (!normalized) return;
+      if (!normalized) {
+        host.notify("info", "zycode: this file is outside the current chat folder.");
+        return;
+      }
       await view.insertMention({ kind, path: normalized });
     }),
     vscode.workspace.onDidGrantWorkspaceTrust(() => {

@@ -33,6 +33,7 @@ const MAX_BRACE_EXPANSIONS = 32;
 const MAX_GITIGNORE_RULES = 2000;
 const MAX_FILTER_PATTERNS = 4000;
 const REGEX_CHUNK_SIZE = 250;
+const MAX_GLOB_WILDCARDS = 6;
 
 /**
  * Expands a single-level brace alternation (e.g. `**\/*.{pyc,pyo}`) into plain glob patterns.
@@ -239,24 +240,33 @@ function globToRegExpSource(glob: string): string | undefined {
   if (clean === "") return undefined;
 
   let regex = "";
+  let wildcards = 0;
   let i = 0;
   while (i < clean.length) {
-    if (clean.startsWith("**/", i)) {
+    if (clean.startsWith("**/", i) && (i === 0 || clean[i - 1] === "/")) {
+      if (++wildcards > MAX_GLOB_WILDCARDS) return undefined;
       regex += "(?:.+/)?";
       i += 3;
       continue;
     }
     if (clean.startsWith("/**/", i)) {
+      if (++wildcards > MAX_GLOB_WILDCARDS) return undefined;
       regex += "(?:/.+/|/)";
       i += 4;
       continue;
     }
     if (clean.startsWith("/**", i) && i + 3 === clean.length) {
+      if (++wildcards > MAX_GLOB_WILDCARDS) return undefined;
       regex += "/.*";
       i += 3;
       continue;
     }
-    if (clean.startsWith("**", i)) {
+    if (
+      clean.startsWith("**", i) &&
+      (i === 0 || clean[i - 1] === "/") &&
+      (i + 2 === clean.length || clean[i + 2] === "/")
+    ) {
+      if (++wildcards > MAX_GLOB_WILDCARDS) return undefined;
       regex += ".*";
       i += 2;
       continue;
@@ -271,7 +281,10 @@ function globToRegExpSource(glob: string): string | undefined {
       }
       regex += "\\[";
     } else if (ch === "*") {
+      while (clean[i] === "*") i++;
+      if (++wildcards > MAX_GLOB_WILDCARDS) return undefined;
       regex += "[^/]*";
+      continue;
     } else if (ch === "?") {
       regex += "[^/]";
     } else if (/[.+^$(){}|\\\]/]/.test(ch)) {
@@ -401,13 +414,19 @@ export function createPathFilter(
   };
 }
 
+export interface CompiledGitignoreFilter {
+  isExcluded(relPath: string): boolean;
+  regexCount: number;
+}
+
 /**
- * Compiles `baseExcludes` (always excluded) plus ordered `.gitignore` rules (last-match-wins).
+ * Compiles `baseExcludes` (always excluded) plus ordered `.gitignore` rules (last-match-wins),
+ * returning both the path predicate and the number of compiled `RegExp` objects.
  */
-export function createGitignorePathFilter(
+export function compileGitignoreFilter(
   baseExcludes: readonly string[],
   gitignore: Pick<ParsedGitignore, "rules">,
-): (relPath: string) => boolean {
+): CompiledGitignoreFilter {
   const baseMatchers = compilePatterns(baseExcludes, { left: MAX_FILTER_PATTERNS });
   const segments: { negated: boolean; matchers: RegExp[] }[] = [];
   const budget = { left: MAX_FILTER_PATTERNS };
@@ -434,18 +453,33 @@ export function createGitignorePathFilter(
   }
   flushSegment();
 
-  return (relPath: string): boolean => {
-    const clean = normalizeFilterTarget(relPath);
-    if (clean === "") return false;
-    if (matchesAny(baseMatchers, clean)) return true;
-    for (let i = segments.length - 1; i >= 0; i--) {
-      const seg = segments[i]!;
-      if (matchesAny(seg.matchers, clean)) {
-        return !seg.negated;
+  const regexCount = baseMatchers.length + segments.reduce((sum, seg) => sum + seg.matchers.length, 0);
+
+  return {
+    regexCount,
+    isExcluded(relPath: string): boolean {
+      const clean = normalizeFilterTarget(relPath);
+      if (clean === "") return false;
+      if (matchesAny(baseMatchers, clean)) return true;
+      for (let i = segments.length - 1; i >= 0; i--) {
+        const seg = segments[i]!;
+        if (matchesAny(seg.matchers, clean)) {
+          return !seg.negated;
+        }
       }
-    }
-    return false;
+      return false;
+    },
   };
+}
+
+/**
+ * Compiles `baseExcludes` (always excluded) plus ordered `.gitignore` rules (last-match-wins).
+ */
+export function createGitignorePathFilter(
+  baseExcludes: readonly string[],
+  gitignore: Pick<ParsedGitignore, "rules">,
+): (relPath: string) => boolean {
+  return compileGitignoreFilter(baseExcludes, gitignore).isExcluded;
 }
 
 function concreteNegatedBase(pattern: string): string | undefined {

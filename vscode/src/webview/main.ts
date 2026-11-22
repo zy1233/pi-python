@@ -778,7 +778,22 @@ function drawToolOutput(entry: ToolEntry): void {
 
 function toolFilePath(call: ToolCallView): string | undefined {
   if (!isPlainRecord(call.rawInput) || typeof call.rawInput.path !== "string") return undefined;
-  return normalizeRelativePath(call.rawInput.path, "file");
+  const rawPath = call.rawInput.path;
+  const isAbs = rawPath.startsWith("/") || /^[A-Za-z]:[\\/]/.test(rawPath);
+  if (isAbs) {
+    if (!state.cwd) return undefined;
+    const cwdNorm = state.cwd.replace(/\\/g, "/").replace(/\/+/g, "/").replace(/\/+$/, "");
+    const pathNorm = rawPath.replace(/\\/g, "/").replace(/\/+/g, "/");
+    const prefix = `${cwdNorm}/`;
+    const isWinDrive = /^[A-Za-z]:\//.test(prefix);
+    const matchesPrefix = isWinDrive
+      ? pathNorm.length > prefix.length &&
+        pathNorm.slice(0, prefix.length).toLowerCase() === prefix.toLowerCase()
+      : pathNorm.startsWith(prefix);
+    if (!matchesPrefix) return undefined;
+    return normalizeRelativePath(pathNorm.slice(prefix.length), "file");
+  }
+  return normalizeRelativePath(rawPath, "file");
 }
 
 function createToolEntry(call: ToolCallView): ToolEntry {
@@ -1396,6 +1411,11 @@ function renderChips(): void {
 
 function addImageAttachment(mimeType: string, base64Data: string, name?: string): void {
   if (input.disabled) return;
+  if (state.supportsImages === false) {
+    addNotice("warning", "This agent does not support image attachments.");
+    scrollToEnd();
+    return;
+  }
   if (!(ALLOWED_IMAGE_MIMES as readonly string[]).includes(mimeType)) return;
   if (imageAttachments.length >= MAX_IMAGES) {
     addNotice("warning", `At most ${MAX_IMAGES} images can be attached to a message.`);
@@ -1705,6 +1725,11 @@ function submit(): void {
     }
   }
   if (state.status !== "ready") return;
+  if (imageAttachments.length > 0 && state.supportsImages === false) {
+    addNotice("warning", "This agent does not support image attachments.");
+    scrollToEnd();
+    return;
+  }
   closePopover();
   followTail = true;
   syncJumpBottom();
@@ -1735,6 +1760,12 @@ input.addEventListener("paste", (event) => {
     if ((ALLOWED_IMAGE_MIMES as readonly string[]).includes(item.type)) {
       const file = item.getAsFile();
       if (file) {
+        if (state.supportsImages === false) {
+          event.preventDefault();
+          addNotice("warning", "This agent does not support image attachments.");
+          scrollToEnd();
+          return;
+        }
         handledImage = true;
         readImageFile(file);
       }
@@ -1757,6 +1788,12 @@ composer.addEventListener("drop", (event) => {
   let hasImage = false;
   for (const file of Array.from(files)) {
     if ((ALLOWED_IMAGE_MIMES as readonly string[]).includes(file.type)) {
+      if (state.supportsImages === false) {
+        event.preventDefault();
+        addNotice("warning", "This agent does not support image attachments.");
+        scrollToEnd();
+        return;
+      }
       hasImage = true;
       readImageFile(file);
     }

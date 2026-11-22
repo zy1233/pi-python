@@ -2,6 +2,7 @@ import path from "node:path";
 
 import * as vscode from "vscode";
 
+import type { Logger } from "../core/host.js";
 import {
   DEFAULT_MENTION_EXCLUDES,
   buildFindFilesExcludeGlob,
@@ -78,6 +79,9 @@ export class WorkspaceMentions implements vscode.Disposable {
   private watcherFolder: string | undefined;
   private watcherDisposables: vscode.Disposable[] = [];
   private pendingIndex: { folder: string; version: number; promise: Promise<CachedIndex> } | undefined;
+  private warnedGitignoreTruncated = false;
+
+  constructor(private readonly log?: Logger) {}
 
   async search(folder: string, query: string, limit = DEFAULT_MENTION_LIMIT): Promise<RankedMention[]> {
     if (!vscode.workspace.isTrusted) return [];
@@ -168,6 +172,7 @@ export class WorkspaceMentions implements vscode.Disposable {
     this.cache = undefined;
     if (clearFilter) {
       this.pathFilter = undefined;
+      this.warnedGitignoreTruncated = false;
     }
   }
 
@@ -232,6 +237,10 @@ export class WorkspaceMentions implements vscode.Disposable {
       const baseExcludes = new Set<string>(DEFAULT_MENTION_EXCLUDES);
       collectConfigExcludes(folderUri, baseExcludes);
       const gitignore = await readRootGitignore(folderUri);
+      if (gitignore.truncated && !this.warnedGitignoreTruncated) {
+        this.warnedGitignoreTruncated = true;
+        this.log?.warn(".gitignore has more than 2000 rules; later rules are ignored for @ mention indexing.");
+      }
       const findFilesExcludes = new Set<string>(baseExcludes);
       for (const pattern of selectSafeFindFilesGitignoreExcludes(gitignore)) {
         findFilesExcludes.add(pattern);

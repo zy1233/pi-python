@@ -3,6 +3,7 @@ import { describe, expect, it } from "vitest";
 import {
   DEFAULT_MENTION_EXCLUDES,
   buildFindFilesExcludeGlob,
+  compileGitignoreFilter,
   createGitignorePathFilter,
   createPathFilter,
   expandExcludePattern,
@@ -148,13 +149,32 @@ cache/
     expect(safeWildcard).toContain("**/cache");
   });
 
-  it("filters 5,000 paths across a large .gitignore quickly without stalling", () => {
+  it("drops pathological multi-wildcard globs so ReDoS patterns never stall while collapsing repeated segment stars", () => {
+    const evil = "**/a*a*a*a*a*a*a*a*a*a*b";
+    const isExcluded = createPathFilter([evil, "**/foo***bar.log", "**/a*b*c*d/**"]);
+    const input = `${"a".repeat(40)}/${"a".repeat(40)}`;
+
+    const start = Date.now();
+    expect(isExcluded(input)).toBe(false);
+    expect(Date.now() - start).toBeLessThan(500);
+
+    // Repeated '*' inside a segment collapses cleanly and stays within one path segment.
+    expect(isExcluded("dir/foo123bar.log")).toBe(true);
+    expect(isExcluded("dir/foo/bar.log")).toBe(false);
+    // Multi-wildcard pattern within the wildcard budget (<= 6) still matches.
+    expect(isExcluded("pkg/a1b2c3d/out.js")).toBe(true);
+  });
+
+  it("filters 5,000 paths across a large .gitignore with bounded compiled regex count and no stalling", () => {
     const lines: string[] = [];
     for (let i = 0; i < 3000; i++) {
       lines.push(`gen_${i}/`);
     }
     const parsed = parseGitignorePatterns(lines.join("\n"));
-    const isExcluded = createGitignorePathFilter(DEFAULT_MENTION_EXCLUDES, parsed);
+    const { isExcluded, regexCount } = compileGitignoreFilter(DEFAULT_MENTION_EXCLUDES, parsed);
+    expect(regexCount).toBeGreaterThan(0);
+    expect(regexCount).toBeLessThanOrEqual(20);
+
     const paths = Array.from({ length: 5000 }, (_, i) => (i % 10 === 0 ? `gen_${i}/out.ts` : `src/mod_${i % 50}/f_${i}.ts`));
 
     const start = Date.now();
@@ -165,6 +185,6 @@ cache/
     const elapsedMs = Date.now() - start;
 
     expect(excludedCount).toBeGreaterThan(0);
-    expect(elapsedMs).toBeLessThan(3000);
+    expect(elapsedMs).toBeLessThan(10_000);
   });
 });

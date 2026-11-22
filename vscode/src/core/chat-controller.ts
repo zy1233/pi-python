@@ -160,6 +160,7 @@ export class ChatController {
   private modeNoticeShown = false;
   private stuckModeNoticeShown = false;
   private contextHintShown = false;
+  private mcpFilteredNoticeShown = false;
   private setupInfo: SetupInfo | undefined;
   private settingUp = false;
   private projectTrustRefused = false;
@@ -206,6 +207,10 @@ export class ChatController {
     return { dispose: () => this.sessionListeners.delete(listener) };
   }
 
+  private supportsImages(): boolean {
+    return this.initResult?.agentCapabilities?.promptCapabilities?.image === true;
+  }
+
   stateMessage(): StateMessage {
     const message: StateMessage = {
       type: "state",
@@ -220,6 +225,7 @@ export class ChatController {
         source: this.command.source,
       };
     }
+    if (this.initResult) message.supportsImages = this.supportsImages();
     if (this.cwd !== undefined) message.cwd = this.cwd;
     if (this.mode) message.mode = this.visibleMode(this.mode);
     if (this.model !== undefined) message.model = this.model;
@@ -428,6 +434,10 @@ export class ChatController {
     return this.status;
   }
 
+  get currentCwd(): string | undefined {
+    return this.cwd;
+  }
+
   // ----- lifecycle
 
   /** Starts the agent and opens a session. Does nothing if the agent is running. */
@@ -448,6 +458,7 @@ export class ChatController {
     this.stopping = false;
     this.projectTrustRefused = false;
     this.deleteSupported = true;
+    this.mcpFilteredNoticeShown = false;
     if (!this.host.isTrusted()) {
       this.setStatus("untrusted", "Workspace Trust is off for this folder. zycode does not start in Restricted Mode.");
       return;
@@ -567,7 +578,36 @@ export class ChatController {
   }
 
   private mcpServers(): McpServerConfig[] {
-    return this.host.isTrusted() ? (this.host.settings().mcpServers ?? []) : [];
+    if (!this.host.isTrusted()) return [];
+    const configured = this.host.settings().mcpServers ?? [];
+    if (configured.length === 0) return [];
+    const mcpCaps = this.initResult?.agentCapabilities?.mcpCapabilities;
+    const allowed: McpServerConfig[] = [];
+    const skippedTransports = new Set<"http" | "sse">();
+    for (const server of configured) {
+      if ("type" in server) {
+        if (server.type === "http" && mcpCaps?.http !== true) {
+          skippedTransports.add("http");
+          continue;
+        }
+        if (server.type === "sse" && mcpCaps?.sse !== true) {
+          skippedTransports.add("sse");
+          continue;
+        }
+      }
+      allowed.push(server);
+    }
+    if (skippedTransports.size > 0 && !this.mcpFilteredNoticeShown) {
+      this.mcpFilteredNoticeShown = true;
+      const transports = (["http", "sse"] as const)
+        .filter((transport) => skippedTransports.has(transport))
+        .map((transport) => transport.toUpperCase())
+        .join(" and ");
+      const text = `Skipped configured ${transports} MCP server(s) because this agent did not advertise support for ${transports}.`;
+      this.host.log.warn(text);
+      this.pushNotice("info", text);
+    }
+    return allowed;
   }
 
   private async openSession(): Promise<void> {
@@ -800,6 +840,7 @@ export class ChatController {
     this.models = undefined;
     this.agentCommands = [];
     this.opening = false;
+    this.mcpFilteredNoticeShown = false;
     this.clearSessionStats();
     this.setStatus("stopped");
   }
@@ -840,6 +881,7 @@ export class ChatController {
     this.models = undefined;
     this.agentCommands = [];
     this.opening = false;
+    this.mcpFilteredNoticeShown = false;
     this.clearSessionStats();
     this.pushNotice("error", text);
     this.setError(text);
@@ -864,6 +906,10 @@ export class ChatController {
     const promptText = formatPromptWithMentions(text, mentions);
     const hasImages = images.length > 0;
     if (this.status !== "ready" || !conn || !sessionId || (promptText.trim() === "" && !hasImages)) return false;
+    if (hasImages && !this.supportsImages()) {
+      this.pushNotice("warning", "This agent does not support image attachments.");
+      return false;
+    }
     const dirty = this.cwd !== undefined ? this.host.dirtyFiles(this.cwd) : [];
     if (dirty.length > 0) {
       this.pushNotice(

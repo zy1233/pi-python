@@ -42,13 +42,14 @@ export class VsCodeHost implements Host, vscode.Disposable {
   readonly extensionVersion: string;
   readonly agentVersionPin: string;
   readonly platform = process.platform;
-  private readonly mentions = new WorkspaceMentions();
+  private readonly mentions: WorkspaceMentions;
 
   constructor(
     private readonly channel: vscode.LogOutputChannel,
     info: HostInfo,
   ) {
     this.log = new ChannelLogger(channel);
+    this.mentions = new WorkspaceMentions(this.log);
     this.extensionPath = info.extensionPath;
     this.extensionVersion = info.extensionVersion;
     this.agentVersionPin = info.agentVersionPin;

@@ -424,6 +424,36 @@ describe("WorkspaceMentions UI wiring", () => {
 
     mentions.dispose();
   });
+
+  it("logs a warning once when .gitignore has more than 2000 rules and resets on .gitignore change", async () => {
+    mockState.gitignoreContent = Array.from({ length: 2005 }, (_, i) => `gen_${i}/`).join("\n");
+    mockState.findFilesResult = [fileUri("src/app.ts")];
+    const warnings: string[] = [];
+    const log = {
+      info() {},
+      warn(msg: string) {
+        warnings.push(msg);
+      },
+      error() {},
+    };
+
+    const mentions = new WorkspaceMentions(log);
+    await mentions.search(folder, "", 10);
+    expect(warnings).toEqual([".gitignore has more than 2000 rules; later rules are ignored for @ mention indexing."]);
+
+    // Cached search and unignored file creation must not spam the warning.
+    await mentions.search(folder, "app", 10);
+    mockState.watcherHandlers.create[0]?.(fileUri("src/other.ts"));
+    await mentions.search(folder, "app", 10);
+    expect(warnings).toHaveLength(1);
+
+    // Editing .gitignore clears the filter latch so a still-truncated file warns again once.
+    mockState.watcherHandlers.change[0]?.(fileUri(".gitignore"));
+    await mentions.search(folder, "app", 10);
+    expect(warnings).toHaveLength(2);
+
+    mentions.dispose();
+  });
 });
 
 describe("ChatViewProvider host clipboard & SessionsView timer polish", () => {
