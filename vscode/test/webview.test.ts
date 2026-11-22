@@ -740,7 +740,9 @@ describe.skipIf(!chrome || !built)("webview: slash commands and @ mentions", () 
       input.dispatchEvent(new Event("input", { bubbles: true }));
       const openState = {
         hidden: menu.hidden,
-        expanded: input.getAttribute("aria-expanded"),
+        controls: input.getAttribute("aria-controls"),
+        listbox: document.getElementById(input.getAttribute("aria-controls"))?.getAttribute("role"),
+        role: input.getAttribute("role"),
         activeDesc0: input.getAttribute("aria-activedescendant"),
         options: [...menu.querySelectorAll("[role='option']")].map((el) => el.querySelector(".popover-title").textContent),
       };
@@ -769,17 +771,17 @@ describe.skipIf(!chrome || !built)("webview: slash commands and @ mentions", () 
         afterAccept,
         openBeforeEsc,
         hiddenAfterEsc: menu.hidden,
-        expandedAfterEsc: input.getAttribute("aria-expanded"),
+        activeDescAfterEsc: input.getAttribute("aria-activedescendant"),
       };`);
     expect(out).toMatchObject({
       ok: true,
-      openState: { hidden: false, expanded: "true", activeDesc0: "composer-opt-0" },
+      openState: { hidden: false, controls: "composer-listbox", listbox: "listbox", role: null, activeDesc0: "composer-opt-0" },
       afterDown: { activeDesc: "composer-opt-1" },
       afterUp: "composer-opt-0",
       afterAccept: { value: "/goal ", menuHidden: true, sends: 0 },
       openBeforeEsc: true,
       hiddenAfterEsc: true,
-      expandedAfterEsc: "false",
+      activeDescAfterEsc: null,
     });
     const opts = (out.openState as { options: string[] }).options;
     expect(opts.slice(0, 3)).toEqual(["/goal", "/auto-log", "/new"]);
@@ -1260,6 +1262,46 @@ describe.skipIf(!chrome || !built)("webview: slash commands and @ mentions", () 
     });
   });
 
+  it("keeps the textarea a textbox and the listbox free of non-option children, and announces the number of results", () => {
+    const out = run(`${richState}
+      const input = document.querySelector("textarea");
+      const menu = document.getElementById("composer-menu");
+      const live = () => [...document.querySelectorAll(".composer [role='status']")].map((n) => n.textContent).filter(Boolean);
+      const shape = () => {
+        const list = document.getElementById("composer-listbox");
+        return {
+          listChildRoles: list ? [...list.children].map((c) => c.getAttribute("role")) : null,
+          headHidden: menu.querySelector(".popover-head")?.getAttribute("aria-hidden"),
+          listLabel: list?.getAttribute("aria-label") ?? null,
+          emptyInsideList: Boolean(list?.querySelector(".popover-empty")),
+          live: live(),
+        };
+      };
+      const typeText = (text) => {
+        input.value = text;
+        input.setSelectionRange(text.length, text.length);
+        input.dispatchEvent(new Event("input", { bubbles: true }));
+      };
+      typeText("/mode");
+      const slash = shape();
+      typeText("/zzzzzz");
+      const empty = shape();
+      typeText("@a");
+      const q = [...window.__posted].filter((m) => m.type === "queryMentions").at(-1);
+      host({ type: "mentionResults", requestId: q.requestId, query: q.query, items: [{ kind: "file", path: "a.ts", label: "a.ts", detail: "" }] });
+      const mention = shape();
+      input.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", bubbles: true }));
+      window.__result = { role: input.getAttribute("role"), slash, empty, mention, afterClose: live() };`);
+    expect(out).toMatchObject({
+      ok: true,
+      role: null,
+      slash: { listChildRoles: ["option", "option", "option"], headHidden: "true", listLabel: "Commands", emptyInsideList: false, live: ["3 suggestions"] },
+      empty: { listChildRoles: null, emptyInsideList: false, live: ["No matching commands"] },
+      mention: { listChildRoles: ["option"], listLabel: "Context · files, folders, selection", live: ["1 suggestion"] },
+      afterClose: [],
+    });
+  });
+
   it("keeps the old @ rows (dimmed) while a new search is pending, and never accepts them with Enter, Tab or a click", () => {
     const out = run(`${richState}
       const input = document.querySelector("textarea");
@@ -1280,10 +1322,11 @@ describe.skipIf(!chrome || !built)("webview: slash commands and @ mentions", () 
 
       typeText("see @a");
       answer([file("alpha.ts"), file("beta.ts")]);
-      const settled = { rows: rows(), stale: menu.classList.contains("stale"), busy: menu.getAttribute("aria-busy") };
+      const busy = () => document.getElementById("composer-listbox")?.getAttribute("aria-busy") ?? null;
+      const settled = { rows: rows(), stale: menu.classList.contains("stale"), busy: busy() };
 
       typeText("see @al");
-      const pending = { rows: rows(), stale: menu.classList.contains("stale"), busy: menu.getAttribute("aria-busy") };
+      const pending = { rows: rows(), stale: menu.classList.contains("stale"), busy: busy() };
       const tab = new KeyboardEvent("keydown", { key: "Tab", cancelable: true, bubbles: true });
       input.dispatchEvent(tab);
       input.dispatchEvent(new KeyboardEvent("keydown", { key: "Enter", bubbles: true }));
@@ -1296,7 +1339,7 @@ describe.skipIf(!chrome || !built)("webview: slash commands and @ mentions", () 
       };
 
       answer([file("alpha.ts")]);
-      const fresh = { rows: rows(), stale: menu.classList.contains("stale"), busy: menu.getAttribute("aria-busy") };
+      const fresh = { rows: rows(), stale: menu.classList.contains("stale"), busy: busy() };
       input.dispatchEvent(new KeyboardEvent("keydown", { key: "Enter", bubbles: true }));
       const accepted = { value: input.value, chipCount: chips.querySelectorAll(".chip").length };
 

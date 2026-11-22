@@ -83,20 +83,17 @@ const inputLabel = el("label", { class: "sr-only", for: "chat-input", text: "Mes
 const input = el("textarea", {
   id: "chat-input",
   class: "input",
-  role: "combobox",
   ariaAutocomplete: "list",
-  ariaExpanded: "false",
-  ariaControls: "composer-menu",
+  ariaControls: "composer-listbox",
 });
 input.placeholder = "Ask zycode (@ to mention, / for commands; Enter to send, Shift+Enter for a new line)";
 input.rows = 3;
 const popover = el("div", {
   id: "composer-menu",
   class: "composer-popover",
-  role: "listbox",
-  ariaLabel: "Suggestions",
   hidden: true,
 });
+const popoverStatus = el("span", { class: "sr-only", role: "status" });
 const chipsBar = el("div", {
   class: "composer-chips",
   role: "list",
@@ -133,7 +130,7 @@ const composerBar = el(
   el("div", { class: "composer-triggers" }, mentionTriggerButton, slashTriggerButton),
   el("div", { class: "actions" }, stopButton, sendButton),
 );
-const composer = el("footer", { class: "composer" }, jumpBottomButton, popover, chipsBar, inputLabel, input, composerBar);
+const composer = el("footer", { class: "composer" }, jumpBottomButton, popover, popoverStatus, chipsBar, inputLabel, input, composerBar);
 root.append(header, banner, transcript, composer);
 
 /**
@@ -1225,7 +1222,6 @@ function startMentionLoading(): void {
 }
 
 function syncComboboxAria(): void {
-  input.setAttribute("aria-expanded", menuOpen ? "true" : "false");
   if (menuOpen && menuItems.length > 0 && activeIndex >= 0 && activeIndex < menuItems.length) {
     input.setAttribute("aria-activedescendant", `composer-opt-${activeIndex}`);
   } else {
@@ -1243,6 +1239,7 @@ function closePopover(): void {
   menuOpen = false;
   popover.hidden = true;
   popover.replaceChildren();
+  popoverStatus.textContent = "";
   syncComboboxAria();
   syncJumpBottom();
 }
@@ -1269,8 +1266,6 @@ function renderPopover(): void {
   popover.hidden = false;
   const stale = activeTrigger.kind === "mention" && mentionLoading && menuItems.length > 0;
   popover.classList.toggle("stale", stale);
-  if (stale) popover.setAttribute("aria-busy", "true");
-  else popover.removeAttribute("aria-busy");
   syncJumpBottom();
 
   const headerText =
@@ -1279,7 +1274,7 @@ function renderPopover(): void {
       : activeTrigger.kind === "slash-arg"
         ? `/${activeTrigger.command} options`
         : "Context · files, folders, selection";
-  const nodes: Node[] = [el("div", { class: "popover-head", text: headerText })];
+  const nodes: Node[] = [el("div", { class: "popover-head", ariaHidden: true, text: headerText })];
 
   if (menuItems.length === 0) {
     const emptyText =
@@ -1290,8 +1285,9 @@ function renderPopover(): void {
         : activeTrigger.kind === "slash-arg"
           ? `No matching options for /${activeTrigger.command}`
           : "No matching commands";
-    nodes.push(el("div", { class: "popover-empty", role: "status", text: emptyText }));
+    nodes.push(el("div", { class: "popover-empty", text: emptyText }));
     popover.replaceChildren(...nodes);
+    popoverStatus.textContent = emptyText;
     syncComboboxAria();
     return;
   }
@@ -1299,6 +1295,8 @@ function renderPopover(): void {
   if (activeIndex >= menuItems.length) activeIndex = menuItems.length - 1;
   if (activeIndex < 0) activeIndex = 0;
 
+  const list = el("div", { id: "composer-listbox", role: "listbox", ariaLabel: headerText });
+  if (stale) list.setAttribute("aria-busy", "true");
   menuItems.forEach((entry, index) => {
     const active = index === activeIndex;
     const row = el("div", {
@@ -1351,10 +1349,14 @@ function renderPopover(): void {
         row.append(el("div", { class: "popover-detail" }, ...highlightedText(item.detail, item.detailMatches)));
       }
     }
-    nodes.push(row);
+    list.append(row);
   });
+  nodes.push(list);
 
   popover.replaceChildren(...nodes);
+  popoverStatus.textContent = stale
+    ? "Searching workspace…"
+    : `${menuItems.length} ${menuItems.length === 1 ? "suggestion" : "suggestions"}`;
   syncComboboxAria();
 }
 
