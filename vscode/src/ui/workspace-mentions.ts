@@ -6,7 +6,7 @@ import type { Logger } from "../core/host.js";
 import {
   DEFAULT_MENTION_EXCLUDES,
   buildFindFilesExcludeGlob,
-  createGitignorePathFilter,
+  compileGitignoreFilter,
   expandExcludePattern,
   parseGitignorePatterns,
   selectSafeFindFilesGitignoreExcludes,
@@ -80,6 +80,7 @@ export class WorkspaceMentions implements vscode.Disposable {
   private watcherDisposables: vscode.Disposable[] = [];
   private pendingIndex: { folder: string; version: number; promise: Promise<CachedIndex> } | undefined;
   private warnedGitignoreTruncated = false;
+  private warnedGitignoreDropped = false;
 
   constructor(private readonly log?: Logger) {}
 
@@ -173,6 +174,7 @@ export class WorkspaceMentions implements vscode.Disposable {
     if (clearFilter) {
       this.pathFilter = undefined;
       this.warnedGitignoreTruncated = false;
+      this.warnedGitignoreDropped = false;
     }
   }
 
@@ -246,7 +248,17 @@ export class WorkspaceMentions implements vscode.Disposable {
         findFilesExcludes.add(pattern);
       }
       const exclude = buildFindFilesExcludeGlob(findFilesExcludes);
-      const pathFilter = createGitignorePathFilter([...baseExcludes], gitignore);
+      const compiled = compileGitignoreFilter([...baseExcludes], gitignore);
+      const pathFilter = compiled.isExcluded;
+      const dropped = (gitignore.dropped ?? 0) + compiled.dropped;
+      if (dropped > 0 && !this.warnedGitignoreDropped) {
+        this.warnedGitignoreDropped = true;
+        const negations = (gitignore.droppedNegations ?? 0) + compiled.droppedNegations;
+        this.log?.warn(
+          `${dropped} .gitignore pattern${dropped === 1 ? "" : "s"} could not be used for @ mention indexing ` +
+            `(${negations} from \`!\` rules). Ignored files can show in the list, and a file that a dropped \`!\` rule re-includes can stay hidden.`,
+        );
+      }
       const uris = await vscode.workspace.findFiles(
         new vscode.RelativePattern(folder, "**/*"),
         exclude || undefined,

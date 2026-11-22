@@ -456,6 +456,49 @@ describe("WorkspaceMentions UI wiring", () => {
   });
 });
 
+describe("WorkspaceMentions dropped .gitignore patterns", () => {
+  const folder = path.resolve("/workspace/proj");
+
+  it("logs one warning with the number of patterns that cannot be used, and how many are `!` rules", async () => {
+    mockState.gitignoreContent = "ok.log\n!a{b{c,d},e}\nx{a,b\n";
+    mockState.findFilesResult = [makeUri(path.join(folder, "src/app.ts"))];
+    const warnings: string[] = [];
+    const log = {
+      info() {},
+      warn(msg: string) {
+        warnings.push(msg);
+      },
+      error() {},
+    };
+
+    const mentions = new WorkspaceMentions(log);
+    await mentions.search(folder, "", 10);
+    expect(warnings).toHaveLength(1);
+    expect(warnings[0]).toContain("2 .gitignore patterns could not be used");
+    expect(warnings[0]).toContain("1 from `!` rules");
+
+    await mentions.search(folder, "app", 10);
+    expect(warnings).toHaveLength(1);
+
+    mockState.watcherHandlers.change[0]?.(makeUri(path.join(folder, ".gitignore")));
+    await mentions.search(folder, "app", 10);
+    expect(warnings).toHaveLength(2);
+
+    mentions.dispose();
+  });
+
+  it("logs nothing for a .gitignore whose patterns all work, with many stars included", async () => {
+    mockState.gitignoreContent = "*\n!a*a*a*a*a*a*b\n";
+    mockState.findFilesResult = [makeUri(path.join(folder, "axaxaxaxaxaxb"))];
+    const warnings: string[] = [];
+    const mentions = new WorkspaceMentions({ info() {}, warn: (msg: string) => warnings.push(msg), error() {} });
+    const results = await mentions.search(folder, "", 10);
+    expect(warnings).toEqual([]);
+    expect(results.map((r) => r.path)).toEqual(["axaxaxaxaxaxb"]);
+    mentions.dispose();
+  });
+});
+
 describe("ChatViewProvider host clipboard & SessionsView timer polish", () => {
   it("writes copy messages to vscode.env.clipboard and skips SessionsView timer refresh when hidden or empty", async () => {
     let receiveMessage: ((raw: unknown) => void) | undefined;

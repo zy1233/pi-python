@@ -27,13 +27,26 @@ export interface ParsedGitignore {
   negations: string[];
   rules: GitignoreRule[];
   truncated?: boolean;
+  /** Lines that gave no usable pattern (nested braces, too many brace alternatives). `droppedNegations` counts the `!` lines among them. */
+  dropped?: number;
+  droppedNegations?: number;
+}
+
+/** What a compiled glob offers: a `RegExp`, or the linear matcher for a glob that a regex could not match in bounded time. */
+export interface GlobMatcher {
+  test(target: string): boolean;
 }
 
 const MAX_BRACE_EXPANSIONS = 32;
 const MAX_GITIGNORE_RULES = 2000;
 const MAX_FILTER_PATTERNS = 4000;
 const REGEX_CHUNK_SIZE = 250;
-const MAX_GLOB_WILDCARDS = 6;
+const MAX_GLOB_LENGTH = 1024;
+const MAX_LINEAR_MATCHERS = 200;
+/** A regex over one segment with more `*` runs than this can take O(n^k) time (k = the number of runs). */
+const MAX_REGEX_SEGMENT_STARS = 2;
+/** `**` between two segments multiplies the backtracking; a leading and a trailing `**` do not. */
+const MAX_REGEX_MIDDLE_GLOBSTARS = 1;
 
 /**
  * Expands a single-level brace alternation (e.g. `**\/*.{pyc,pyo}`) into plain glob patterns.
@@ -114,6 +127,8 @@ export function parseGitignorePatterns(content: string): ParsedGitignore {
   const seenExcludes = new Set<string>();
   const seenNegations = new Set<string>();
   let truncated = false;
+  let dropped = 0;
+  let droppedNegations = 0;
 
   for (const rawLine of content.split(/\r?\n/)) {
     let line = trimTrailingUnescapedSpaces(rawLine);
@@ -166,10 +181,19 @@ export function parseGitignorePatterns(content: string): ParsedGitignore {
 
     if (rulePatterns.length > 0) {
       rules.push({ negated, patterns: rulePatterns });
+    } else {
+      dropped++;
+      if (negated) droppedNegations++;
     }
   }
 
-  return truncated ? { excludes, negations, rules, truncated: true } : { excludes, negations, rules };
+  const result: ParsedGitignore = { excludes, negations, rules };
+  if (truncated) result.truncated = true;
+  if (dropped > 0) {
+    result.dropped = dropped;
+    result.droppedNegations = droppedNegations;
+  }
+  return result;
 }
 
 /** Builds a single glob string for `vscode.workspace.findFiles` `exclude`. */
@@ -231,32 +255,32 @@ function parseGlobCharacterClass(
   };
 }
 
-function globToRegExpSource(glob: string): string | undefined {
-  const clean = glob
+function cleanGlob(glob: string): string {
+  return glob
     .replace(/\\/g, "/")
     .replace(/^\.\//, "")
     .replace(/^\/+/, "")
     .replace(/\*{3,}/g, "**");
+}
+
+function globToRegExpSource(glob: string): string | undefined {
+  const clean = cleanGlob(glob);
   if (clean === "") return undefined;
 
   let regex = "";
-  let wildcards = 0;
   let i = 0;
   while (i < clean.length) {
     if (clean.startsWith("**/", i) && (i === 0 || clean[i - 1] === "/")) {
-      if (++wildcards > MAX_GLOB_WILDCARDS) return undefined;
       regex += "(?:.+/)?";
       i += 3;
       continue;
     }
     if (clean.startsWith("/**/", i)) {
-      if (++wildcards > MAX_GLOB_WILDCARDS) return undefined;
       regex += "(?:/.+/|/)";
       i += 4;
       continue;
     }
     if (clean.startsWith("/**", i) && i + 3 === clean.length) {
-      if (++wildcards > MAX_GLOB_WILDCARDS) return undefined;
       regex += "/.*";
       i += 3;
       continue;
@@ -266,7 +290,6 @@ function globToRegExpSource(glob: string): string | undefined {
       (i === 0 || clean[i - 1] === "/") &&
       (i + 2 === clean.length || clean[i + 2] === "/")
     ) {
-      if (++wildcards > MAX_GLOB_WILDCARDS) return undefined;
       regex += ".*";
       i += 2;
       continue;
@@ -282,7 +305,6 @@ function globToRegExpSource(glob: string): string | undefined {
       regex += "\\[";
     } else if (ch === "*") {
       while (clean[i] === "*") i++;
-      if (++wildcards > MAX_GLOB_WILDCARDS) return undefined;
       regex += "[^/]*";
       continue;
     } else if (ch === "?") {
@@ -302,7 +324,7 @@ function globToRegExpSource(glob: string): string | undefined {
   }
 }
 
-function globToRegExp(glob: string): RegExp | undefined {
+export function globToRegExp(glob: string): RegExp | undefined {
   const src = globToRegExpSource(glob);
   if (src === undefined) return undefined;
   try {
@@ -312,21 +334,208 @@ function globToRegExp(glob: string): RegExp | undefined {
   }
 }
 
+/**
+ * True when the regex of this glob cannot take more than about quadratic time. Backtracking is
+ * exponential in the number of `*` runs of one segment and in the number of `**` between segments,
+ * so a glob over the limits is matched by `compileLinearGlob` instead of being dropped.
+ */
+function isRegexSafeGlob(clean: string): boolean {
+  const segments = clean.split("/");
+  let middleGlobstars = 0;
+  for (let i = 0; i < segments.length; i++) {
+    const segment = segments[i] ?? "";
+    if (segment === "**") {
+      if (i > 0 && i < segments.length - 1) middleGlobstars++;
+      continue;
+    }
+    const runs = segment.match(/\*+/g);
+    if ((runs?.length ?? 0) > MAX_REGEX_SEGMENT_STARS) return false;
+  }
+  return middleGlobstars <= MAX_REGEX_MIDDLE_GLOBSTARS;
+}
+
+type SegmentToken =
+  | { kind: "literal"; char: string }
+  | { kind: "any" }
+  | { kind: "star" }
+  | { kind: "class"; re: RegExp };
+
+type GlobSegment = { globstar: true; min: number } | { globstar: false; tokens: SegmentToken[] };
+
+function tokenizeSegment(segment: string): SegmentToken[] | undefined {
+  const tokens: SegmentToken[] = [];
+  let i = 0;
+  while (i < segment.length) {
+    const ch = segment[i] ?? "";
+    if (ch === "[") {
+      const charClass = parseGlobCharacterClass(segment, i);
+      if (charClass) {
+        try {
+          tokens.push({ kind: "class", re: new RegExp(`^${charClass.fragment}$`) });
+        } catch {
+          return undefined;
+        }
+        i = charClass.nextIndex;
+        continue;
+      }
+      tokens.push({ kind: "literal", char: "[" });
+    } else if (ch === "*") {
+      while (segment[i] === "*") i++;
+      tokens.push({ kind: "star" });
+      continue;
+    } else if (ch === "?") {
+      tokens.push({ kind: "any" });
+    } else {
+      tokens.push({ kind: "literal", char: ch });
+    }
+    i++;
+  }
+  return tokens;
+}
+
+function segmentMatches(tokens: readonly SegmentToken[], text: string): boolean {
+  let t = 0;
+  let s = 0;
+  let starToken = -1;
+  let starText = 0;
+  while (s < text.length) {
+    const token = tokens[t];
+    if (token?.kind === "star") {
+      starToken = t++;
+      starText = s;
+      continue;
+    }
+    if (
+      token !== undefined &&
+      (token.kind === "any" ||
+        (token.kind === "literal" && token.char === text[s]) ||
+        (token.kind === "class" && token.re.test(text[s] ?? "")))
+    ) {
+      t++;
+      s++;
+      continue;
+    }
+    if (starToken >= 0) {
+      t = starToken + 1;
+      s = ++starText;
+      continue;
+    }
+    return false;
+  }
+  while (tokens[t]?.kind === "star") t++;
+  return t === tokens.length;
+}
+
+/**
+ * Matches a glob segment by segment with the two-pointer wildcard algorithm: time is O(path length
+ * times pattern length) whatever the number of `*` and `**`. It matches what `globToRegExp` matches.
+ */
+export function compileLinearGlob(glob: string): GlobMatcher | undefined {
+  const clean = cleanGlob(glob);
+  if (clean === "") return undefined;
+  const parts = clean.split("/");
+  const segments: GlobSegment[] = [];
+  for (let i = 0; i < parts.length; i++) {
+    const part = parts[i] ?? "";
+    if (part === "**") {
+      // A trailing `**` after a segment needs at least one more segment (`a/**` is not `a`).
+      segments.push({ globstar: true, min: i === parts.length - 1 && parts.length > 1 ? 1 : 0 });
+      continue;
+    }
+    const tokens = tokenizeSegment(part);
+    if (tokens === undefined) return undefined;
+    segments.push({ globstar: false, tokens });
+  }
+
+  return {
+    test(target: string): boolean {
+      const names = target.split("/");
+      let p = 0;
+      let n = 0;
+      let starP = -1;
+      let starN = 0;
+      while (n < names.length) {
+        const segment = segments[p];
+        if (segment?.globstar) {
+          if (segment.min === 1 && p === segments.length - 1) return true;
+          starP = p++;
+          starN = n;
+          continue;
+        }
+        if (segment !== undefined && segmentMatches(segment.tokens, names[n] ?? "")) {
+          p++;
+          n++;
+          continue;
+        }
+        if (starP >= 0) {
+          p = starP + 1;
+          n = ++starN;
+          continue;
+        }
+        return false;
+      }
+      while (segments[p]?.globstar && (segments[p] as { min: number }).min === 0) p++;
+      return p === segments.length;
+    },
+  };
+}
+
+/** A `RegExp` when it is bounded, else the linear matcher. `undefined` for a glob that is empty, too long or invalid. */
+export function compileGlobMatcher(glob: string): GlobMatcher | undefined {
+  const clean = cleanGlob(glob);
+  if (clean === "" || clean.length > MAX_GLOB_LENGTH) return undefined;
+  return isRegexSafeGlob(clean) ? globToRegExp(clean) : compileLinearGlob(clean);
+}
+
 const UNANCHORED_PREFIX = "(?:.+/)?";
 
-function compilePatterns(patterns: readonly string[], remaining?: { left: number }): RegExp[] {
+interface CompileStats {
+  dropped: number;
+}
+
+function compilePatterns(
+  patterns: readonly string[],
+  remaining?: { left: number },
+  stats?: CompileStats,
+): GlobMatcher[] {
   const rawSources: string[] = [];
   const seen = new Set<string>();
+  const linear: GlobMatcher[] = [];
+  const seenLinear = new Set<string>();
+  const drop = () => {
+    if (stats) stats.dropped++;
+  };
   for (const raw of patterns) {
-    if (remaining && remaining.left <= 0) break;
     for (const expanded of expandExcludePattern(raw)) {
-      if (remaining && remaining.left <= 0) break;
-      const src = globToRegExpSource(expanded);
-      if (src !== undefined && !seen.has(src)) {
-        seen.add(src);
-        rawSources.push(src);
-        if (remaining) remaining.left--;
+      if (remaining && remaining.left <= 0) {
+        drop();
+        continue;
       }
+      const clean = cleanGlob(expanded);
+      if (clean === "" || clean.length > MAX_GLOB_LENGTH) {
+        drop();
+        continue;
+      }
+      if (isRegexSafeGlob(clean)) {
+        const src = globToRegExpSource(expanded);
+        if (src === undefined) {
+          drop();
+        } else if (!seen.has(src)) {
+          seen.add(src);
+          rawSources.push(src);
+          if (remaining) remaining.left--;
+        }
+        continue;
+      }
+      if (seenLinear.has(clean)) continue;
+      const matcher = linear.length < MAX_LINEAR_MATCHERS ? compileLinearGlob(clean) : undefined;
+      if (matcher === undefined) {
+        drop();
+        continue;
+      }
+      seenLinear.add(clean);
+      linear.push(matcher);
+      if (remaining) remaining.left--;
     }
   }
 
@@ -358,7 +567,7 @@ function compilePatterns(patterns: readonly string[], remaining?: { left: number
     }
   }
 
-  const out: RegExp[] = [];
+  const out: GlobMatcher[] = [];
   const compileGroup = (items: readonly string[], prefix: string) => {
     for (let i = 0; i < items.length; i += REGEX_CHUNK_SIZE) {
       const chunk = items.slice(i, i + REGEX_CHUNK_SIZE);
@@ -378,6 +587,7 @@ function compilePatterns(patterns: readonly string[], remaining?: { left: number
 
   compileGroup(unanchored, UNANCHORED_PREFIX);
   compileGroup(anchored, "");
+  out.push(...linear);
   return out;
 }
 
@@ -389,7 +599,7 @@ function normalizeFilterTarget(relPath: string): string {
     .replace(/\/+$/, "");
 }
 
-function matchesAny(matchers: readonly RegExp[], target: string): boolean {
+function matchesAny(matchers: readonly GlobMatcher[], target: string): boolean {
   for (const re of matchers) {
     if (re.test(target)) return true;
   }
@@ -416,7 +626,11 @@ export function createPathFilter(
 
 export interface CompiledGitignoreFilter {
   isExcluded(relPath: string): boolean;
+  /** The number of compiled matchers (`RegExp` objects and linear matchers). */
   regexCount: number;
+  /** Patterns that could not be used (too long, invalid, over a budget). `droppedNegations` counts those of `!` rules. */
+  dropped: number;
+  droppedNegations: number;
 }
 
 /**
@@ -427,8 +641,10 @@ export function compileGitignoreFilter(
   baseExcludes: readonly string[],
   gitignore: Pick<ParsedGitignore, "rules">,
 ): CompiledGitignoreFilter {
-  const baseMatchers = compilePatterns(baseExcludes, { left: MAX_FILTER_PATTERNS });
-  const segments: { negated: boolean; matchers: RegExp[] }[] = [];
+  const stats: CompileStats = { dropped: 0 };
+  let droppedNegations = 0;
+  const baseMatchers = compilePatterns(baseExcludes, { left: MAX_FILTER_PATTERNS }, stats);
+  const segments: { negated: boolean; matchers: GlobMatcher[] }[] = [];
   const budget = { left: MAX_FILTER_PATTERNS };
 
   let currentNegated: boolean | undefined;
@@ -436,7 +652,9 @@ export function compileGitignoreFilter(
 
   const flushSegment = () => {
     if (currentNegated === undefined || currentPatterns.length === 0) return;
-    const matchers = compilePatterns(currentPatterns, budget);
+    const before = stats.dropped;
+    const matchers = compilePatterns(currentPatterns, budget, stats);
+    if (currentNegated) droppedNegations += stats.dropped - before;
     if (matchers.length > 0) {
       segments.push({ negated: currentNegated, matchers });
     }
@@ -444,7 +662,11 @@ export function compileGitignoreFilter(
   };
 
   for (const rule of gitignore.rules) {
-    if (budget.left <= 0) break;
+    if (budget.left <= 0) {
+      stats.dropped += rule.patterns.length;
+      if (rule.negated) droppedNegations += rule.patterns.length;
+      continue;
+    }
     if (currentNegated !== undefined && rule.negated !== currentNegated) {
       flushSegment();
     }
@@ -457,6 +679,8 @@ export function compileGitignoreFilter(
 
   return {
     regexCount,
+    dropped: stats.dropped,
+    droppedNegations,
     isExcluded(relPath: string): boolean {
       const clean = normalizeFilterTarget(relPath);
       if (clean === "") return false;
@@ -546,7 +770,7 @@ export function selectSafeFindFilesGitignoreExcludes(
       if (out.length >= maxPatterns) break;
       if (seen.has(pattern)) continue;
       if (probePaths.length > 0) {
-        const re = globToRegExp(pattern);
+        const re = compileGlobMatcher(pattern);
         if (!re || probePaths.some((p) => re.test(p))) {
           continue;
         }

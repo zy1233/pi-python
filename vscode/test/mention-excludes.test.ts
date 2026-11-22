@@ -4,9 +4,11 @@ import {
   DEFAULT_MENTION_EXCLUDES,
   buildFindFilesExcludeGlob,
   compileGitignoreFilter,
+  compileLinearGlob,
   createGitignorePathFilter,
   createPathFilter,
   expandExcludePattern,
+  globToRegExp,
   parseGitignorePatterns,
   selectSafeFindFilesGitignoreExcludes,
 } from "../src/core/mention-excludes.js";
@@ -149,7 +151,7 @@ cache/
     expect(safeWildcard).toContain("**/cache");
   });
 
-  it("drops pathological multi-wildcard globs so ReDoS patterns never stall while collapsing repeated segment stars", () => {
+  it("matches pathological multi-wildcard globs in bounded time while collapsing repeated segment stars", () => {
     const evil = "**/a*a*a*a*a*a*a*a*a*a*b";
     const isExcluded = createPathFilter([evil, "**/foo***bar.log", "**/a*b*c*d/**"]);
     const input = `${"a".repeat(40)}/${"a".repeat(40)}`;
@@ -161,8 +163,85 @@ cache/
     // Repeated '*' inside a segment collapses cleanly and stays within one path segment.
     expect(isExcluded("dir/foo123bar.log")).toBe(true);
     expect(isExcluded("dir/foo/bar.log")).toBe(false);
-    // Multi-wildcard pattern within the wildcard budget (<= 6) still matches.
     expect(isExcluded("pkg/a1b2c3d/out.js")).toBe(true);
+  });
+
+  it("does not drop a floating pattern with 5 or more stars and matches a 255-character name without a stall", () => {
+    const filter = compileGitignoreFilter(DEFAULT_MENTION_EXCLUDES, parseGitignorePatterns("a*a*a*a*a*b\n"));
+    expect(filter.dropped).toBe(0);
+    const longName = "a".repeat(255);
+
+    const start = performance.now();
+    expect(filter.isExcluded(longName)).toBe(false);
+    expect(filter.isExcluded(`${longName.slice(0, 250)}b`)).toBe(true);
+    expect(filter.isExcluded(`dir/${"a".repeat(251)}b`)).toBe(true);
+    // The old regex needed about 9.6 s for the first call; the budget is 1000 times the new cost.
+    expect(performance.now() - start).toBeLessThan(1000);
+  });
+
+  it("keeps a file visible when a `!` rule has 6 stars (the rule is not dropped)", () => {
+    const parsed = parseGitignorePatterns("*\n!a*a*a*a*a*a*b\n");
+    const filter = compileGitignoreFilter(DEFAULT_MENTION_EXCLUDES, parsed);
+    expect(filter.dropped).toBe(0);
+    expect(filter.droppedNegations).toBe(0);
+    expect(filter.isExcluded("axaxaxaxaxaxb")).toBe(false);
+    expect(filter.isExcluded("axaxaxaxaxb")).toBe(true);
+    expect(filter.isExcluded("nope.txt")).toBe(true);
+  });
+
+  it("matches a glob with many `**` segments in bounded time", () => {
+    const filter = compileGitignoreFilter([], parseGitignorePatterns("**/a/**/a/**/a/**/a/**/a/**/b\n"));
+    expect(filter.dropped).toBe(0);
+    const start = performance.now();
+    expect(filter.isExcluded(Array(150).fill("a").join("/"))).toBe(false);
+    expect(filter.isExcluded(`${Array(150).fill("a").join("/")}/b`)).toBe(true);
+    expect(performance.now() - start).toBeLessThan(1000);
+  });
+
+  it("counts every pattern that cannot be used, and says how many of them are `!` rules", () => {
+    const parsed = parseGitignorePatterns("ok.txt\n!a{b{c,d},e}\nx{a,b\n" + `!${"d/".repeat(600)}z\n`);
+    expect(parsed.dropped).toBe(2);
+    expect(parsed.droppedNegations).toBe(1);
+
+    const filter = compileGitignoreFilter([], parsed);
+    expect(filter.dropped).toBeGreaterThanOrEqual(1);
+    expect(filter.droppedNegations).toBe(filter.dropped);
+    expect(filter.isExcluded("ok.txt")).toBe(true);
+  });
+
+  it("matches the same paths with the linear matcher as with the regex (differential, fixed seed)", () => {
+    let seed = 20261122;
+    const rand = (n: number) => {
+      seed = (Math.imul(seed, 1664525) + 1013904223) >>> 0;
+      return seed % n;
+    };
+    const pick = <T,>(items: readonly T[]): T => items[rand(items.length)] as T;
+    const patternParts = ["a", "b", "ab", "*", "?", "[ab]", "[!a]", "**", ".", "a*b"];
+    const nameChars = ["a", "b", ".", "c"];
+    const makeGlob = () => {
+      const segments = Array.from({ length: 1 + rand(4) }, () => {
+        if (rand(5) === 0) return "**";
+        return Array.from({ length: 1 + rand(3) }, () => pick(patternParts).replace("**", "*")).join("");
+      });
+      return segments.join("/");
+    };
+    const makePath = () =>
+      Array.from({ length: 1 + rand(5) }, () => Array.from({ length: rand(5) }, () => pick(nameChars)).join("") || "a").join("/");
+
+    let compared = 0;
+    for (let i = 0; i < 400; i++) {
+      const glob = makeGlob();
+      const re = globToRegExp(glob);
+      const linear = compileLinearGlob(glob);
+      expect(re, glob).toBeDefined();
+      expect(linear, glob).toBeDefined();
+      for (let j = 0; j < 25; j++) {
+        const target = makePath();
+        expect(linear!.test(target), `${glob} vs ${target}`).toBe(re!.test(target));
+        compared++;
+      }
+    }
+    expect(compared).toBe(10_000);
   });
 
   it("filters 5,000 paths across a large .gitignore with bounded compiled regex count and no stalling", () => {
