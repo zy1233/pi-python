@@ -86,7 +86,8 @@ const input = el("textarea", {
   ariaAutocomplete: "list",
   ariaControls: "composer-listbox",
 });
-input.placeholder = "Ask zycode (@ to mention, / for commands; Enter to send, Shift+Enter for a new line)";
+input.placeholder =
+  "Ask zycode (@ to mention, / for commands, or use the @ and / buttons with an input method; Enter to send, Shift+Enter for a new line)";
 input.rows = 3;
 const popover = el("div", {
   id: "composer-menu",

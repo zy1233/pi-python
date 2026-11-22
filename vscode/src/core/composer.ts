@@ -184,9 +184,9 @@ export function detectComposerTrigger(text: string, cursor: number): ComposerTri
   const before = text.slice(0, pos);
 
   if (!before.includes("\n")) {
-    const slashMatch = /^[ \t]*\/([^\s]*)$/.exec(before);
+    const slashMatch = /^[ \t]*[/／]([^\s]*)$/.exec(before);
     if (slashMatch) {
-      const slashIdx = before.indexOf("/");
+      const slashIdx = before.length - slashMatch[1]!.length - 1;
       const end = scanTokenEnd(text, pos, /\s/);
       return {
         kind: "slash",
@@ -212,7 +212,7 @@ export function detectComposerTrigger(text: string, cursor: number): ComposerTri
     }
   }
 
-  const atIdx = before.lastIndexOf("@");
+  const atIdx = Math.max(before.lastIndexOf("@"), before.lastIndexOf("＠"));
   if (atIdx < 0) return undefined;
   if (atIdx > 0 && /[A-Za-z0-9_]/.test(before[atIdx - 1] ?? "")) {
     return undefined;

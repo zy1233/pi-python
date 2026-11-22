@@ -1302,6 +1302,29 @@ describe.skipIf(!chrome || !built)("webview: slash commands and @ mentions", () 
     });
   });
 
+  it("opens the menus for a full-width ＠ and ／, and the placeholder names the buttons for an input method", () => {
+    const out = run(`${richState}
+      const input = document.querySelector("textarea");
+      const menu = document.getElementById("composer-menu");
+      const type = (text) => {
+        input.value = text;
+        input.setSelectionRange(text.length, text.length);
+        input.dispatchEvent(new Event("input", { bubbles: true }));
+      };
+      type("看＠");
+      const at = { hidden: menu.hidden, head: menu.querySelector(".popover-head")?.textContent };
+      type("");
+      type("／");
+      const slash = { hidden: menu.hidden, head: menu.querySelector(".popover-head")?.textContent };
+      window.__result = { placeholder: input.placeholder, at, slash };`);
+    expect(out).toMatchObject({
+      ok: true,
+      at: { hidden: false, head: "References · files, folders, selection" },
+      slash: { hidden: false, head: "Commands" },
+    });
+    expect(out.placeholder).toMatch(/@ and \/ buttons/);
+  });
+
   it("keeps the old @ rows (dimmed) while a new search is pending, and never accepts them with Enter, Tab or a click", () => {
     const out = run(`${richState}
       const input = document.querySelector("textarea");

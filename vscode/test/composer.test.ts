@@ -258,3 +258,17 @@ describe("mentionReplaceEnd", () => {
     expect(replaceEnd("see @ma|in.ts here".replace("|", ""), 7, "src/main.ts")).toBe("see @main.ts".length);
   });
 });
+
+describe("full-width triggers (input method)", () => {
+  it("opens a mention for the full-width ＠ and keeps the ASCII email rule", () => {
+    expect(detectComposerTrigger("看＠ma然后", 4)).toEqual({ kind: "mention", query: "ma", range: { start: 1, end: 4 } });
+    expect(detectComposerTrigger("＠", 1)).toEqual({ kind: "mention", query: "", range: { start: 0, end: 1 } });
+    expect(detectComposerTrigger("user＠example.com", 16)).toBeUndefined();
+  });
+
+  it("opens the command list for a full-width ／ at the start, and only there", () => {
+    expect(detectComposerTrigger("／mo", 3)).toEqual({ kind: "slash", query: "mo", range: { start: 0, end: 3 } });
+    expect(detectComposerTrigger("  ／", 3)).toEqual({ kind: "slash", query: "", range: { start: 2, end: 3 } });
+    expect(detectComposerTrigger("一／二", 3)).toBeUndefined();
+  });
+});
