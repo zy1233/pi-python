@@ -495,4 +495,83 @@ describe("ChatViewProvider host clipboard & SessionsView timer polish", () => {
     expect(mockState.executedCommands.at(-1)).toContain("/call-1%3Aresult/after/app.ts");
     docs.dispose();
   });
+
+  it("queues insertMention calls before webview ready, flushes them on ready, and delivers immediately once ready", async () => {
+    let receiveMessage: ((raw: unknown) => void) | undefined;
+    let disposeView: (() => void) | undefined;
+    const posted: HostMessage[] = [];
+    const controller = {
+      onMessage: () => ({ dispose() {} }),
+      stateMessage: () => ({ type: "state", status: "ready", canRestart: true }) as StateMessage,
+      transcript: () => [],
+      currentStatus: "ready",
+    } as unknown as ChatController;
+
+    const provider = new ChatViewProvider(makeUri("/ext") as never, controller, {
+      showLog() {},
+      async showDiff() {},
+      notify() {},
+      openGuide() {},
+      openAgentConfig() {},
+    });
+
+    const firstItem = { kind: "selection" as const, path: "src/app.ts", range: { startLine: 10, endLine: 20 } };
+    const secondItem = { kind: "file" as const, path: "src/util.ts" };
+    const thirdItem = { kind: "file" as const, path: "src/after.ts" };
+
+    // Before resolveWebviewView / ready: reveal focuses the view and queues the mention.
+    await provider.insertMention(firstItem);
+    expect(mockState.executedCommands).toContain("zycode.chat.focus");
+
+    const fakeView = {
+      visible: true,
+      show: vi.fn(),
+      webview: {
+        options: {},
+        html: "",
+        cspSource: "vscode-webview:",
+        asWebviewUri: (u: unknown) => u,
+        postMessage: vi.fn(async (msg: HostMessage) => {
+          posted.push(msg);
+          return true;
+        }),
+        onDidReceiveMessage: (fn: (raw: unknown) => void) => {
+          receiveMessage = fn;
+          return { dispose() {} };
+        },
+      },
+      onDidDispose: (fn: () => void) => {
+        disposeView = fn;
+        return { dispose() {} };
+      },
+    };
+    provider.resolveWebviewView(fakeView as never);
+
+    // Still before "ready": queued, nothing posted yet.
+    await provider.insertMention(secondItem);
+    expect(fakeView.show).toHaveBeenCalledWith(false);
+    expect(posted).toEqual([]);
+
+    // Once webview posts "ready", state and reset are posted first, followed by queued mentions in order.
+    receiveMessage?.({ type: "ready" });
+    await Promise.resolve();
+    expect(posted).toEqual([
+      { type: "state", status: "ready", canRestart: true },
+      { type: "reset", transcript: [] },
+      { type: "insertMention", item: firstItem },
+      { type: "insertMention", item: secondItem },
+    ]);
+
+    // After ready: insertMention delivers immediately.
+    await provider.insertMention(thirdItem);
+    expect(posted.at(-1)).toEqual({ type: "insertMention", item: thirdItem });
+
+    // After view disposal, webviewReady resets so subsequent calls queue again instead of posting blindly.
+    disposeView?.();
+    const afterDisposeItem = { kind: "file" as const, path: "src/reopen.ts" };
+    await provider.insertMention(afterDisposeItem);
+    expect(posted).toHaveLength(5);
+
+    provider.dispose();
+  });
 });

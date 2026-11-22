@@ -38,6 +38,7 @@ _KIND: dict[str, str] = {
 
 _terminal_stream_offsets: dict[str, int] = {}
 _tool_call_args: dict[str, Any] = {}
+_MAX_TRACKED_TOOL_CALL_ARGS = 512
 
 
 def tool_title(name: str, args: Any = None) -> str:
@@ -128,6 +129,9 @@ def project_event(event: AgentEvent, cwd: str | None = None) -> Iterator[Session
         field_meta: dict[str, Any] | None = None
         content: list[Any] | None = None
         if name in {"edit", "write"} and isinstance(event.args, dict):
+            if event.tool_call_id not in _tool_call_args:
+                while len(_tool_call_args) >= _MAX_TRACKED_TOOL_CALL_ARGS:
+                    _tool_call_args.pop(next(iter(_tool_call_args)))
             _tool_call_args[event.tool_call_id] = event.args
         elif name == "bash":
             _terminal_stream_offsets[event.tool_call_id] = 0

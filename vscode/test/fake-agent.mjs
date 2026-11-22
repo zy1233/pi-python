@@ -16,6 +16,7 @@
 //   FAKE_LIST_ERROR=1       session/list fails
 //   FAKE_IGNORE_CWD=1       session/list gives the sessions of every folder (an agent that ignores the filter)
 //   FAKE_TOML=<file>        like the real agent, read thinking_level from this file once, at the start (not later)
+//   FAKE_LIVE_THINKING=1    advertise and handle a live `thinking_level` config option
 //   FAKE_LOAD_CWD=<dir>     session/load says in _meta["pi/cwd"] that the session belongs to this folder
 import { existsSync, appendFileSync, readFileSync, writeFileSync } from "node:fs";
 import path from "node:path";
@@ -30,12 +31,14 @@ if (env.FAKE_EXIT_AT_START) {
 const raw = { parse: (params) => params };
 const record = (line) => env.FAKE_LOG && appendFileSync(env.FAKE_LOG, line + "\n");
 
+const thinkingLevels = ["off", "minimal", "low", "medium", "high", "xhigh", "max"];
 let startLevel = "off";
 if (env.FAKE_TOML && existsSync(env.FAKE_TOML)) {
   const found = /^thinking_level\s*=\s*["']([a-z]+)["']/m.exec(readFileSync(env.FAKE_TOML, "utf8"));
   if (found) startLevel = found[1];
 }
 if (env.FAKE_TOML) record("start thinking_level=" + startLevel);
+let currentThinkingLevel = startLevel;
 
 let mode = "ask";
 const parsedModels = env.FAKE_MODELS ? JSON.parse(env.FAKE_MODELS) : [{ value: "fake-model", name: "Fake model" }];
@@ -69,6 +72,16 @@ function configOptions() {
     options.push({
       id: "mode", name: "Mode", category: "mode", type: "select", currentValue: mode,
       options: [{ value: "ask", name: "Ask" }, { value: "auto", name: "Auto" }],
+    });
+  }
+  if (env.FAKE_LIVE_THINKING === "1") {
+    options.push({
+      id: "thinking_level",
+      name: "Thinking",
+      category: "thought_level",
+      type: "select",
+      currentValue: currentThinkingLevel,
+      options: thinkingLevels.map((value) => ({ value, name: value })),
     });
   }
   return options;
@@ -115,7 +128,7 @@ async function runPrompt(ctx, sessionId, prompt) {
     return "end_turn";
   }
   if (prompt === "level") {
-    await notify(text(sessionId, "agent_message_chunk", "level:" + startLevel));
+    await notify(text(sessionId, "agent_message_chunk", "level:" + currentThinkingLevel));
     return "end_turn";
   }
   if (prompt.startsWith("usage:")) {
@@ -274,6 +287,12 @@ const app = acp
       if (env.FAKE_FAIL_SET_MODEL) throw new acp.RequestError(-32603, "model switch failed");
       if (!parsedModels.some((item) => item.value === value)) throw new acp.RequestError(-32602, `unknown model ${value}`);
       currentModel = value;
+    } else if (ctx.params.configId === "thinking_level") {
+      const value = String(ctx.params.value);
+      if (env.FAKE_LIVE_THINKING !== "1" || !thinkingLevels.includes(value)) {
+        throw new acp.RequestError(-32602, `invalid thinking_level ${value}`);
+      }
+      currentThinkingLevel = value;
     }
     return { configOptions: configOptions() };
   })

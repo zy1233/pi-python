@@ -730,6 +730,18 @@ mark.match {
   text-overflow: ellipsis;
   max-width: 28ch;
 }
+.chip-label.clickable {
+  cursor: pointer;
+}
+.chip-label.clickable:hover {
+  text-decoration: underline;
+  color: var(--vscode-textLink-foreground, var(--vscode-foreground));
+}
+.chip-label.clickable:focus-visible {
+  outline: 1px solid var(--vscode-focusBorder);
+  outline-offset: 1px;
+  border-radius: 2px;
+}
 .chip-remove {
   display: inline-flex;
   align-items: center;

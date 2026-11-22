@@ -178,6 +178,9 @@ type ToolEntry = {
   outputPre: HTMLPreElement;
   outputCopyBtn: HTMLButtonElement;
   diffWrap: HTMLElement;
+  diffBtn: HTMLButtonElement;
+  openBtn: HTMLButtonElement;
+  openFilePath: string | undefined;
   call: ToolCallView;
   drawnOutput: string;
   drawOutput: Throttled;
@@ -737,6 +740,11 @@ function drawToolOutput(entry: ToolEntry): void {
   scrollToEnd();
 }
 
+function toolFilePath(call: ToolCallView): string | undefined {
+  if (!isPlainRecord(call.rawInput) || typeof call.rawInput.path !== "string") return undefined;
+  return normalizeRelativePath(call.rawInput.path, "file");
+}
+
 function createToolEntry(call: ToolCallView): ToolEntry {
   const badge = el("span", { class: `badge ${call.status}`, text: call.status.replace("_", " ") });
   const titleEl = el("span", { class: "tool-title", text: call.title });
@@ -747,7 +755,15 @@ function createToolEntry(call: ToolCallView): ToolEntry {
   const outputCopyBtn = copyButton("", "Copy output", "output-copy", "Copy");
   const outputBody = el("div", { class: "tool-output-body" }, outputPre);
   const outputDetails = el("details", { class: "tool-output" }, outputSummary, outputBody);
-  const diffWrap = el("div", { class: "actions" }, button("Show diff", () => send({ type: "showDiff", toolCallId: call.id })));
+  const diffBtn = button("Show diff", () => send({ type: "showDiff", toolCallId: call.id }));
+  const openBtn = button(
+    "Open",
+    () => {
+      if (entry.openFilePath !== undefined) send({ type: "openFile", path: entry.openFilePath });
+    },
+    "secondary tool-open-btn",
+  );
+  const diffWrap = el("div", { class: "actions" });
   const rootEl = el("article", { class: "tool" }, headerLine);
 
   const savedOpen = openDetails.get(`tool:${call.id}`);
@@ -767,6 +783,9 @@ function createToolEntry(call: ToolCallView): ToolEntry {
     outputPre,
     outputCopyBtn,
     diffWrap,
+    diffBtn,
+    openBtn,
+    openFilePath: undefined,
     call,
     drawnOutput: "",
     drawOutput: throttle(() => drawToolOutput(entry), DRAW_INTERVAL_MS, scheduler),
@@ -835,7 +854,24 @@ function upsertTool(call: ToolCallView): void {
   const hasOutput = body !== "" || call.terminal?.exitCode !== undefined;
   syncToolOutputState(entry, body, hasOutput);
 
+  const filePath = toolFilePath(call);
+  entry.openFilePath = filePath;
+  if (filePath !== undefined) {
+    entry.openBtn.title = `Open ${filePath}`;
+    entry.openBtn.setAttribute("aria-label", `Open ${filePath}`);
+    if (!entry.openBtn.isConnected) {
+      if (entry.diffBtn.isConnected) entry.diffWrap.insertBefore(entry.openBtn, entry.diffBtn);
+      else entry.diffWrap.append(entry.openBtn);
+    }
+  } else if (entry.openBtn.isConnected) {
+    entry.openBtn.remove();
+  }
   if (call.canDiff) {
+    if (!entry.diffBtn.isConnected) entry.diffWrap.append(entry.diffBtn);
+  } else if (entry.diffBtn.isConnected) {
+    entry.diffBtn.remove();
+  }
+  if (call.canDiff || filePath !== undefined) {
     if (!entry.diffWrap.isConnected) entry.root.append(entry.diffWrap);
   } else if (entry.diffWrap.isConnected) {
     entry.diffWrap.remove();
@@ -1264,12 +1300,34 @@ function renderChips(): void {
       title: `Remove ${label}`,
     });
     removeBtn.addEventListener("click", () => removeAttachment(att));
+    const canOpen = att.kind === "file" || att.kind === "selection";
+    const labelEl = el("span", {
+      class: canOpen ? "chip-label clickable" : "chip-label",
+      text: label,
+      ...(canOpen ? { role: "button", title: `Open ${title}` } : {}),
+    });
+    if (canOpen) {
+      labelEl.tabIndex = 0;
+      const open = () =>
+        send({
+          type: "openFile",
+          path: att.path,
+          ...(att.range ? { line: att.range.startLine } : {}),
+        });
+      labelEl.addEventListener("click", open);
+      labelEl.addEventListener("keydown", (event) => {
+        if (event.key === "Enter" || event.key === " ") {
+          event.preventDefault();
+          open();
+        }
+      });
+    }
     chipsBar.append(
       el(
         "div",
         { class: "chip", role: "listitem", title },
         el("span", { class: `mention-icon ${att.kind}`, ariaHidden: true }),
-        el("span", { class: "chip-label", text: label }),
+        labelEl,
         removeBtn,
       ),
     );

@@ -2,7 +2,7 @@ import * as vscode from "vscode";
 
 import type { ChatController } from "../core/chat-controller.js";
 import type { DiffInfo } from "../core/diff-tracker.js";
-import type { MentionAttachment } from "../core/mentions.js";
+import { MAX_MENTIONS, type MentionAttachment } from "../core/mentions.js";
 import {
   isSafeLink,
   parseWebviewMessage,
@@ -29,6 +29,8 @@ export class ChatViewProvider implements vscode.WebviewViewProvider, vscode.Disp
   private readonly subscription: { dispose(): void };
   private readonly fallback = new PermissionFallback();
   private latestMentionRequest = 0;
+  private webviewReady = false;
+  private pendingMentions: MentionAttachment[] = [];
 
   constructor(
     private readonly extensionUri: vscode.Uri,
@@ -56,6 +58,7 @@ export class ChatViewProvider implements vscode.WebviewViewProvider, vscode.Disp
 
   resolveWebviewView(view: vscode.WebviewView): void {
     this.view = view;
+    this.webviewReady = false;
     view.webview.options = {
       enableScripts: true,
       localResourceRoots: [vscode.Uri.joinPath(this.extensionUri, "dist"), vscode.Uri.joinPath(this.extensionUri, "media")],
@@ -68,6 +71,7 @@ export class ChatViewProvider implements vscode.WebviewViewProvider, vscode.Disp
     view.onDidDispose(() => {
       if (this.view === view) {
         this.view = undefined;
+        this.webviewReady = false;
         this.latestMentionRequest = 0;
       }
     });
@@ -82,10 +86,16 @@ export class ChatViewProvider implements vscode.WebviewViewProvider, vscode.Disp
   /** Reveals the chat view and inserts a `@` mention attachment into the composer. */
   async insertMention(item: MentionAttachment): Promise<void> {
     await this.reveal();
-    this.post({ type: "insertMention", item });
+    if (this.webviewReady) {
+      this.post({ type: "insertMention", item });
+    } else if (this.pendingMentions.length < MAX_MENTIONS) {
+      this.pendingMentions.push(item);
+    }
   }
 
   dispose(): void {
+    this.webviewReady = false;
+    this.pendingMentions.length = 0;
     this.fallback.clear();
     this.subscription.dispose();
   }
@@ -98,9 +108,13 @@ export class ChatViewProvider implements vscode.WebviewViewProvider, vscode.Disp
     const controller = this.controller;
     switch (message.type) {
       case "ready":
+        this.webviewReady = true;
         this.latestMentionRequest = 0;
         this.post(controller.stateMessage());
         this.post({ type: "reset", transcript: controller.transcript() });
+        for (const item of this.pendingMentions.splice(0)) {
+          this.post({ type: "insertMention", item });
+        }
         if (controller.currentStatus === "stopped") await controller.start();
         return;
       case "send":

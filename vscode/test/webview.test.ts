@@ -1646,4 +1646,63 @@ describe.skipIf(!chrome || !built)("webview: P1 images, insertMention, saveAll, 
       copyPosted: [{ type: "copy", text: code }],
     });
   });
+
+  it("posts openFile when clicking a file or selection @ chip label and a tool card Open button", () => {
+    const out = run(`${state}
+      state({});
+      host({ type: "insertMention", item: { kind: "selection", path: "src/app.ts", range: { startLine: 10, endLine: 20 } } });
+      host({ type: "insertMention", item: { kind: "file", path: "src/util.ts" } });
+      host({ type: "insertMention", item: { kind: "folder", path: "src/" } });
+
+      const chips = [...document.querySelectorAll(".composer-chips .chip")];
+      const selectionLabel = chips[0].querySelector(".chip-label");
+      const fileLabel = chips[1].querySelector(".chip-label");
+      const folderLabel = chips[2].querySelector(".chip-label");
+
+      const chipMeta = {
+        selectionRole: selectionLabel.getAttribute("role"),
+        selectionTabIndex: selectionLabel.tabIndex,
+        fileRole: fileLabel.getAttribute("role"),
+        folderRole: folderLabel.getAttribute("role"),
+      };
+
+      selectionLabel.click();
+      fileLabel.click();
+      folderLabel.click();
+      // Removing the selection chip must not fire another openFile message.
+      chips[0].querySelector(".chip-remove").click();
+
+      host({ type: "toolCall", toolCall: { id: "t-open", title: "read src/app.ts", kind: "read", status: "completed", rawInput: { path: "./src\\\\app.ts" } } });
+      host({ type: "toolCall", toolCall: { id: "t-unsafe", title: "read ../secret.txt", kind: "read", status: "completed", rawInput: { path: "../secret.txt" } } });
+      host({ type: "toolCall", toolCall: { id: "t-both", title: "edit src/app.ts", kind: "edit", status: "completed", rawInput: { path: "src/app.ts" }, canDiff: true } });
+
+      const openButtons = [...document.querySelectorAll(".tool-open-btn")];
+      openButtons[0].click();
+
+      const bothButtons = [...document.querySelectorAll(".tool")][2].querySelectorAll(".actions button");
+      window.__result = {
+        chipMeta,
+        remainingChips: document.querySelectorAll(".composer-chips .chip").length,
+        openButtonCount: openButtons.length,
+        bothButtonLabels: [...bothButtons].map((b) => b.textContent),
+        openFiles: window.__posted.filter((m) => m.type === "openFile"),
+      };`);
+    expect(out).toMatchObject({
+      ok: true,
+      chipMeta: {
+        selectionRole: "button",
+        selectionTabIndex: 0,
+        fileRole: "button",
+        folderRole: null,
+      },
+      remainingChips: 2,
+      openButtonCount: 2,
+      bothButtonLabels: ["Open", "Show diff"],
+      openFiles: [
+        { type: "openFile", path: "src/app.ts", line: 10 },
+        { type: "openFile", path: "src/util.ts" },
+        { type: "openFile", path: "src/app.ts" },
+      ],
+    });
+  });
 });

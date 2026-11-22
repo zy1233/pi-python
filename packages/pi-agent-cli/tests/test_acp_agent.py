@@ -1212,3 +1212,28 @@ def test_project_event_edit_structured_old_and_new_text():
     assert diff_block.path == "src/app.py"
     assert diff_block.old_text == "a = 1\n"
     assert diff_block.new_text == "a = 2\n"
+
+
+def test_project_event_caps_tool_call_args():
+    from pi_agent_cli import events as events_mod
+    from pi_agent_core.types import ToolExecutionStartEvent
+
+    saved = dict(events_mod._tool_call_args)
+    events_mod._tool_call_args.clear()
+    try:
+        for i in range(520):
+            ev = ToolExecutionStartEvent(
+                tool_call_id=f"edit_{i}",
+                tool_name="edit",
+                args={"path": f"file_{i}.py"},
+            )
+            list(project_event(ev))
+
+        assert len(events_mod._tool_call_args) == 512
+        assert "edit_0" not in events_mod._tool_call_args
+        assert "edit_7" not in events_mod._tool_call_args
+        assert "edit_8" in events_mod._tool_call_args
+        assert "edit_519" in events_mod._tool_call_args
+    finally:
+        events_mod._tool_call_args.clear()
+        events_mod._tool_call_args.update(saved)
