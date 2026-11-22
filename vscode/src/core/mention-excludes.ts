@@ -42,7 +42,8 @@ const MAX_GITIGNORE_RULES = 2000;
 const MAX_FILTER_PATTERNS = 4000;
 const REGEX_CHUNK_SIZE = 250;
 const MAX_GLOB_LENGTH = 1024;
-const MAX_LINEAR_MATCHERS = 200;
+/** The total for one filter: each linear matcher costs O(path length x glob length) for every path. */
+const MAX_LINEAR_MATCHERS = 100;
 /** A regex over one segment with more `*` runs than this can take O(n^k) time (k = the number of runs). */
 const MAX_REGEX_SEGMENT_STARS = 2;
 /** `**` between two segments multiplies the backtracking; a leading and a trailing `**` do not. */
@@ -497,6 +498,7 @@ function compilePatterns(
   patterns: readonly string[],
   remaining?: { left: number },
   stats?: CompileStats,
+  linearBudget: { left: number } = { left: MAX_LINEAR_MATCHERS },
 ): GlobMatcher[] {
   const rawSources: string[] = [];
   const seen = new Set<string>();
@@ -528,11 +530,12 @@ function compilePatterns(
         continue;
       }
       if (seenLinear.has(clean)) continue;
-      const matcher = linear.length < MAX_LINEAR_MATCHERS ? compileLinearGlob(clean) : undefined;
+      const matcher = linearBudget.left > 0 ? compileLinearGlob(clean) : undefined;
       if (matcher === undefined) {
         drop();
         continue;
       }
+      linearBudget.left--;
       seenLinear.add(clean);
       linear.push(matcher);
       if (remaining) remaining.left--;
@@ -614,8 +617,9 @@ export function createPathFilter(
   negations: readonly string[] = [],
 ): (relPath: string) => boolean {
   const budget = { left: MAX_FILTER_PATTERNS };
-  const excludeMatchers = compilePatterns(patterns, budget);
-  const negationMatchers = compilePatterns(negations, { left: MAX_FILTER_PATTERNS });
+  const linearBudget = { left: MAX_LINEAR_MATCHERS };
+  const excludeMatchers = compilePatterns(patterns, budget, undefined, linearBudget);
+  const negationMatchers = compilePatterns(negations, { left: MAX_FILTER_PATTERNS }, undefined, linearBudget);
   return (relPath: string): boolean => {
     const clean = normalizeFilterTarget(relPath);
     if (clean === "") return false;
@@ -643,7 +647,8 @@ export function compileGitignoreFilter(
 ): CompiledGitignoreFilter {
   const stats: CompileStats = { dropped: 0 };
   let droppedNegations = 0;
-  const baseMatchers = compilePatterns(baseExcludes, { left: MAX_FILTER_PATTERNS }, stats);
+  const linearBudget = { left: MAX_LINEAR_MATCHERS };
+  const baseMatchers = compilePatterns(baseExcludes, { left: MAX_FILTER_PATTERNS }, stats, linearBudget);
   const segments: { negated: boolean; matchers: GlobMatcher[] }[] = [];
   const budget = { left: MAX_FILTER_PATTERNS };
 
@@ -653,7 +658,7 @@ export function compileGitignoreFilter(
   const flushSegment = () => {
     if (currentNegated === undefined || currentPatterns.length === 0) return;
     const before = stats.dropped;
-    const matchers = compilePatterns(currentPatterns, budget, stats);
+    const matchers = compilePatterns(currentPatterns, budget, stats, linearBudget);
     if (currentNegated) droppedNegations += stats.dropped - before;
     if (matchers.length > 0) {
       segments.push({ negated: currentNegated, matchers });

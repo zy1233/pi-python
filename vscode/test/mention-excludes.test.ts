@@ -209,6 +209,19 @@ cache/
     expect(filter.isExcluded("ok.txt")).toBe(true);
   });
 
+  it("limits the linear matchers of the whole filter, not of each run of rules, and counts the rest as dropped", () => {
+    const lines: string[] = [];
+    for (let i = 0; i < 600; i++) lines.push(`${i % 2 === 1 ? "!" : ""}a${i}*b*c*d*e${i}`);
+    const filter = compileGitignoreFilter([], parseGitignorePatterns(`${lines.join("\n")}\n`));
+    // Each of the 600 alternating rules is its own run; a limit per run would keep all of them.
+    expect(filter.regexCount).toBe(100);
+    expect(filter.dropped).toBe(1200 - 100);
+    expect(filter.droppedNegations).toBeGreaterThan(0);
+    expect(filter.droppedNegations).toBeLessThan(filter.dropped);
+    expect(filter.isExcluded("a0xbxcxdxe0")).toBe(true);
+    expect(filter.isExcluded("unrelated/file.ts")).toBe(false);
+  });
+
   it("matches the same paths with the linear matcher as with the regex (differential, fixed seed)", () => {
     let seed = 20261122;
     const rand = (n: number) => {
