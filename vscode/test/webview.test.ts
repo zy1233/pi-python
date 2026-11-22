@@ -1340,6 +1340,44 @@ describe.skipIf(!chrome || !built)("webview: slash commands and @ mentions", () 
     expect(out.placeholder).toMatch(/@ and \/ buttons/);
   });
 
+  it("does not show or accept the answer of an old query that arrives inside the 40 ms debounce window", () => {
+    const out = run(`${richState}
+      const input = document.querySelector("textarea");
+      const menu = document.getElementById("composer-menu");
+      const chips = document.querySelector(".composer-chips");
+      const queries = () => [...window.__posted].filter((m) => m.type === "queryMentions");
+      const rows = () => [...menu.querySelectorAll("[role='option'] .popover-title")].map((n) => n.textContent);
+      const typeText = (text) => {
+        input.value = text;
+        input.setSelectionRange(text.length, text.length);
+        input.dispatchEvent(new Event("input", { bubbles: true }));
+      };
+      const file = (name) => ({ kind: "file", path: name, label: name, detail: "" });
+      typeText("see @a");
+      const qa = queries().at(-1);
+      typeText("see @al");
+      // The debounce for "@al" has not fired yet: mentionSeq is still the id of "@a".
+      host({ type: "mentionResults", requestId: qa.requestId, query: qa.query, items: [file("alpha.ts"), file("beta.ts")] });
+      const lateAnswer = { rows: rows(), stale: menu.classList.contains("stale"), queriesSent: queries().length };
+      input.dispatchEvent(new KeyboardEvent("keydown", { key: "Enter", bubbles: true }));
+      const afterEnter = { value: input.value, chipCount: chips.querySelectorAll(".chip").length, sends: window.__posted.filter((m) => m.type === "send").length };
+      setTimeout(() => {
+        const qal = queries().at(-1);
+        host({ type: "mentionResults", requestId: qal.requestId, query: qal.query, items: [file("alpha.ts")] });
+        input.dispatchEvent(new KeyboardEvent("keydown", { key: "Enter", bubbles: true }));
+        document.getElementById("result").textContent = JSON.stringify({
+          ok: true, lateAnswer, afterEnter, query: qal.query, accepted: { value: input.value, chipCount: chips.querySelectorAll(".chip").length },
+        });
+      }, 120);`);
+    expect(out).toMatchObject({
+      ok: true,
+      lateAnswer: { rows: [], queriesSent: 1 },
+      afterEnter: { value: "see @al", chipCount: 0, sends: 0 },
+      query: "al",
+      accepted: { value: "see @alpha.ts ", chipCount: 1 },
+    });
+  });
+
   it("keeps the old @ rows (italic, with a searching header) while a new search is pending, and never accepts them with Enter, Tab or a click", () => {
     const out = run(`${richState}
       const input = document.querySelector("textarea");
@@ -1381,20 +1419,23 @@ describe.skipIf(!chrome || !built)("webview: slash commands and @ mentions", () 
         sends: window.__posted.filter((m) => m.type === "send").length,
       };
 
-      answer([file("alpha.ts")]);
-      const fresh = { rows: rows(), stale: menu.classList.contains("stale"), busy: busy() };
-      input.dispatchEvent(new KeyboardEvent("keydown", { key: "Enter", bubbles: true }));
-      const accepted = { value: input.value, chipCount: chips.querySelectorAll(".chip").length };
-
-      typeText("see @alpha.ts @b");
-      answer([file("beta.ts")]);
-      typeText("see @alpha.ts @be");
+      // The debounce for "@al" fires after 40 ms; only then does an answer carry the query of the box.
       setTimeout(() => {
-        const afterTimeout = { rows: rows(), empty: menu.querySelector(".popover-empty")?.textContent };
-        document.getElementById("result").textContent = JSON.stringify({
-          ok: true, settled, pending, afterKeys, fresh, accepted, afterTimeout,
-        });
-      }, 1100);`);
+        answer([file("alpha.ts")]);
+        const fresh = { rows: rows(), stale: menu.classList.contains("stale"), busy: busy() };
+        input.dispatchEvent(new KeyboardEvent("keydown", { key: "Enter", bubbles: true }));
+        const accepted = { value: input.value, chipCount: chips.querySelectorAll(".chip").length };
+
+        typeText("see @alpha.ts @b");
+        answer([file("beta.ts")]);
+        typeText("see @alpha.ts @be");
+        setTimeout(() => {
+          const afterTimeout = { rows: rows(), empty: menu.querySelector(".popover-empty")?.textContent };
+          document.getElementById("result").textContent = JSON.stringify({
+            ok: true, settled, pending, afterKeys, fresh, accepted, afterTimeout,
+          });
+        }, 1100);
+      }, 100);`);
     expect(out).toMatchObject({
       ok: true,
       // Stale rows keep full opacity (the text must pass 4.5:1) and differ from fresh rows by italics and a head suffix.

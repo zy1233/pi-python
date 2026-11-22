@@ -1169,6 +1169,7 @@ function onHostMessage(message: HostMessage): void {
       return;
     case "mentionResults":
       if (message.requestId !== mentionSeq || activeTrigger?.kind !== "mention") return;
+      if (message.query !== activeTrigger.query) return;
       clearMentionLoadingTimer();
       mentionLoading = false;
       menuItems = message.items.map((item) => ({ kind: "mention", item }));
