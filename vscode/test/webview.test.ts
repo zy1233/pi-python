@@ -1285,8 +1285,15 @@ describe.skipIf(!chrome || !built)("webview: slash commands and @ mentions", () 
         input.setSelectionRange(text.length, text.length);
         input.dispatchEvent(new Event("input", { bubbles: true }));
       };
+      input.focus();
       typeText("/mode");
       const slash = shape();
+      const focus = {
+        menuTabindexAttr: menu.getAttribute("tabindex"),
+        menuInTabOrder: [...document.querySelectorAll("*")].some((e) => e === menu && e.tabIndex >= 0),
+        focusInInput: document.activeElement === input,
+        scrollable: menu.scrollHeight >= menu.clientHeight,
+      };
       typeText("/zzzzzz");
       const empty = shape();
       typeText("@a");
@@ -1295,11 +1302,13 @@ describe.skipIf(!chrome || !built)("webview: slash commands and @ mentions", () 
       const mention = shape();
       input.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", bubbles: true }));
       const afterEsc = shape();
-      window.__result = { role: input.getAttribute("role"), closed, slash, empty, mention, afterEsc, afterClose: live() };`);
+      window.__result = { role: input.getAttribute("role"), closed, slash, focus, empty, mention, afterEsc, afterClose: live() };`);
     expect(out).toMatchObject({
       ok: true,
       role: null,
       closed: { controls: null, controlsResolves: null },
+      // A scroll region needs to be focusable (axe scrollable-region-focusable); tabindex -1 keeps it out of the Tab order and focus stays in the textarea.
+      focus: { menuTabindexAttr: "-1", menuInTabOrder: false, focusInInput: true },
       slash: { listChildRoles: ["option", "option", "option"], headHidden: "true", listLabel: "Commands", emptyInsideList: false, live: ["3 suggestions"], controls: "composer-listbox", controlsResolves: true },
       empty: { listChildRoles: null, emptyInsideList: false, live: ["No matching commands"], controls: null, controlsResolves: null },
       mention: { listChildRoles: ["option"], listLabel: "References · files, folders, selection", live: ["1 suggestion"], controls: "composer-listbox", controlsResolves: true },

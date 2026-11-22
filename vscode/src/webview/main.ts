@@ -93,6 +93,7 @@ const popover = el("div", {
   class: "composer-popover",
   hidden: true,
 });
+popover.tabIndex = -1;
 const popoverStatus = el("span", { class: "sr-only", role: "status" });
 const chipsBar = el("div", {
   class: "composer-chips",
