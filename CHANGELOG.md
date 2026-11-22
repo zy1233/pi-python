@@ -13,7 +13,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
-- **The output limit of `bash` could miss a command that ended first (`pi-agent-core`)**: a `bash` call that has an output limit (Auto sets one) and prints more than the limit could pass when the command ended before the tool counted its output, which happens on a loaded machine. The tool now counts the output after the command ended too, and fails the call with the same message. When the command had already ended, the message adds that fact and the exit code. Measured with 12 busy processes on 4 cores: 145 of 300 calls passed the limit before, 0 of 300 after.
+- **The output limit of `bash` could miss a command that ended first (`pi-agent-core`)**: a `bash` call that has an output limit (Auto sets one) and prints more than the limit could pass when the command ended before the tool counted its output, which happens on a loaded machine. The tool now counts the output after the command ended too, and fails the call with the same message. When the command had already ended, the message adds that fact and the exit code. In one run on one machine, with 12 busy processes on 4 cores, 145 of 300 calls passed the limit before and 0 of 300 after; the share changes from run to run.
 
 ## [1.0.1] - 2026-11-20
 
