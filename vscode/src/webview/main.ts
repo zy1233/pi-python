@@ -2,6 +2,7 @@ import {
   buildCommandCatalog,
   canRunClientCommandInStatus,
   detectComposerTrigger,
+  mentionReplaceEnd,
   rankCommands,
   resolveClientSlashCommand,
   slashArgOptions,
@@ -1694,8 +1695,12 @@ function acceptMenuItem(index: number, mode: "enter" | "tab"): void {
   }
 
   const item = selected.item;
+  const replaced =
+    item.kind === "selection"
+      ? trigger
+      : { ...trigger, range: { ...trigger.range, end: mentionReplaceEnd(val, trigger, item.path) } };
   if (item.kind === "folder" && mode === "tab") {
-    replaceTriggerRange(trigger, `@${item.path}`);
+    replaceTriggerRange(replaced, `@${item.path}`);
     dismissedKey = undefined;
     saveWebviewState();
     updateTrigger(true);
@@ -1707,7 +1712,7 @@ function acceptMenuItem(index: number, mode: "enter" | "tab"): void {
       ? { kind: "selection", path: item.path, range: item.range }
       : { kind: item.kind, path: item.path };
   const token = formatMentionToken(attachment);
-  replaceTriggerRange(trigger, `${token} `);
+  replaceTriggerRange(replaced, `${token} `);
   addAttachment(attachment);
   closePopover();
 }

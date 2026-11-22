@@ -4,6 +4,7 @@ import {
   buildCommandCatalog,
   canRunClientCommandInStatus,
   detectComposerTrigger,
+  mentionReplaceEnd,
   parseAvailableCommandsUpdate,
   rankCommands,
   resolveClientSlashCommand,
@@ -229,5 +230,31 @@ describe("catalog, ranking, and client slash command resolution", () => {
     // Agent-owned or unknown commands pass through to the agent.
     expect(resolveClientSlashCommand("/goal build feature", fullState)).toBeUndefined();
     expect(resolveClientSlashCommand("/unknown-cmd", fullState)).toBeUndefined();
+  });
+});
+
+describe("mentionReplaceEnd", () => {
+  const replaceEnd = (text: string, cursor: number, picked: string) => {
+    const trigger = detectComposerTrigger(text, cursor);
+    if (trigger?.kind !== "mention") throw new Error("no mention trigger");
+    return mentionReplaceEnd(text, trigger, picked);
+  };
+
+  it("takes the rest of a CJK file name that follows the cursor", () => {
+    expect(replaceEnd("看@文件.md然后", 3, "文件.md")).toBe("看@文件.md".length);
+    expect(replaceEnd("看@文件.md然后", 3, "docs/文件.md")).toBe("看@文件.md".length);
+    expect(replaceEnd("看@docs/文件.md然后", 8, "docs/文件.md")).toBe("看@docs/文件.md".length);
+  });
+
+  it("never takes text that is not the rest of the picked name (B1)", () => {
+    expect(replaceEnd("解释@ma然后改一下这个文件", 5, "src/main.ts")).toBe("解释@ma".length);
+    expect(replaceEnd("解释@ma然后改一下这个文件", 5, "ma然后.md")).toBe("解释@ma".length);
+    expect(replaceEnd("解释@ma然后.md改一下", 5, "ma然后.md")).toBe("解释@ma然后.md".length);
+    expect(replaceEnd("看@文然后", 3, "文件.md")).toBe("看@文".length);
+    expect(replaceEnd("看@文", 3, "文件.md")).toBe("看@文".length);
+  });
+
+  it("leaves an ASCII name alone (the scan already took it)", () => {
+    expect(replaceEnd("see @ma|in.ts here".replace("|", ""), 7, "src/main.ts")).toBe("see @main.ts".length);
   });
 });

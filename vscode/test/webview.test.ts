@@ -1233,6 +1233,33 @@ describe.skipIf(!chrome || !built)("webview: slash commands and @ mentions", () 
     });
   });
 
+  it("replaces the whole CJK file name when the cursor is inside it, and still keeps the text of a sentence", () => {
+    const out = run(`${richState}
+      const input = document.querySelector("textarea");
+      const chips = document.querySelector(".composer-chips");
+      const lastQuery = () => [...window.__posted].filter((m) => m.type === "queryMentions").at(-1);
+      const pick = (text, cursor, path) => {
+        input.value = text;
+        input.setSelectionRange(cursor, cursor);
+        input.dispatchEvent(new Event("input", { bubbles: true }));
+        const q = lastQuery();
+        host({ type: "mentionResults", requestId: q.requestId, query: q.query, items: [{ kind: "file", path, label: path, detail: "" }] });
+        input.dispatchEvent(new KeyboardEvent("keydown", { key: "Enter", bubbles: true }));
+        const value = input.value;
+        chips.querySelector(".chip-remove")?.click();
+        return value;
+      };
+      window.__result = {
+        cjkName: pick("看@文件.md然后", 3, "文件.md"),
+        sentence: pick("解释@ma然后改一下这个文件", 5, "src/main.ts"),
+      };`);
+    expect(out).toMatchObject({
+      ok: true,
+      cjkName: "看@文件.md 然后",
+      sentence: "解释@src/main.ts 然后改一下这个文件",
+    });
+  });
+
   it("keeps the old @ rows (dimmed) while a new search is pending, and never accepts them with Enter, Tab or a click", () => {
     const out = run(`${richState}
       const input = document.querySelector("textarea");
