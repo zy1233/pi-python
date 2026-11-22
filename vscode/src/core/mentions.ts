@@ -388,7 +388,7 @@ export function rankMentions(
 }
 
 const SAFE_EXACT_NAMES = new Set(["ca.pem", "cacert.pem", "root-ca.pem"]);
-const SAFE_SECRET_SUFFIXES = [".example", ".sample", ".template", ".dist", ".md", ".pub", ".d.ts", ".bak"];
+const SAFE_SECRET_SUFFIXES = [".example", ".sample", ".template", ".dist", ".md", ".pub", ".d.ts"];
 const SECRET_EXACT_NAMES = new Set([
   ".env",
   ".envrc",
