@@ -557,22 +557,27 @@ async def test_bash_output_limit_does_not_apply_to_a_call_that_gets_no_limits(tm
     assert seen == ["free", "limited"]
 
 
+def _make_the_limit_watcher_lose(monkeypatch) -> None:
+    """The command ends before its output is counted, as on a loaded machine.
+
+    The only ``asyncio.Event`` that the Bash tool waits on is the one that the output pump sets
+    when the limit is passed. Left to wait for ever, the limit can only be seen by the count that
+    the tool makes after the command ended. This does not depend on how the loop orders the two
+    tasks (the order differs between Python versions).
+    """
+
+    async def never(self) -> bool:
+        await asyncio.get_running_loop().create_future()
+        return True
+
+    monkeypatch.setattr(asyncio.Event, "wait", never)
+
+
 @needs_bash
 async def test_bash_output_limit_applies_to_a_command_that_ends_before_its_output_is_counted(
     tmp_path, monkeypatch
 ):
-    """The command ends first and its output is counted a moment later (a loaded machine).
-
-    The pump is slowed down on purpose, so that the exit is seen before the limit is hit: the
-    watcher of the limit never gets to run, and the call must still be stopped.
-    """
-    real_append = OutputAccumulator.append
-
-    def slow_append(self, data):
-        real_append(self, data)
-        time.sleep(0.15)
-
-    monkeypatch.setattr(OutputAccumulator, "append", slow_append)
+    _make_the_limit_watcher_lose(monkeypatch)
     tool = create_bash_tool(
         str(tmp_path), limits_for_call=lambda _id: BashLimits(max_output_bytes=1_000)
     )
@@ -584,13 +589,7 @@ async def test_bash_output_limit_applies_to_a_command_that_ends_before_its_outpu
 async def test_bash_output_limit_says_when_the_command_had_already_ended(tmp_path, monkeypatch):
     """The command ran to its end, so the error keeps the first sentence and adds the fact and
     the exit code (the model must not run a command again that already did its work)."""
-    real_append = OutputAccumulator.append
-
-    def slow_append(self, data):
-        real_append(self, data)
-        time.sleep(0.15)
-
-    monkeypatch.setattr(OutputAccumulator, "append", slow_append)
+    _make_the_limit_watcher_lose(monkeypatch)
     tool = create_bash_tool(
         str(tmp_path), limits_for_call=lambda _id: BashLimits(max_output_bytes=1_000)
     )
