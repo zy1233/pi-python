@@ -165,7 +165,7 @@ describe("mention formatting and prompt assembly", () => {
     expect(formatPromptWithMentions("  /goal inspect @src/a.ts", [a, b])).toBe("  /goal inspect @src/a.ts");
   });
 
-  it("identifies secret-looking paths while excluding safe templates, public keys, CA certs, backups, and type defs", () => {
+  it("identifies secret-looking paths while excluding safe templates, public keys, CA certs, and type defs", () => {
     for (const secretPath of [
       ".env",
       ".env.local",
