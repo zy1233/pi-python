@@ -519,6 +519,7 @@ async def test_bash_output_limit_stops_a_command_that_never_stops_printing(tmp_p
     assert time.monotonic() - start < 10
     message = str(excinfo.value)
     assert message.endswith("Command stopped: its output passed the limit of 48.8KB")
+    assert "already ended" not in message
     assert "0123456789" in message
 
 
@@ -577,6 +578,30 @@ async def test_bash_output_limit_applies_to_a_command_that_ends_before_its_outpu
     )
     with pytest.raises(RuntimeError, match="Command stopped: its output passed the limit"):
         await tool.execute("t1", BashParams(command="seq 1 2000"))
+
+
+@needs_bash
+async def test_bash_output_limit_says_when_the_command_had_already_ended(tmp_path, monkeypatch):
+    """The command ran to its end, so the error keeps the first sentence and adds the fact and
+    the exit code (the model must not run a command again that already did its work)."""
+    real_append = OutputAccumulator.append
+
+    def slow_append(self, data):
+        real_append(self, data)
+        time.sleep(0.15)
+
+    monkeypatch.setattr(OutputAccumulator, "append", slow_append)
+    tool = create_bash_tool(
+        str(tmp_path), limits_for_call=lambda _id: BashLimits(max_output_bytes=1_000)
+    )
+    with pytest.raises(RuntimeError) as excinfo:
+        await tool.execute("t1", BashParams(command="seq 1 2000; exit 3"))
+    message = str(excinfo.value)
+    assert "Command stopped: its output passed the limit of 1000B" in message
+    assert message.endswith(
+        "Command stopped: its output passed the limit of 1000B."
+        " The command had already ended (exit code 3) when its output was counted."
+    )
 
 
 # --- agent-loop integration (create_coding_tools group incl. bash) ---
