@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- **A loaded chat starts at the thinking level saved in it (`pi-agent-cli`)**: `session/load` and `session/resume` now apply the latest `thinking_level_change` entry of the chat, as they apply the saved model, and write nothing to the chat file. Before, a loaded chat always started at `thinking_level` of `agent.toml`. A saved level is used only when `reasoning` is not `false` and the `thinking_level` option offers it. A chat with no saved level, and a new chat, keep the level of `agent.toml`.
+
 ## [1.0.1] - 2026-11-20
 
 This is a patch release. It adds `thinking_format = "gemini"` and `<thought>` / OpenRouter `reasoning_details` stream extraction for `provider = "openai"`, adds `python -m pi_agent_cli --version`, and fixes the PyPI README metadata and links. All seven Python packages and the TUI go to 1.0.1.

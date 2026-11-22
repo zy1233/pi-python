@@ -6,9 +6,9 @@
  * by what the agent says in `configOptions`:
  * - Live. An agent that advertises the select `thinking_level` (category `thought_level`) gets
  *   `session/set_config_option` with the new level: no file edit and no restart. The live level
- *   belongs to the session while the agent runs. The agent saves it in the chat file but does not
- *   restore it on `session/load`: a new chat and a loaded chat both start at the level of
- *   `agent.toml`. Agents up to 1.0.1 do not advertise the option; a later agent does.
+ *   belongs to the session while the agent runs. The agent saves it in the chat file and restores
+ *   it on `session/load`: a loaded chat starts at its own level, and a new chat starts at the level
+ *   of `agent.toml`. Agents up to 1.0.1 do not advertise the option; a later agent does.
  * - File. For an agent with no such option, the rest of this module is used: the level lives in
  *   `agent.toml`, the extension changes that one key with a text edit and restarts the agent.
  *
