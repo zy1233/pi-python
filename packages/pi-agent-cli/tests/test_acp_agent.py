@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import ast
 import asyncio
+import json
 from datetime import datetime
 from pathlib import Path
 from typing import Any
@@ -1305,6 +1306,68 @@ async def test_project_event_real_edit_tool_produces_structured_acp_diff(tmp_pat
     assert diff_block.path == "demo.py"
     assert diff_block.old_text == "value = 1\n"
     assert diff_block.new_text == "value = 2\n"
+
+    # The texts are on the event only: ``rawOutput`` and the result's dump do not carry them.
+    raw_output = updates[0].raw_output
+    assert set(raw_output["details"]) == {"diff", "patch", "firstChangedLine"}
+    assert raw_output == result.model_dump(exclude_none=True)
+    for key in ("old_text", "new_text", "oldText", "newText"):
+        assert key not in json.dumps(raw_output)
+
+
+@pytest.mark.asyncio
+async def test_project_event_real_edit_above_the_cap_falls_back_to_the_patch(tmp_path):
+    from pi_agent_core.coding_tools.edit import _MAX_DIFF_TEXT_CHARS, EditParams, create_edit_tool
+    from pi_agent_core.types import ToolExecutionEndEvent, ToolExecutionStartEvent
+
+    target = tmp_path / "big.txt"
+    target.write_text("x" * (_MAX_DIFF_TEXT_CHARS + 1) + "\ntarget\n", encoding="utf-8")
+    tool = create_edit_tool(str(tmp_path))
+    result = await tool.execute(
+        "big_edit_1",
+        EditParams(path="big.txt", edits=[{"oldText": "target", "newText": "updated"}]),
+    )
+    assert result.event_details is None
+
+    start_ev = ToolExecutionStartEvent(
+        tool_call_id="big_edit_1", tool_name="edit", args={"path": "big.txt"}
+    )
+    assert len(list(project_event(start_ev))) == 1
+    end_ev = ToolExecutionEndEvent(
+        tool_call_id="big_edit_1", tool_name="edit", result=result, is_error=False
+    )
+    (update,) = list(project_event(end_ev))
+    diff_block = update.content[0]
+    assert diff_block.type == "diff"
+    assert diff_block.old_text is None
+    assert diff_block.new_text == result.details["patch"]
+    assert "-target" in diff_block.new_text
+
+
+def test_project_event_edit_without_event_texts_falls_back_to_the_patch():
+    """A result that lost its event data (rebuilt, or from a replayed session) must not raise."""
+    from pi_agent_core.types import (
+        AgentToolResult,
+        ToolExecutionEndEvent,
+        ToolExecutionStartEvent,
+    )
+
+    start_ev = ToolExecutionStartEvent(
+        tool_call_id="edit_2", tool_name="edit", args={"path": "src/app.py"}
+    )
+    assert len(list(project_event(start_ev))) == 1
+    end_ev = ToolExecutionEndEvent(
+        tool_call_id="edit_2",
+        tool_name="edit",
+        result=AgentToolResult(
+            content=[{"type": "text", "text": "Edited src/app.py"}],
+            details={"diff": "@@ -1 +1 @@\n-a\n+b\n", "patch": "@@ -1 +1 @@\n-a\n+b\n"},
+        ),
+        is_error=False,
+    )
+    (update,) = list(project_event(end_ev))
+    assert update.content[0].new_text == "@@ -1 +1 @@\n-a\n+b\n"
+    assert update.content[0].old_text is None
 
 
 def test_project_event_caps_tool_call_args():

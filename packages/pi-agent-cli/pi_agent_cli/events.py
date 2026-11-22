@@ -256,11 +256,15 @@ def _result_content(tool_name: str, args: Any, result: Any) -> list[Any] | None:
     if path is None and isinstance(details, dict):
         path = details.get("path")
     if tool_name in {"edit", "write"} and path:
-        if isinstance(details, dict):
-            old_text = details.get("old_text", details.get("oldText"))
-            new_text = details.get("new_text", details.get("newText"))
+        event_details = getattr(result, "event_details", None)
+        for source in (event_details, details):
+            if not isinstance(source, dict):
+                continue
+            old_text = source.get("old_text", source.get("oldText"))
+            new_text = source.get("new_text", source.get("newText"))
             if isinstance(new_text, str) and (old_text is None or isinstance(old_text, str)):
                 return [tool_diff_content(str(path), new_text, old_text)]
+        if isinstance(details, dict):
             patch = details.get("diff") or details.get("patch")
             if patch:
                 return [tool_diff_content(str(path), str(patch))]

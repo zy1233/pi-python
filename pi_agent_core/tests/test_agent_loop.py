@@ -771,3 +771,70 @@ async def test_continue_from_tool_result():
     await run_agent_loop_continue(ctx, config, emit, stream_fn=mock_text_stream)
     assert _event_types(events)[0] == "agent_start"
     assert _event_types(events)[-1] == "agent_end"
+
+
+async def _run_real_edit(tmp_path, *, tool_execution: str, after=None):
+    from pi_agent_core.coding_tools.edit import create_edit_tool
+
+    (tmp_path / "f.txt").write_text("a\nb\nc\n", encoding="utf-8")
+    ctx = AgentContext(system_prompt="", messages=[], tools=[create_edit_tool(str(tmp_path))])
+    config = AgentLoopConfig(
+        model=_model(),
+        convert_to_llm=default_convert_to_llm,
+        tool_execution=tool_execution,  # type: ignore[arg-type]
+        after_tool_call=after,
+    )
+    events = await _collect(
+        [UserMessage(content="go", timestamp=int(time.time() * 1000))],
+        ctx,
+        config,
+        _single_tool_stream("edit", {"path": "f.txt", "edits": [{"oldText": "b", "newText": "B"}]}),
+    )
+    (end,) = [e for e in events if e.type == "tool_execution_end"]
+    (message,) = [
+        e.message for e in events if e.type == "message_end" and e.message.role == "toolResult"
+    ]
+    return end, message
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("tool_execution", ["sequential", "parallel"])
+async def test_edit_texts_reach_the_end_event_but_not_the_tool_result_message(
+    tmp_path, tool_execution
+):
+    end, message = await _run_real_edit(tmp_path, tool_execution=tool_execution)
+
+    assert end.result.event_details == {"old_text": "a\nb\nc\n", "new_text": "a\nB\nc\n"}
+    assert set(end.result.details) == {"diff", "patch", "firstChangedLine"}
+    assert set(message.details) == {"diff", "patch", "firstChangedLine"}
+    stored = message.model_dump(exclude_none=True)
+    assert "old_text" not in str(stored)
+    assert "new_text" not in str(stored)
+
+
+@pytest.mark.asyncio
+async def test_after_tool_call_that_leaves_details_alone_keeps_the_event_texts(tmp_path):
+    from pi_agent_core.types import AfterToolCallResult
+
+    async def after(ctx, signal):
+        return AfterToolCallResult(content=[{"type": "text", "text": "changed"}])
+
+    end, message = await _run_real_edit(tmp_path, tool_execution="sequential", after=after)
+
+    assert end.result.content == [{"type": "text", "text": "changed"}]
+    assert end.result.event_details == {"old_text": "a\nb\nc\n", "new_text": "a\nB\nc\n"}
+    assert "old_text" not in str(message.model_dump(exclude_none=True))
+
+
+@pytest.mark.asyncio
+async def test_after_tool_call_that_replaces_details_drops_the_event_texts(tmp_path):
+    from pi_agent_core.types import AfterToolCallResult
+
+    async def after(ctx, signal):
+        return AfterToolCallResult(details={"diff": "replaced", "patch": "replaced"})
+
+    end, message = await _run_real_edit(tmp_path, tool_execution="sequential", after=after)
+
+    assert end.result.event_details is None
+    assert end.result.details == {"diff": "replaced", "patch": "replaced"}
+    assert message.details == {"diff": "replaced", "patch": "replaced"}

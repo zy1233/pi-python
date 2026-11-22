@@ -9,7 +9,7 @@ from typing import TYPE_CHECKING, Any, Literal, Protocol, TypedDict
 if TYPE_CHECKING:
     from pi_agent_core.event_stream import AssistantMessageEventStream
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, PrivateAttr
 
 from pi_agent_core.messages import (
     AgentToolCall,
@@ -101,6 +101,19 @@ class AgentToolResult(BaseModel):
     content: list[TextContent | ImageContent]
     details: Any = None
     terminate: bool | None = None
+
+    # Data for the live ``tool_execution_end`` event only. A private attribute is not part of
+    # ``model_dump()``, so it never reaches the ``toolResult`` message, the session file or
+    # ``rawOutput``. Code that builds a new result from this one must copy it on purpose.
+    _event_details: dict[str, Any] | None = PrivateAttr(default=None)
+
+    @property
+    def event_details(self) -> dict[str, Any] | None:
+        return self._event_details
+
+    def with_event_details(self, event_details: dict[str, Any] | None) -> AgentToolResult:
+        self._event_details = event_details
+        return self
 
 
 # Synchronous callback; returns an optional awaitable that resolves once the

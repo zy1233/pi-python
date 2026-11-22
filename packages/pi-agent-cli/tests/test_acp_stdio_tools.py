@@ -318,6 +318,52 @@ async def until(condition: Callable[[], bool]) -> None:
     await asyncio.wait_for(poll(), WIRE_TIMEOUT)
 
 
+async def test_a_real_edit_sends_both_texts_to_the_client_and_keeps_them_out_of_the_session_file(
+    tmp_path,
+):
+    home, project = mode_folders(tmp_path)
+    lines = [f"FARLINE-{n:02d}" for n in range(40)]
+    target = project / "f.txt"
+    target.write_text("\n".join(lines) + "\n", encoding="utf-8")
+    call = {
+        "id": "call_edit",
+        "name": "edit",
+        "arguments": {
+            "path": "f.txt",
+            "edits": [{"oldText": "FARLINE-20", "newText": "CHANGED-20"}],
+        },
+    }
+    client = ToolClient(cancelled)
+    async with tool_agent(
+        home, client, permission="always-approve", project=project, call=call
+    ) as (conn, _process, session_id):
+        await prompt_once(conn, session_id)
+
+    assert "CHANGED-20" in target.read_text(encoding="utf-8")
+    finished = [
+        update
+        for update in client.updates
+        if getattr(update, "session_update", "") == "tool_call_update"
+        and getattr(update, "status", None) == "completed"
+    ]
+    (update,) = finished
+    (diff_block,) = update.content
+    assert diff_block.type == "diff"
+    assert diff_block.old_text == "\n".join(lines) + "\n"
+    assert diff_block.new_text == "\n".join(lines).replace("FARLINE-20", "CHANGED-20") + "\n"
+    wire = json.dumps(update.raw_output)
+    assert "FARLINE-00" not in wire  # no unchanged line of the file
+    assert set(update.raw_output["details"]) == {"diff", "patch", "firstChangedLine"}
+
+    session_text = "".join(
+        path.read_text(encoding="utf-8") for path in (home / "sessions").glob("*.jsonl")
+    )
+    assert "call_edit" in session_text  # the toolResult message is there
+    assert "FARLINE-00" not in session_text
+    assert "old_text" not in session_text
+    assert "new_text" not in session_text
+
+
 async def test_the_pagers_auto_flag_makes_a_project_write_run_without_a_question(tmp_path):
     home, project = mode_folders(tmp_path)
     marker = project / "marker.txt"
