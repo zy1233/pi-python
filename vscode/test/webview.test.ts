@@ -954,7 +954,7 @@ describe.skipIf(!chrome || !built)("webview: slash commands and @ mentions", () 
       ok: true,
       slashOpen: { value: "/", hidden: false, head: "Commands" },
       afterIme: { value: "/", hidden: false, postedSame: true },
-      mentionOpen: { value: "explain @", hidden: false, head: "Context · files, folders, selection", query: "" },
+      mentionOpen: { value: "explain @", hidden: false, head: "References · files, folders, selection", query: "" },
     });
   });
 
@@ -1297,7 +1297,7 @@ describe.skipIf(!chrome || !built)("webview: slash commands and @ mentions", () 
       role: null,
       slash: { listChildRoles: ["option", "option", "option"], headHidden: "true", listLabel: "Commands", emptyInsideList: false, live: ["3 suggestions"] },
       empty: { listChildRoles: null, emptyInsideList: false, live: ["No matching commands"] },
-      mention: { listChildRoles: ["option"], listLabel: "Context · files, folders, selection", live: ["1 suggestion"] },
+      mention: { listChildRoles: ["option"], listLabel: "References · files, folders, selection", live: ["1 suggestion"] },
       afterClose: [],
     });
   });

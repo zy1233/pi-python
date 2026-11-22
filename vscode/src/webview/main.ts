@@ -97,7 +97,7 @@ const popoverStatus = el("span", { class: "sr-only", role: "status" });
 const chipsBar = el("div", {
   class: "composer-chips",
   role: "list",
-  ariaLabel: "Attached context",
+  ariaLabel: "References and images",
   hidden: true,
 });
 const mentionTriggerButton = el("button", {
@@ -1273,7 +1273,7 @@ function renderPopover(): void {
       ? "Commands"
       : activeTrigger.kind === "slash-arg"
         ? `/${activeTrigger.command} options`
-        : "Context · files, folders, selection";
+        : "References · files, folders, selection";
   const nodes: Node[] = [el("div", { class: "popover-head", ariaHidden: true, text: headerText })];
 
   if (menuItems.length === 0) {
