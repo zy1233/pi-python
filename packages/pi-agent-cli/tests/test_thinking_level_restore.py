@@ -179,3 +179,28 @@ async def test_a_level_set_after_a_restored_one_is_saved_as_before(tmp_path):
     loaded = await third.load_session(cwd=cwd, session_id=sid)
 
     assert _level_option(loaded.config_options).current_value == "low"
+
+
+@pytest.mark.asyncio
+async def test_the_level_comes_from_the_branch_not_from_the_whole_file(tmp_path):
+    """A chat whose leaf was moved back to before a later level change starts at the level that
+    is on its branch, although the file holds the later change too."""
+    agent = _agent(tmp_path)
+    cwd = str(tmp_path.resolve())
+    sid = (await agent.new_session(cwd=cwd)).session_id
+    await agent.set_config_option(config_id="thinking_level", session_id=sid, value="high")
+    await agent.prompt(session_id=sid, prompt=[text_block("one")])
+    await agent.set_config_option(config_id="thinking_level", session_id=sid, value="low")
+    await agent.prompt(session_id=sid, prompt=[text_block("two")])
+
+    session = agent._harnesses[sid].session
+    entries = await session.get_entries()
+    low = next(e for e in entries if e.type == "thinking_level_change" and e.thinkingLevel == "low")
+    await session.move_to(low.parentId)
+
+    other = _agent(tmp_path)
+    loaded = await other.load_session(cwd=cwd, session_id=sid)
+
+    assert any(e.type == "thinking_level_change" and e.thinkingLevel == "low" for e in entries)
+    assert _level_option(loaded.config_options).current_value == "high"
+    assert other._harnesses[sid].thinking_level == "high"
