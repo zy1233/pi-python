@@ -148,6 +148,7 @@ export class ChatController {
   /** When the prompt of the running turn was sent, and how long the last turn took (our clock). */
   private turnStartedAt: number | undefined;
   private lastTurnMs: number | undefined;
+  private turnInFlight = false;
   private opening = false;
   private earlyUpdates: SessionNotification[] = [];
   private generation = 0;
@@ -786,6 +787,7 @@ export class ChatController {
   async stop(): Promise<void> {
     this.generation++;
     this.stopping = true;
+    this.turnInFlight = false;
     this.clearCancelTimer();
     this.cancelAllPermissions();
     const conn = this.conn;
@@ -819,12 +821,14 @@ export class ChatController {
   }
 
   async dispose(): Promise<void> {
+    this.turnInFlight = false;
     await this.stop();
     this.listeners.clear();
   }
 
   private onProcessExit(generation: number, proc: AgentProcess, info: { code: number | null; signal: NodeJS.Signals | null }): void {
     if (generation !== this.generation || this.stopping || proc !== this.proc) return;
+    this.turnInFlight = false;
     this.cancelAllPermissions();
     this.clearCancelTimer();
     const text = this.exitText(info, proc);
@@ -882,6 +886,7 @@ export class ChatController {
     this.lastTurnMs = undefined;
     this.emit({ type: "userMessage", id, text: displayText });
     this.setStatus("busy");
+    this.turnInFlight = true;
     const generation = this.generation;
     try {
       const stopReason = await conn.prompt(sessionId, promptText, hasImages ? images : undefined);
@@ -889,6 +894,7 @@ export class ChatController {
       this.finishTurn(stopReason);
     } catch (error) {
       if (generation !== this.generation) return true;
+      this.turnInFlight = false;
       if ((this.status as Status) !== "error") {
         this.pushNotice("error", `The turn failed: ${messageOf(error)}`);
         this.finishTurn("error");
@@ -934,6 +940,7 @@ export class ChatController {
   }
 
   private finishTurn(stopReason: string): void {
+    this.turnInFlight = false;
     this.segmentId = undefined;
     this.clearCancelTimer();
     this.cancelAllPermissions();
@@ -1016,6 +1023,7 @@ export class ChatController {
   }
 
   private resetTranscript(): void {
+    this.turnInFlight = false;
     this.items = [];
     this.toolItemIndices.clear();
     this.tools.clear();
@@ -1408,8 +1416,9 @@ export class ChatController {
       item.thought += text;
       this.emit({ type: "agentThought", messageId: item.id, text });
     } else {
+      const outOfTurn = !replay && !this.turnInFlight && this.status !== "busy" && this.status !== "cancelling";
       const chunkText =
-        !replay && this.status !== "busy" && item.text !== "" && !item.text.endsWith("\n") && !text.startsWith("\n")
+        outOfTurn && item.text !== "" && !item.text.endsWith("\n") && !text.startsWith("\n")
           ? `\n\n${text}`
           : text;
       item.text += chunkText;

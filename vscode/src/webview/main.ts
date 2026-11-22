@@ -45,6 +45,7 @@ import { copyButton, el, highlightedText, renderBlocks } from "./dom.js";
 interface PersistedWebviewState {
   draft: string;
   attachments: MentionAttachment[];
+  images?: ImageAttachment[];
   followTail: boolean;
   scrollTop: number;
   openDetails: Record<string, boolean>;
@@ -222,7 +223,12 @@ let imageAttachments: ImageAttachment[] = [];
 const MAX_HISTORY = 50;
 const sentHistory: string[] = [];
 let historyIndex = -1;
-let historyDraft = "";
+let historyDraft: { text: string; attachments: MentionAttachment[] } | undefined;
+let historyEdited = false;
+
+function cloneAttachments(items: readonly MentionAttachment[]): MentionAttachment[] {
+  return items.map((item) => (item.range ? { ...item, range: { ...item.range } } : { ...item }));
+}
 
 function isPlainRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value);
@@ -266,6 +272,33 @@ function sanitizeAttachments(raw: unknown): MentionAttachment[] {
   return out;
 }
 
+function sanitizeImages(raw: unknown): ImageAttachment[] {
+  if (!Array.isArray(raw)) return [];
+  const out: ImageAttachment[] = [];
+  for (const entry of raw) {
+    if (!isPlainRecord(entry)) continue;
+    if (typeof entry.mimeType !== "string" || !(ALLOWED_IMAGE_MIMES as readonly string[]).includes(entry.mimeType)) {
+      continue;
+    }
+    if (
+      typeof entry.data !== "string" ||
+      entry.data === "" ||
+      entry.data.length > MAX_IMAGE_DATA_CHARS ||
+      !/^[A-Za-z0-9+/=]+$/.test(entry.data)
+    ) {
+      continue;
+    }
+    const cleanName = typeof entry.name === "string" && entry.name.trim() !== "" ? entry.name.trim().slice(0, 128) : undefined;
+    out.push({
+      mimeType: entry.mimeType as ImageMimeType,
+      data: entry.data,
+      ...(cleanName ? { name: cleanName } : {}),
+    });
+    if (out.length >= MAX_IMAGES) break;
+  }
+  return out;
+}
+
 function loadPersistedState(): PersistedWebviewState | undefined {
   let raw: unknown;
   try {
@@ -276,6 +309,7 @@ function loadPersistedState(): PersistedWebviewState | undefined {
   if (!isPlainRecord(raw)) return undefined;
   const draft = typeof raw.draft === "string" ? raw.draft.slice(0, 200_000) : "";
   const restoredAttachments = sanitizeAttachments(raw.attachments);
+  const restoredImages = sanitizeImages(raw.images);
   const follow = typeof raw.followTail === "boolean" ? raw.followTail : true;
   const scrollTop =
     typeof raw.scrollTop === "number" && Number.isFinite(raw.scrollTop) && raw.scrollTop >= 0 ? raw.scrollTop : 0;
@@ -293,6 +327,7 @@ function loadPersistedState(): PersistedWebviewState | undefined {
   return {
     draft,
     attachments: restoredAttachments,
+    images: restoredImages,
     followTail: follow,
     scrollTop,
     openDetails: details,
@@ -303,7 +338,8 @@ function saveWebviewState(): void {
   try {
     vscode.setState?.({
       draft: input.value,
-      attachments: attachments.map((item) => (item.range ? { ...item, range: { ...item.range } } : { ...item })),
+      attachments: cloneAttachments(attachments),
+      images: imageAttachments.map((img) => ({ ...img })),
       followTail,
       scrollTop: Math.max(0, transcript.scrollTop),
       openDetails: Object.fromEntries(openDetails),
@@ -1344,6 +1380,7 @@ function renderChips(): void {
     removeBtn.addEventListener("click", () => {
       imageAttachments.splice(index, 1);
       renderChips();
+      saveWebviewState();
       input.focus();
     });
     chipsBar.append(
@@ -1377,6 +1414,7 @@ function addImageAttachment(mimeType: string, base64Data: string, name?: string)
     ...(cleanName ? { name: cleanName } : {}),
   });
   renderChips();
+  saveWebviewState();
 }
 
 function readImageFile(file: File): void {
@@ -1419,7 +1457,7 @@ function syncAttachmentsWithInput(): void {
   }
 }
 
-function dispatchClientCommand(text: string): "dispatched" | "notice" | "none" {
+function dispatchClientCommand(text: string): "dispatched-new" | "dispatched" | "notice" | "none" {
   const resolved = resolveClientSlashCommand(text, state);
   if (!resolved) return "none";
   if (resolved.kind === "message") {
@@ -1429,7 +1467,7 @@ function dispatchClientCommand(text: string): "dispatched" | "notice" | "none" {
       return "notice";
     }
     send(resolved.message);
-    return "dispatched";
+    return resolved.message.type === "newChat" ? "dispatched-new" : "dispatched";
   }
   addNotice(resolved.level, resolved.text);
   scrollToEnd();
@@ -1559,7 +1597,7 @@ function acceptMenuItem(index: number, mode: "enter" | "tab"): void {
       const resolved = resolveClientSlashCommand(`/${cmd.name}`, state);
       if (resolved?.kind === "message" && canRunClientCommandInStatus(resolved.message, state.status)) {
         closePopover();
-        if (!openedViaButtonOnDraft || cmd.name === "new") {
+        if (!openedViaButtonOnDraft) {
           input.value = "";
           attachments = [];
           if (cmd.name === "new") imageAttachments = [];
@@ -1624,13 +1662,25 @@ function acceptMenuItem(index: number, mode: "enter" | "tab"): void {
 }
 
 function recordHistory(text: string): void {
+  historyIndex = -1;
+  historyEdited = false;
+  historyDraft = undefined;
   if (text.trim() === "") return;
   if (sentHistory.at(-1) !== text) {
     sentHistory.push(text);
     if (sentHistory.length > MAX_HISTORY) sentHistory.shift();
   }
+}
+
+function restoreHistoryDraft(): void {
+  input.value = historyDraft?.text ?? "";
+  attachments = historyDraft ? cloneAttachments(historyDraft.attachments) : [];
   historyIndex = -1;
-  historyDraft = "";
+  historyEdited = false;
+  historyDraft = undefined;
+  input.setSelectionRange(input.value.length, input.value.length);
+  renderChips();
+  saveStateThrottled.request();
 }
 
 function submit(): void {
@@ -1641,11 +1691,13 @@ function submit(): void {
     const outcome = dispatchClientCommand(text);
     if (outcome !== "none") {
       closePopover();
-      if (outcome === "dispatched") {
+      if (outcome === "dispatched" || outcome === "dispatched-new") {
         recordHistory(text);
         input.value = "";
         attachments = [];
-        imageAttachments = [];
+        if (outcome === "dispatched-new") {
+          imageAttachments = [];
+        }
         renderChips();
         saveWebviewState();
       }
@@ -1802,7 +1854,9 @@ document.addEventListener("mousedown", (event) => {
 });
 
 input.addEventListener("input", () => {
-  historyIndex = -1;
+  if (historyIndex >= 0) {
+    historyEdited = true;
+  }
   syncAttachmentsWithInput();
   saveStateThrottled.request();
   updateTrigger();
@@ -1873,16 +1927,32 @@ input.addEventListener("keydown", (event) => {
     return;
   }
 
+  if (event.key === "Escape" && !menuOpen && state.status !== "busy" && historyIndex >= 0 && historyDraft !== undefined) {
+    event.preventDefault();
+    restoreHistoryDraft();
+    return;
+  }
+
   const noModifiers = !event.shiftKey && !event.ctrlKey && !event.altKey && !event.metaKey;
-  if (event.key === "ArrowUp" && noModifiers && sentHistory.length > 0) {
+  if (event.key === "ArrowUp" && !menuOpen && noModifiers && sentHistory.length > 0) {
     const cursor = input.selectionStart ?? 0;
+    const selectionEnd = input.selectionEnd ?? cursor;
     const onFirstLine = !input.value.slice(0, cursor).includes("\n");
-    if (onFirstLine) {
-      event.preventDefault();
-      if (historyIndex === -1) {
-        historyDraft = input.value;
+    if (historyIndex === -1) {
+      if (input.value === "" || (cursor === 0 && selectionEnd === 0)) {
+        event.preventDefault();
+        historyDraft = { text: input.value, attachments: cloneAttachments(attachments) };
         historyIndex = sentHistory.length - 1;
-      } else if (historyIndex > 0) {
+        historyEdited = false;
+        input.value = sentHistory[historyIndex]!;
+        input.setSelectionRange(input.value.length, input.value.length);
+        syncAttachmentsWithInput();
+        saveStateThrottled.request();
+        return;
+      }
+    } else if (!historyEdited && onFirstLine) {
+      event.preventDefault();
+      if (historyIndex > 0) {
         historyIndex--;
       }
       input.value = sentHistory[historyIndex]!;
@@ -1893,21 +1963,20 @@ input.addEventListener("keydown", (event) => {
     }
   }
 
-  if (event.key === "ArrowDown" && noModifiers && historyIndex >= 0) {
+  if (event.key === "ArrowDown" && !menuOpen && noModifiers && historyIndex >= 0) {
     const cursor = input.selectionEnd ?? input.value.length;
     const onLastLine = !input.value.slice(cursor).includes("\n");
     if (onLastLine) {
       event.preventDefault();
-      if (historyIndex < sentHistory.length - 1) {
+      if (!historyEdited && historyIndex < sentHistory.length - 1) {
         historyIndex++;
         input.value = sentHistory[historyIndex]!;
+        input.setSelectionRange(input.value.length, input.value.length);
+        syncAttachmentsWithInput();
+        saveStateThrottled.request();
       } else {
-        historyIndex = -1;
-        input.value = historyDraft;
+        restoreHistoryDraft();
       }
-      input.setSelectionRange(input.value.length, input.value.length);
-      syncAttachmentsWithInput();
-      saveStateThrottled.request();
       return;
     }
   }
@@ -1944,6 +2013,7 @@ const restored = loadPersistedState();
 if (restored) {
   input.value = restored.draft;
   attachments = restored.attachments;
+  imageAttachments = restored.images ?? [];
   renderChips();
   for (const [key, value] of Object.entries(restored.openDetails)) {
     openDetails.set(key, value);

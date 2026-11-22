@@ -200,6 +200,28 @@ async function runPrompt(ctx, sessionId, prompt) {
     cancelled.delete(sessionId);
     return "cancelled";
   }
+  if (prompt === "busy-chunks") {
+    await notify(text(sessionId, "agent_message_chunk", "Hel"));
+    await notify(text(sessionId, "agent_message_chunk", "lo wor"));
+    await notify(text(sessionId, "agent_message_chunk", "ld"));
+    return "end_turn";
+  }
+  if (prompt === "cancel-chunks") {
+    await notify(text(sessionId, "agent_message_chunk", "Hel"));
+    for (let i = 0; i < 400 && !cancelled.has(sessionId); i++) await sleep(10);
+    await notify(text(sessionId, "agent_message_chunk", "lo wor"));
+    await notify(text(sessionId, "agent_message_chunk", "ld"));
+    cancelled.delete(sessionId);
+    return "cancelled";
+  }
+  if (prompt === "out-of-turn-notices") {
+    setTimeout(() => {
+      void notify(text(sessionId, "agent_message_chunk", "Notice one."))
+        .then(() => notify(text(sessionId, "agent_message_chunk", "Notice two.")))
+        .catch(() => undefined);
+    }, 20);
+    return "end_turn";
+  }
   if (prompt === "crash") {
     await notify(text(sessionId, "agent_message_chunk", "about to crash"));
     process.stderr.write("fake agent: crashing\n");

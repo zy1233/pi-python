@@ -4,10 +4,14 @@ import { spawnSync } from "node:child_process";
 import { existsSync, writeFileSync } from "node:fs";
 import path from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
-import { describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it } from "vitest";
 
 import { buildHarness } from "../scripts/webview-harness.mjs";
 import { tempDir } from "./helpers.js";
+
+// Each test invokes Chrome via spawnSync (~1s); yielding a macrotask between tests lets
+// Vitest's worker IPC drain onTaskUpdate acknowledgments instead of starving past 60s.
+afterEach(() => new Promise((resolve) => setTimeout(resolve, 0)));
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const built = existsSync(path.join(root, "dist", "webview.js"));
@@ -1169,7 +1173,7 @@ describe.skipIf(!chrome || !built)("webview: slash commands and @ mentions", () 
       };
 
       // 3. Click / button on non-empty draft with attached chip and pick /new:
-      // executes newChat and clears both the draft and the attached chip.
+      // executes newChat while preserving both the draft and the attached chip.
       slashBtn.click();
       const newIdx = [...menu.querySelectorAll("[role='option'] .popover-title")].findIndex((n) => n.textContent === "/new");
       menu.querySelectorAll("[role='option']")[newIdx].click();
@@ -1218,9 +1222,9 @@ describe.skipIf(!chrome || !built)("webview: slash commands and @ mentions", () 
         openLogCount: 1,
       },
       afterSlashBtnNew: {
-        value: "",
-        chipCount: 0,
-        chipsHidden: true,
+        value: "explain @.env ",
+        chipCount: 1,
+        chipsHidden: false,
         newChatCount: 1,
       },
       statusBeforeTimeout: "Searching workspace…",
@@ -1702,6 +1706,197 @@ describe.skipIf(!chrome || !built)("webview: P1 images, insertMention, saveAll, 
         { type: "openFile", path: "src/app.ts", line: 10 },
         { type: "openFile", path: "src/util.ts" },
         { type: "openFile", path: "src/app.ts" },
+      ],
+    });
+  });
+
+  it("preserves drafts and @ chips across ArrowUp/ArrowDown/Escape history navigation and guards mid-draft ArrowUp", () => {
+    const out = run(`${state}
+      state({});
+      const input = document.querySelector("textarea");
+      const chips = document.querySelector(".composer-chips");
+
+      // Send two prompts into history.
+      input.value = "first prompt";
+      input.dispatchEvent(new KeyboardEvent("keydown", { key: "Enter", bubbles: true }));
+      input.value = "second prompt";
+      input.dispatchEvent(new KeyboardEvent("keydown", { key: "Enter", bubbles: true }));
+
+      // 1. ArrowUp on empty box recalls latest history entry.
+      input.dispatchEvent(new KeyboardEvent("keydown", { key: "ArrowUp", bubbles: true }));
+      const recalledFromEmpty = input.value;
+      input.dispatchEvent(new KeyboardEvent("keydown", { key: "ArrowDown", bubbles: true }));
+      const restoredEmpty = input.value;
+
+      // 2. ArrowUp with cursor in the middle of a draft (pos 2) must NOT overwrite the draft.
+      input.value = "my long draft G";
+      input.setSelectionRange(2, 2);
+      input.dispatchEvent(new KeyboardEvent("keydown", { key: "ArrowUp", bubbles: true }));
+      const afterMidDraftUp = input.value;
+
+      // 3. Build a draft with an attached @ chip, recall at cursor 0, edit recalled text,
+      // verify ArrowUp does not clobber the edit, then ArrowDown restores draft + chip.
+      input.value = "check";
+      input.setSelectionRange(5, 5);
+      host({ type: "insertMention", item: { kind: "file", path: "src/app.ts" } });
+      const originalDraft = input.value;
+      input.setSelectionRange(0, 0);
+      input.dispatchEvent(new KeyboardEvent("keydown", { key: "ArrowUp", bubbles: true }));
+      const afterRecall = {
+        value: input.value,
+        chipCount: chips.querySelectorAll(".chip").length,
+      };
+      input.value = "second prompt edited";
+      input.dispatchEvent(new Event("input", { bubbles: true }));
+      input.setSelectionRange(0, 0);
+      input.dispatchEvent(new KeyboardEvent("keydown", { key: "ArrowUp", bubbles: true }));
+      const afterEditedUp = input.value;
+      input.setSelectionRange(input.value.length, input.value.length);
+      input.dispatchEvent(new KeyboardEvent("keydown", { key: "ArrowDown", bubbles: true }));
+      const afterEditedDown = {
+        value: input.value,
+        chipLabels: [...chips.querySelectorAll(".chip-label")].map((c) => c.textContent),
+      };
+
+      // 4. Recall again, edit, then press Escape while ready to restore draft + chip.
+      input.setSelectionRange(0, 0);
+      input.dispatchEvent(new KeyboardEvent("keydown", { key: "ArrowUp", bubbles: true }));
+      input.value = "another edit";
+      input.dispatchEvent(new Event("input", { bubbles: true }));
+      input.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", bubbles: true }));
+      const afterEscape = {
+        value: input.value,
+        chipLabels: [...chips.querySelectorAll(".chip-label")].map((c) => c.textContent),
+      };
+
+      window.__result = {
+        recalledFromEmpty,
+        restoredEmpty,
+        afterMidDraftUp,
+        originalDraft,
+        afterRecall,
+        afterEditedUp,
+        afterEditedDown,
+        afterEscape,
+      };`);
+    expect(out).toMatchObject({
+      ok: true,
+      recalledFromEmpty: "second prompt",
+      restoredEmpty: "",
+      afterMidDraftUp: "my long draft G",
+      originalDraft: "check @src/app.ts ",
+      afterRecall: { value: "second prompt", chipCount: 0 },
+      afterEditedUp: "second prompt edited",
+      afterEditedDown: { value: "check @src/app.ts ", chipLabels: ["app.ts"] },
+      afterEscape: { value: "check @src/app.ts ", chipLabels: ["app.ts"] },
+    });
+  });
+
+  it("preserves pasted images across non-/new client commands and restores sanitized images from webview state", () => {
+    const mockFileReader = `window.FileReader = class {
+      constructor() { this._listeners = []; this.result = ""; }
+      addEventListener(type, fn) { if (type === "load") this._listeners.push(fn); }
+      readAsDataURL(file) {
+        this.result = "data:" + file.type + ";base64," + (file.__base64 || "iVBORw0KGgo=");
+        for (const fn of this._listeners) fn();
+      }
+    };`;
+    const out = run(
+      `${state}
+      state({ mode: { current: "ask", options: [{ id: "ask", name: "Ask" }, { id: "auto", name: "Auto" }] } });
+      const input = document.querySelector("textarea");
+      const chips = document.querySelector(".composer-chips");
+
+      // Paste an image and verify state persistence.
+      const pasteEvent = new Event("paste", { bubbles: true, cancelable: true });
+      Object.defineProperty(pasteEvent, "clipboardData", {
+        value: {
+          items: [
+            {
+              type: "image/png",
+              getAsFile: () => ({ type: "image/png", name: "clip.png", __base64: "iVBORw0KGgo=" }),
+            },
+          ],
+        },
+      });
+      input.dispatchEvent(pasteEvent);
+      const persistedAfterPaste = window.__webviewState?.images;
+
+      // Typing /log + Enter must preserve attached images.
+      input.value = "/log";
+      input.dispatchEvent(new KeyboardEvent("keydown", { key: "Enter", bubbles: true }));
+      const afterLog = {
+        value: input.value,
+        chipLabels: [...chips.querySelectorAll(".chip-label")].map((c) => c.textContent),
+        persistedImages: window.__webviewState?.images,
+        openLogCount: window.__posted.filter((m) => m.type === "openLog").length,
+      };
+
+      // Typing /new + Enter clears attached images.
+      input.value = "/new";
+      input.dispatchEvent(new KeyboardEvent("keydown", { key: "Enter", bubbles: true }));
+      const afterNew = {
+        value: input.value,
+        chipCount: chips.querySelectorAll(".chip").length,
+        persistedImages: window.__webviewState?.images,
+        newChatCount: window.__posted.filter((m) => m.type === "newChat").length,
+      };
+
+      window.__result = { persistedAfterPaste, afterLog, afterNew };`,
+      mockFileReader,
+    );
+    expect(out).toMatchObject({
+      ok: true,
+      persistedAfterPaste: [{ mimeType: "image/png", data: "iVBORw0KGgo=", name: "clip.png" }],
+      afterLog: {
+        value: "",
+        chipLabels: ["[Image: clip.png]"],
+        persistedImages: [{ mimeType: "image/png", data: "iVBORw0KGgo=", name: "clip.png" }],
+        openLogCount: 1,
+      },
+      afterNew: {
+        value: "",
+        chipCount: 0,
+        persistedImages: [],
+        newChatCount: 1,
+      },
+    });
+
+    // Reloading with preseeded window.__webviewState.images restores valid images and filters invalid ones.
+    const preseed = `window.__webviewState = ${JSON.stringify({
+      draft: "look at this",
+      attachments: [],
+      images: [
+        { mimeType: "image/png", data: "iVBORw0KGgo=", name: "saved.png" },
+        { mimeType: "image/svg+xml", data: "AAAA", name: "bad.svg" },
+        { mimeType: "image/jpeg", data: "not base64!!!", name: "bad.jpg" },
+      ],
+      followTail: true,
+      scrollTop: 0,
+      openDetails: {},
+    })};`;
+    const reloaded = run(
+      `${state}
+      state({});
+      const input = document.querySelector("textarea");
+      const chips = document.querySelector(".composer-chips");
+      const restoredLabels = [...chips.querySelectorAll(".chip-label")].map((c) => c.textContent);
+      input.dispatchEvent(new KeyboardEvent("keydown", { key: "Enter", bubbles: true }));
+      window.__result = {
+        restoredLabels,
+        sends: window.__posted.filter((m) => m.type === "send"),
+      };`,
+      preseed,
+    );
+    expect(reloaded).toMatchObject({
+      ok: true,
+      restoredLabels: ["[Image: saved.png]"],
+      sends: [
+        {
+          type: "send",
+          text: "look at this",
+          images: [{ mimeType: "image/png", data: "iVBORw0KGgo=", name: "saved.png" }],
+        },
       ],
     });
   });

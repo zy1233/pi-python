@@ -318,6 +318,40 @@ describe("chat", () => {
     expect(ofType(messages, "turnEnd").at(-1)).toEqual({ type: "turnEnd", stopReason: "cancelled" });
   });
 
+  it("joins streamed chunks seamlessly during busy and cancelling, and separates out-of-turn notices during ready", async () => {
+    const { controller, messages } = setup();
+    await controller.start();
+
+    // 1. Busy turn: "Hel" + "lo wor" + "ld" join without "\n\n".
+    await controller.send("busy-chunks");
+    const busyItem = controller.transcript().filter((i) => i.type === "agent").at(-1);
+    expect(busyItem).toMatchObject({ type: "agent", text: "Hello world" });
+
+    // 2. Cancelling turn: trailing chunks arriving after cancel() join without "\n\n".
+    const cancelTurn = controller.send("cancel-chunks");
+    await waitFor(
+      () => controller.transcript().filter((i) => i.type === "agent").at(-1)?.text === "Hel",
+      "first chunk before cancel",
+    );
+    await controller.cancel();
+    expect(controller.currentStatus).toBe("cancelling");
+    await cancelTurn;
+    expect(controller.currentStatus).toBe("ready");
+    const cancelItem = controller.transcript().filter((i) => i.type === "agent").at(-1);
+    expect(cancelItem).toMatchObject({ type: "agent", text: "Hello world" });
+
+    // 3. Out-of-turn chunks while ready: separated by "\n\n".
+    const beforeOutOfTurn = ofType(messages, "agentText").length;
+    await controller.send("out-of-turn-notices");
+    expect(controller.currentStatus).toBe("ready");
+    await waitFor(
+      () => ofType(messages, "agentText").length >= beforeOutOfTurn + 2,
+      "two out-of-turn notices",
+    );
+    const noticeItem = controller.transcript().filter((i) => i.type === "agent").at(-1);
+    expect(noticeItem).toMatchObject({ type: "agent", text: "Notice one.\n\nNotice two." });
+  });
+
   it("notes unsaved files with a Save all action, and delegates saveAll and openFile to the host", async () => {
     const { controller, messages, host } = setup({ dirty: ["/p/a.ts", "/p/b.ts"] });
     await controller.start();
