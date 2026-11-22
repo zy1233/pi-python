@@ -24,6 +24,8 @@ permission = "ask" # ask | auto | always-approve
 # `always-approve` asks about nothing. Headless (-p) runs always use it. Before this version,
 # `auto` meant "ask about nothing": use `always-approve` for that.
 
+# The level of a new chat and of a chat with no saved level. A chat that you changed with the
+# `thinking_level` option keeps that level when you open it again, whatever this line says.
 thinking_level = "off" # off | minimal | low | medium | high | xhigh | max
 # The most model calls that one prompt may make. It stops a loop that does not end, and it does
 # not limit the size of the context. Unset: no limit.

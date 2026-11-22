@@ -204,6 +204,8 @@ class CliConfig:
     provider: str = MOCK_PROVIDER
     model_id: str = "mock"
     base_url: str | None = None
+    # The level of a new session and of a session with no saved level: ``session/load`` and
+    # ``session/resume`` start a chat at the level saved in it (``_restored_thinking_level``).
     thinking_level: ThinkingLevel = "off"
     max_turns: int | None = None
     # Whether the agent compacts the context by itself. ``None``: not set, and then
