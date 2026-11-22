@@ -1,8 +1,19 @@
 /**
  * The thinking level (docs/specs/2026-11-04-vscode-extension-design.md, section 7c). It adds no wire
- * item and no agent change.
+ * item.
  *
- * What agent v0.9.1 offers (read from its source and measured on the 0.9.0 and 0.9.1 binaries):
+ * The extension changes the level in one of two ways. `ChatController.applyThinkingLevel` chooses
+ * by what the agent says in `configOptions`:
+ * - Live. An agent that advertises the select `thinking_level` (category `thought_level`) gets
+ *   `session/set_config_option` with the new level: no file edit and no restart. The live level
+ *   belongs to the session. A new chat starts at the level of `agent.toml`, and `session/load`
+ *   restores the level of that chat. Agents up to 1.0.1 do not advertise the option; a later agent
+ *   does.
+ * - File. For an agent with no such option, the rest of this module is used: the level lives in
+ *   `agent.toml`, the extension changes that one key with a text edit and restarts the agent.
+ *
+ * What an agent up to 1.0.1 offers (measured on the 0.9.0 and 0.9.1 binaries, and read in the source
+ * of 1.0.0):
  * - The level lives in `agent.toml` only: the top-level key `thinking_level`, one of `off`,
  *   `minimal`, `low`, `medium`, `high`, `xhigh`. A missing or invalid value is `off`.
  *   A later agent adds `max` (`MAX_LEVEL_SINCE`). An agent that does not know `max` reads it as `off`
@@ -14,10 +25,10 @@
  *   `thinking_level != "off"` (`CliConfig.model_reasoning`). With `reasoning = false` the agent
  *   asks no provider to think, whatever the level is.
  * - `zypi` has no level switch for this agent either: it refuses `--reasoning-effort` and says
- *   "Set thinking_level in agent.toml."
+ *   "Set thinking_level in agent.toml." (it ignores every option that is not of category `model`).
  *
- * So the only input the agent has is the file. This module reads it, and changes the one key with a
- * minimal text edit that is checked by parsing the result.
+ * So for these agents the only input is the file. This module reads it, and changes the one key with
+ * a minimal text edit that is checked by parsing the result.
  */
 
 import { existsSync, mkdtempSync, readFileSync, realpathSync, renameSync, rmSync, statSync, writeFileSync } from "node:fs";

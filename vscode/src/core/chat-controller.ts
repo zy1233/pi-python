@@ -266,8 +266,10 @@ export class ChatController {
   }
 
   /**
-   * The thinking picker (design section 7c). The level is the one in `agent.toml` when the agent
-   * started: the agent reads it at its start and has no way to change it while it runs.
+   * The thinking picker (design section 7c). When the agent advertises the `thinking_level` option
+   * (category `thought_level`), the level is the live level of this session (`liveThinkingLevel`).
+   * Otherwise (agents up to 1.0.1) it is the level in `agent.toml` when the agent started: such an
+   * agent reads the file at its start and cannot change the level while it runs.
    */
   private thinkingState(): ThinkingState | undefined {
     if (this.status !== "ready" && this.status !== "busy" && this.status !== "cancelling") return undefined;
