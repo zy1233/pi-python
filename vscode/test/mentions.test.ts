@@ -151,6 +151,8 @@ describe("mention formatting and prompt assembly", () => {
     expect(formatMentionToken(spaced)).toBe('@"my docs/note.md"');
     expect(formatMentionToken(singleLine)).toBe("@src/app.ts:L5");
     expect(formatMentionToken(multiLine)).toBe("@src/app.ts:L5-L12");
+    expect(formatMentionToken({ kind: "file", path: 'a"b c.txt' })).toBe('@"a\\"b c.txt"');
+    expect(formatMentionToken({ kind: "file", path: 'a"b.txt' })).toBe('@a"b.txt');
     expect(formatMentionToken(folder)).toBe("@src/core/");
   });
 
