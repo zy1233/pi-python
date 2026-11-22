@@ -214,9 +214,11 @@ pub(crate) fn handle(msg: AcpClientMessage, app: &mut AppView) -> bool {
                             && cost.amount.is_finite()
                             && cost.amount >= 0.0
                         {
+                            // The Cost segment of the status line shows dollars only ("$0.37"),
+                            // so a cost in another currency shows nothing, and it clears an
+                            // earlier USD figure instead of leaving a stale one.
                             let currency = cost.currency.trim().to_ascii_uppercase();
                             agent.usage_cost_usd = (currency == "USD").then_some(cost.amount);
-                            agent.usage_cost_currency = (!currency.is_empty()).then_some(currency);
                         }
                         advance_reconnect_cursor(agent, &mut meta);
                         !meta.is_replay && !agent.session.loading_replay

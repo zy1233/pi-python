@@ -714,10 +714,9 @@ pub struct AgentView {
     pub(crate) modal_hovered_key: Option<char>,
     /// Cached server-reported context state.
     pub context_state: Option<pi_shell::session::ContextInfo>,
-    /// Cumulative session cost in USD reported via standard ACP `usage_update`.
+    /// Cumulative session cost in USD reported via standard ACP `usage_update`. `None` when the
+    /// last valid cost was in another currency: the status line shows dollars only.
     pub usage_cost_usd: Option<f64>,
-    /// Normalized ISO currency code of the last valid cost reported via standard ACP `usage_update`.
-    pub usage_cost_currency: Option<String>,
     /// The last status the agent sent. The Python agent sends none, so for it
     /// this stays `None` and the row is built from what the client knows (see
     /// `status_line_policy`).

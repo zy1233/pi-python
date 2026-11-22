@@ -64,7 +64,6 @@
         assert_eq!(ctx.usage_pct, 42);
         assert_eq!(agent.session.models.get_context_window(), Some(100_000));
         assert_eq!(agent.usage_cost_usd, Some(1.25));
-        assert_eq!(agent.usage_cost_currency.as_deref(), Some("USD"));
     }
 
     #[test]
@@ -85,23 +84,22 @@
             )
         };
 
-        // Lowercase "usd" populates usage_cost_usd and normalizes currency to "USD".
+        // Lowercase "usd" with spaces still gives the dollar figure that the Cost segment shows.
         assert!(send_usage(
             &mut app,
             acp::UsageUpdate::new(20_000, 100_000).cost(acp::Cost::new(0.75, " usd ")),
         ));
         let agent = app.agents.get(&AgentId(0)).unwrap();
         assert_eq!(agent.usage_cost_usd, Some(0.75));
-        assert_eq!(agent.usage_cost_currency.as_deref(), Some("USD"));
 
-        // Non-USD currency ("EUR") clears usage_cost_usd while recording currency.
+        // Non-USD currency ("EUR"): the status line shows dollars only, so nothing is shown,
+        // and the earlier dollar figure is cleared, not left stale.
         assert!(send_usage(
             &mut app,
             acp::UsageUpdate::new(30_000, 0).cost(acp::Cost::new(1.25, "EUR")),
         ));
         let agent = app.agents.get(&AgentId(0)).unwrap();
         assert_eq!(agent.usage_cost_usd, None);
-        assert_eq!(agent.usage_cost_currency.as_deref(), Some("EUR"));
         // size == 0 preserves the prior total (100_000) while updating used.
         let ctx = agent.context_state.as_ref().expect("context_state populated");
         assert_eq!(ctx.used, 30_000);
