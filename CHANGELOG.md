@@ -7,6 +7,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- **A live `thinking_level` option, saved in the chat and restored on load (`pi-agent-cli`)**: `session/new`, `session/load` and `session/resume` return a `thinking_level` select (category `thought_level`; the levels `max`, `xhigh`, `high`, `medium`, `low`, `minimal`, `off`) unless `agent.toml` says `reasoning = false`. `session/set_config_option` changes the level of the open session with no restart: an unknown level, and any level but `off` when `reasoning = false`, are `invalid_params`. When `reasoning` is not set, `Model.reasoning` follows the level, also after a change of model. The harness saves each change in the chat file as a `thinking_level_change` entry. `session/load` and `session/resume` start the chat at the latest saved level, as they start it with the saved model, and write nothing to the chat file. The saved level is used only when `reasoning` is not `false` and the option offers it. A new chat, and a chat with no saved level, start at `thinking_level` of `agent.toml`. Agents up to 1.0.1 have none of this: the level lives in `agent.toml` only.
+
+### Fixed
+
+- **The output limit of `bash` could miss a command that ended first (`pi-agent-core`)**: a `bash` call that has an output limit (Auto sets one) and prints more than the limit could pass when the command ended before the tool counted its output, which happens on a loaded machine. The tool now counts the output after the command ended too, and fails the call with the same message. When the command had already ended, the message adds that fact and its exit code (or the signal that killed it). In one run on one machine, with 12 busy processes on 4 cores, 145 of 300 calls passed the limit before and 0 of 300 after; the share changes from run to run.
+
 ## [1.0.1] - 2026-11-20
 
 This is a patch release. It adds `thinking_format = "gemini"` and `<thought>` / OpenRouter `reasoning_details` stream extraction for `provider = "openai"`, adds `python -m pi_agent_cli --version`, and fixes the PyPI README metadata and links. All seven Python packages and the TUI go to 1.0.1.

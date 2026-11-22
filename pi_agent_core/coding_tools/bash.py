@@ -497,6 +497,13 @@ def create_bash_tool(
                     with contextlib.suppress(Exception):
                         transport.close()
 
+        # The command can end before the pump counts its output: both tasks are ready on
+        # the same pass of the event loop, and ``exit_task`` can win. The watcher then never
+        # runs, so the output is counted now (the pump has drained the pipe by this point).
+        ended_before_limit = False
+        if kill_reason is None and max_output is not None and output.total_raw_bytes > max_output:
+            kill_reason = "output_limit"
+            ended_before_limit = True
         # pi checks abort before timeout, so abort wins when both fired.
         if signal is not None and getattr(signal, "aborted", False):
             kill_reason = "abort"
@@ -521,12 +528,18 @@ def create_bash_tool(
         if kill_reason == "output_limit":
             text, _ = _format_output(snapshot, output.get_last_line_bytes(), empty_text="")
             assert max_output is not None
-            raise RuntimeError(
-                _append_status(
-                    text,
-                    f"Command stopped: its output passed the limit of {format_size(max_output)}",
+            status = f"Command stopped: its output passed the limit of {format_size(max_output)}"
+            if ended_before_limit:
+                # Nothing was stopped: the command ran to its end, with its side effects, and
+                # its exit code would be lost. Say so, so that the model does not run it again.
+                ended_code = exit_task.result()
+                how = (
+                    f"killed by signal {-ended_code}"
+                    if ended_code < 0
+                    else f"exit code {ended_code}"
                 )
-            )
+                status += f". The command had already ended ({how}) when its output was counted."
+            raise RuntimeError(_append_status(text, status))
 
         text, details = _format_output(snapshot, output.get_last_line_bytes())
         exit_code = exit_task.result()

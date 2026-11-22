@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import os
+import sys
 import time
 
 import pytest
@@ -519,6 +520,7 @@ async def test_bash_output_limit_stops_a_command_that_never_stops_printing(tmp_p
     assert time.monotonic() - start < 10
     message = str(excinfo.value)
     assert message.endswith("Command stopped: its output passed the limit of 48.8KB")
+    assert "already ended" not in message
     assert "0123456789" in message
 
 
@@ -554,6 +556,70 @@ async def test_bash_output_limit_does_not_apply_to_a_call_that_gets_no_limits(tm
     with pytest.raises(RuntimeError, match="Command stopped"):
         await tool.execute("limited", BashParams(command="seq 1 2000"))
     assert seen == ["free", "limited"]
+
+
+def _make_the_limit_watcher_lose(monkeypatch) -> None:
+    """The command ends before its output is counted, as on a loaded machine.
+
+    The only ``asyncio.Event`` that the Bash tool waits on is the one that the output pump sets
+    when the limit is passed. Left to wait for ever, the limit can only be seen by the count that
+    the tool makes after the command ended. This does not depend on how the loop orders the two
+    tasks (the order differs between Python versions).
+    """
+
+    async def never(self) -> bool:
+        await asyncio.get_running_loop().create_future()
+        return True
+
+    monkeypatch.setattr(asyncio.Event, "wait", never)
+
+
+@needs_bash
+async def test_bash_output_limit_applies_to_a_command_that_ends_before_its_output_is_counted(
+    tmp_path, monkeypatch
+):
+    _make_the_limit_watcher_lose(monkeypatch)
+    tool = create_bash_tool(
+        str(tmp_path), limits_for_call=lambda _id: BashLimits(max_output_bytes=1_000)
+    )
+    with pytest.raises(RuntimeError, match="Command stopped: its output passed the limit"):
+        await tool.execute("t1", BashParams(command="seq 1 2000"))
+
+
+@needs_bash
+async def test_bash_output_limit_says_when_the_command_had_already_ended(tmp_path, monkeypatch):
+    """The command ran to its end, so the error keeps the first sentence and adds the fact and
+    the exit code (the model must not run a command again that already did its work)."""
+    _make_the_limit_watcher_lose(monkeypatch)
+    tool = create_bash_tool(
+        str(tmp_path), limits_for_call=lambda _id: BashLimits(max_output_bytes=1_000)
+    )
+    with pytest.raises(RuntimeError) as excinfo:
+        await tool.execute("t1", BashParams(command="seq 1 2000; exit 3"))
+    message = str(excinfo.value)
+    assert "Command stopped: its output passed the limit of 1000B" in message
+    assert message.endswith(
+        "Command stopped: its output passed the limit of 1000B."
+        " The command had already ended (exit code 3) when its output was counted."
+    )
+
+
+@needs_bash
+@pytest.mark.skipif(sys.platform == "win32", reason="a signal is not an exit code on Windows")
+async def test_bash_output_limit_says_when_the_command_had_already_been_killed(
+    tmp_path, monkeypatch
+):
+    """A negative return code is a signal on POSIX: the text names the signal, not a code."""
+    _make_the_limit_watcher_lose(monkeypatch)
+    tool = create_bash_tool(
+        str(tmp_path), limits_for_call=lambda _id: BashLimits(max_output_bytes=1_000)
+    )
+    with pytest.raises(RuntimeError) as excinfo:
+        await tool.execute("t1", BashParams(command="seq 1 2000; kill -9 $$"))
+    assert str(excinfo.value).endswith(
+        "Command stopped: its output passed the limit of 1000B."
+        " The command had already ended (killed by signal 9) when its output was counted."
+    )
 
 
 # --- agent-loop integration (create_coding_tools group incl. bash) ---
