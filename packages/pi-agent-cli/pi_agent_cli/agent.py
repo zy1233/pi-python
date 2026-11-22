@@ -9,7 +9,7 @@ import uuid
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass, field, replace
 from pathlib import Path
-from typing import Any
+from typing import Any, cast
 
 from acp import PROTOCOL_VERSION, RequestError
 from acp.helpers import update_agent_message_text
@@ -138,13 +138,14 @@ from pi_agent_cli.trust_prompt import (
 from pi_agent_cli.trust_store import TrustStore
 from pi_agent_core.coding_tools.path_utils import normalize_host_path
 from pi_agent_core.messages import ImageContent
-from pi_agent_core.types import MAX_TURNS_MESSAGE, StreamFn
+from pi_agent_core.types import MAX_TURNS_MESSAGE, StreamFn, ThinkingLevel
 from pi_agent_harness import (
     AgentHarness,
     AgentHarnessError,
     DeferredJsonlSessionStorage,
     JsonlSessionRepo,
     Session,
+    ThinkingLevelChangeEntry,
 )
 
 logger = logging.getLogger(__name__)
@@ -848,6 +849,24 @@ class PiAcpAgent(Agent):
                 meta["pi/provider"] = provider
         return meta or None
 
+    async def _restored_thinking_level(self, session: Session) -> ThinkingLevel | None:
+        """Thinking level saved in the session, if this agent can start with it.
+
+        The latest ``thinking_level_change`` entry of the branch. It is not used (the level of
+        ``agent.toml`` stays) when the chat has no such entry, when the model cannot think
+        (``reasoning = false``), or when the level is not one that the ``thinking_level`` option
+        offers. Nothing is written: the entry is in the file already.
+        """
+        if self._config.reasoning is False:
+            return None
+        saved: str | None = None
+        for entry in await session.get_branch():
+            if isinstance(entry, ThinkingLevelChangeEntry):
+                saved = entry.thinkingLevel
+        if saved is None or saved not in _THINKING_LEVELS:
+            return None
+        return cast(ThinkingLevel, saved)
+
     async def _restored_choice(self, session: Session) -> ModelChoice | None:
         """Model persisted in the session, if it is still configured.
 
@@ -993,6 +1012,7 @@ class PiAcpAgent(Agent):
             cwd=cwd, config=self._config, trusted=state.trust.trusted
         )
         choice = await self._restored_choice(session) or self._config.default_choice()
+        thinking_level = await self._restored_thinking_level(session)
         limits = BashLimitRegistry()
         harness = await create_session_harness(
             session=session,
@@ -1005,6 +1025,7 @@ class PiAcpAgent(Agent):
             home=self._home,
             trust=state.trust,
             model_choice=choice,
+            thinking_level=thinking_level,
             bash_limits=limits.take,
         )
         harness.set_client_mcp_servers(client_mcp_servers(mcp_servers))

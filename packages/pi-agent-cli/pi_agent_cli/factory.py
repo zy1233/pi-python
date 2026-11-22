@@ -27,7 +27,14 @@ from pi_agent_core.coding_tools.bash import BashLimits, create_bash_tool
 from pi_agent_core.coding_tools.path_utils import normalize_host_path
 from pi_agent_core.event_stream import AssistantMessageEventStream
 from pi_agent_core.messages import AssistantMessage, Usage
-from pi_agent_core.types import ErrorEvent, LlmContext, Model, StreamFn, StreamOptions
+from pi_agent_core.types import (
+    ErrorEvent,
+    LlmContext,
+    Model,
+    StreamFn,
+    StreamOptions,
+    ThinkingLevel,
+)
 from pi_agent_harness import AgentHarness, AgentHarnessResources, LocalExecutionEnv, Session
 from pi_agent_harness.compaction import CompactionSettings
 from pi_agent_harness.skills import load_skills
@@ -251,6 +258,7 @@ async def create_session_harness(
     extensions: list[Any] | None = None,
     trust: ProjectTrust | None = None,
     model_choice: ModelChoice | None = None,
+    thinking_level: ThinkingLevel | None = None,
     bash_limits: Callable[[str], BashLimits | None] | None = None,
 ) -> AgentHarness:
     """Build the harness for one session.
@@ -264,6 +272,12 @@ async def create_session_harness(
 
     *model_choice*: the model to start with, for a session that was last used with another
     one (``/model``). Without one, the ``[model]`` table decides.
+
+    *thinking_level*: the level to start with, for a session that was last used at another one
+    (``thinking_level`` of ``session/set_config_option``). It is set on the harness without a
+    write to the session. ``Model.reasoning`` follows it as it follows a live change (the
+    ``reasoning`` setting wins when there is one). Without one, ``thinking_level`` of the
+    configuration decides.
 
     *bash_limits*: asked by the Bash tool, with the tool call id, just before it starts a
     command; the answer is the limits of that call (Auto's, for a call that it let through).
@@ -290,7 +304,12 @@ async def create_session_harness(
     )
     resolved_resources = resources or AgentHarnessResources()
     choice = model_choice or config.default_choice()
-    model = model_for_choice(choice, reasoning=config.model_reasoning)
+    level: ThinkingLevel = thinking_level or config.thinking_level
+    if thinking_level is None or config.reasoning is not None:
+        reasoning = config.model_reasoning
+    else:
+        reasoning = level != "off"
+    model = model_for_choice(choice, reasoning=reasoning)
 
     async def system_prompt_callback(ctx: dict[str, Any]) -> str:
         active_tools = ctx.get("active_tools") or tools_list
@@ -328,7 +347,7 @@ async def create_session_harness(
         resources=resolved_resources,
         get_api_key=api_key_for_choice(choice),
         system_prompt=system_prompt_callback,
-        thinking_level=config.thinking_level,
+        thinking_level=level,
         max_turns=config.max_turns,
         compaction=compaction_settings(choice, auto_compact=auto_compact),
         auto_discover_extensions=True,
