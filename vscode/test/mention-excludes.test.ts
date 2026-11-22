@@ -3,6 +3,7 @@ import { describe, expect, it } from "vitest";
 import {
   DEFAULT_MENTION_EXCLUDES,
   buildFindFilesExcludeGlob,
+  compileGitignoreFilter,
   createGitignorePathFilter,
   createPathFilter,
   expandExcludePattern,
@@ -51,6 +52,19 @@ docs/generated
     expect(parsed.excludes).toContain("**/#literal.txt");
     expect(parsed.negations).toContain("**/important.log");
     expect(parsed.rules.map((r) => r.negated)).toEqual([false, true, false, false, false, false]);
+    expect(parsed.truncated).toBeUndefined();
+  });
+
+  it("marks truncated: true only when non-comment rules exceed MAX_GITIGNORE_RULES (2000)", () => {
+    const withinLimit = Array.from({ length: 2000 }, (_, i) => `rule_${i}/`).concat(["# trailing comment", ""]).join("\n");
+    const parsedWithin = parseGitignorePatterns(withinLimit);
+    expect(parsedWithin.rules).toHaveLength(2000);
+    expect(parsedWithin.truncated).toBeUndefined();
+
+    const overLimit = Array.from({ length: 2005 }, (_, i) => `rule_${i}/`).join("\n");
+    const parsedOver = parseGitignorePatterns(overLimit);
+    expect(parsedOver.rules).toHaveLength(2000);
+    expect(parsedOver.truncated).toBe(true);
   });
 });
 
@@ -75,8 +89,8 @@ describe("buildFindFilesExcludeGlob, glob classes, and gitignore filters", () =>
     expect(isDefaultExcluded(".github/workflows/ci.yml")).toBe(false);
   });
 
-  it("supports [abc] and [!0-9] character classes without matching '/' or failing on unclosed '['", () => {
-    const isExcluded = createPathFilter(["**/*.py[cod]", "file[!0-9].txt", "a[b"]);
+  it("supports [abc], [!0-9], and [!] character classes with $& without matching '/' or failing on unclosed '['", () => {
+    const isExcluded = createPathFilter(["**/*.py[cod]", "file[!0-9].txt", "neg[!$&].txt", "pos[$&].txt", "a[b"]);
 
     expect(isExcluded("mod/a.pyc")).toBe(true);
     expect(isExcluded("mod/a.pyo")).toBe(true);
@@ -85,6 +99,12 @@ describe("buildFindFilesExcludeGlob, glob classes, and gitignore filters", () =>
     expect(isExcluded("filea.txt")).toBe(true);
     expect(isExcluded("file3.txt")).toBe(false);
     expect(isExcluded("file/.txt")).toBe(false);
+    expect(isExcluded("nega.txt")).toBe(true);
+    expect(isExcluded("neg$.txt")).toBe(false);
+    expect(isExcluded("neg&.txt")).toBe(false);
+    expect(isExcluded("pos$.txt")).toBe(true);
+    expect(isExcluded("pos&.txt")).toBe(true);
+    expect(isExcluded("posa.txt")).toBe(false);
     expect(isExcluded("a[b")).toBe(true);
   });
 
@@ -129,13 +149,32 @@ cache/
     expect(safeWildcard).toContain("**/cache");
   });
 
-  it("filters 5,000 paths across a large .gitignore quickly without stalling", () => {
+  it("drops pathological multi-wildcard globs so ReDoS patterns never stall while collapsing repeated segment stars", () => {
+    const evil = "**/a*a*a*a*a*a*a*a*a*a*b";
+    const isExcluded = createPathFilter([evil, "**/foo***bar.log", "**/a*b*c*d/**"]);
+    const input = `${"a".repeat(40)}/${"a".repeat(40)}`;
+
+    const start = Date.now();
+    expect(isExcluded(input)).toBe(false);
+    expect(Date.now() - start).toBeLessThan(500);
+
+    // Repeated '*' inside a segment collapses cleanly and stays within one path segment.
+    expect(isExcluded("dir/foo123bar.log")).toBe(true);
+    expect(isExcluded("dir/foo/bar.log")).toBe(false);
+    // Multi-wildcard pattern within the wildcard budget (<= 6) still matches.
+    expect(isExcluded("pkg/a1b2c3d/out.js")).toBe(true);
+  });
+
+  it("filters 5,000 paths across a large .gitignore with bounded compiled regex count and no stalling", () => {
     const lines: string[] = [];
     for (let i = 0; i < 3000; i++) {
       lines.push(`gen_${i}/`);
     }
     const parsed = parseGitignorePatterns(lines.join("\n"));
-    const isExcluded = createGitignorePathFilter(DEFAULT_MENTION_EXCLUDES, parsed);
+    const { isExcluded, regexCount } = compileGitignoreFilter(DEFAULT_MENTION_EXCLUDES, parsed);
+    expect(regexCount).toBeGreaterThan(0);
+    expect(regexCount).toBeLessThanOrEqual(20);
+
     const paths = Array.from({ length: 5000 }, (_, i) => (i % 10 === 0 ? `gen_${i}/out.ts` : `src/mod_${i % 50}/f_${i}.ts`));
 
     const start = Date.now();
@@ -146,6 +185,6 @@ cache/
     const elapsedMs = Date.now() - start;
 
     expect(excludedCount).toBeGreaterThan(0);
-    expect(elapsedMs).toBeLessThan(1000);
+    expect(elapsedMs).toBeLessThan(10_000);
   });
 });

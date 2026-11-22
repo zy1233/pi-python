@@ -157,6 +157,41 @@ describe("chat", () => {
     expect(transcript[1]).toMatchObject({ type: "agent", text: "Hello", thought: "Thinking. " });
   });
 
+  it("separates consecutive out-of-turn agent_message_chunk notices with a blank line while leaving replay chunks untouched", async () => {
+    const { controller, messages } = setup();
+    await controller.start();
+    const feed = (text: string, isReplay = false) =>
+      (controller as unknown as { onUpdate(n: unknown): void }).onUpdate({
+        sessionId: "fake-1",
+        update: {
+          sessionUpdate: "agent_message_chunk",
+          content: { type: "text", text },
+          ...(isReplay ? { _meta: { isReplay: true } } : {}),
+        },
+      });
+
+    feed("Auto mode is on for this session.");
+    feed("Settings in agent.toml that are not used: foo");
+
+    expect(ofType(messages, "agentText").map((m) => m.text)).toEqual([
+      "Auto mode is on for this session.",
+      "\n\nSettings in agent.toml that are not used: foo",
+    ]);
+    expect(controller.transcript()).toEqual([
+      {
+        type: "agent",
+        id: "agent-1",
+        text: "Auto mode is on for this session.\n\nSettings in agent.toml that are not used: foo",
+        thought: "",
+      },
+    ]);
+
+    feed(" + replayed tail", true);
+    expect(controller.transcript()[0]).toMatchObject({
+      text: "Auto mode is on for this session.\n\nSettings in agent.toml that are not used: foo + replayed tail",
+    });
+  });
+
   it("does not send an empty prompt or a prompt when the agent is not ready", async () => {
     const { controller } = setup();
     expect(await controller.send("hi")).toBe(false);
@@ -283,11 +318,140 @@ describe("chat", () => {
     expect(ofType(messages, "turnEnd").at(-1)).toEqual({ type: "turnEnd", stopReason: "cancelled" });
   });
 
-  it("notes unsaved files", async () => {
-    const { controller, messages } = setup({ dirty: ["/p/a.ts", "/p/b.ts"] });
+  it("joins streamed chunks seamlessly during busy and cancelling, and separates out-of-turn notices during ready", async () => {
+    const { controller, messages } = setup();
+    await controller.start();
+
+    // 1. Busy turn: "Hel" + "lo wor" + "ld" join without "\n\n".
+    await controller.send("busy-chunks");
+    const busyItem = controller.transcript().filter((i) => i.type === "agent").at(-1);
+    expect(busyItem).toMatchObject({ type: "agent", text: "Hello world" });
+
+    // 2. Cancelling turn: trailing chunks arriving after cancel() join without "\n\n".
+    const cancelTurn = controller.send("cancel-chunks");
+    await waitFor(
+      () => controller.transcript().filter((i) => i.type === "agent").at(-1)?.text === "Hel",
+      "first chunk before cancel",
+    );
+    await controller.cancel();
+    expect(controller.currentStatus).toBe("cancelling");
+    await cancelTurn;
+    expect(controller.currentStatus).toBe("ready");
+    const cancelItem = controller.transcript().filter((i) => i.type === "agent").at(-1);
+    expect(cancelItem).toMatchObject({ type: "agent", text: "Hello world" });
+
+    // 3. Out-of-turn chunks while ready: separated by "\n\n".
+    const beforeOutOfTurn = ofType(messages, "agentText").length;
+    await controller.send("out-of-turn-notices");
+    expect(controller.currentStatus).toBe("ready");
+    await waitFor(
+      () => ofType(messages, "agentText").length >= beforeOutOfTurn + 2,
+      "two out-of-turn notices",
+    );
+    const noticeItem = controller.transcript().filter((i) => i.type === "agent").at(-1);
+    expect(noticeItem).toMatchObject({ type: "agent", text: "Notice one.\n\nNotice two." });
+  });
+
+  it("notes unsaved files with a Save all action, and delegates saveAll and openFile to the host", async () => {
+    const { controller, messages, host } = setup({ dirty: ["/p/a.ts", "/p/b.ts"] });
     await controller.start();
     await controller.send("hello");
-    expect(ofType(messages, "notice").some((n) => n.text.startsWith("2 files have unsaved changes"))).toBe(true);
+    const dirtyNotice = ofType(messages, "notice").find((n) => n.text.startsWith("2 files have unsaved changes"));
+    expect(dirtyNotice?.actions).toEqual([{ id: "saveAll", label: "Save all" }]);
+    await controller.saveAll();
+    expect(host.savedAllCount).toBe(1);
+    await controller.openFile("./src\\app.ts", 15);
+    await controller.openFile("../outside.ts");
+    expect(host.openedFiles).toEqual([{ folder: host.sessionFolder()!, relPath: "src/app.ts", line: 15 }]);
+  });
+
+  it("forwards configured mcpServers on session/new and image attachments on session/prompt", async () => {
+    const log = path.join(tempDir(dirs, "log-"), "agent.log");
+    restoreEnv = withEnv({ FAKE_LOG: log });
+    const mcpServers = [{ name: "fs", command: "npx", args: ["-y", "mcp-fs"], env: [] }];
+    const { controller } = setup({ settings: { mcpServers } });
+    await controller.start();
+    expect(
+      await controller.send("describe this", [], [{ mimeType: "image/png", data: "iVBORw0KGgo=", name: "shot.png" }]),
+    ).toBe(true);
+    expect(controller.transcript()[0]).toMatchObject({
+      type: "user",
+      text: "[Image: shot.png]\n\ndescribe this",
+    });
+    expect(await controller.send("", [], [{ mimeType: "image/jpeg", data: "AAAA" }])).toBe(true);
+    expect(controller.transcript()[2]).toMatchObject({
+      type: "user",
+      text: "[Image: image/jpeg]",
+    });
+    const lines = readLog(log);
+    expect(lines).toContain(`session/mcp ${JSON.stringify(mcpServers)}`);
+    expect(lines).toContain(`session/prompt_images ${JSON.stringify([{ mimeType: "image/png", data: "iVBORw0KGgo=" }])}`);
+    expect(controller.stateMessage().supportsImages).toBe(true);
+    expect(controller.currentCwd).toBe(controller.stateMessage().cwd);
+  });
+
+  it("refuses image prompts with a warning notice when the agent does not advertise promptCapabilities.image", async () => {
+    const log = path.join(tempDir(dirs, "log-"), "agent.log");
+    restoreEnv = withEnv({ FAKE_LOG: log, FAKE_NO_IMAGES: "1" });
+    const { controller, messages } = setup();
+    await controller.start();
+    expect(controller.stateMessage().supportsImages).toBe(false);
+
+    const sent = await controller.send("describe", [], [{ mimeType: "image/png", data: "iVBORw0KGgo=", name: "shot.png" }]);
+    expect(sent).toBe(false);
+    expect(ofType(messages, "notice").some((n) => n.level === "warning" && n.text === "This agent does not support image attachments.")).toBe(true);
+    expect(readLog(log).some((l) => l.startsWith("session/prompt"))).toBe(false);
+
+    // Plain text prompts still succeed.
+    expect(await controller.send("hello")).toBe(true);
+    expect(agentText(messages)).toBe("Hello");
+  });
+
+  it("filters unsupported HTTP and SSE MCP servers, notifies once per run, and resets on restart", async () => {
+    const log = path.join(tempDir(dirs, "log-"), "agent.log");
+    restoreEnv = withEnv({ FAKE_LOG: log, FAKE_NO_MCP_HTTP: "1", FAKE_NO_MCP_SSE: "1" });
+    const stdioServer = { name: "fs", command: "npx", args: ["-y", "mcp-fs"], env: [] };
+    const httpServer = { type: "http" as const, name: "remote-http", url: "https://example.com/mcp", headers: [] };
+    const sseServer = { type: "sse" as const, name: "remote-sse", url: "https://example.com/sse", headers: [] };
+    const { controller, messages, host } = setup({ settings: { mcpServers: [stdioServer, httpServer, sseServer] } });
+    await controller.start();
+
+    const mcpNotice = (msgs: HostMessage[]) =>
+      ofType(msgs, "notice").filter((n) => n.level === "info" && n.text.includes("HTTP and SSE"));
+
+    const loggedMcp = () =>
+      readLog(log)
+        .filter((l) => l.startsWith("session/mcp "))
+        .map((l) => JSON.parse(l.slice("session/mcp ".length)));
+
+    expect(mcpNotice(messages)).toHaveLength(1);
+    expect(host.log.lines.some((l) => l.startsWith("warn ") && l.includes("HTTP and SSE"))).toBe(true);
+    expect(loggedMcp()).toEqual([[stdioServer]]);
+
+    // Opening a new chat on the same running process does not repeat the notice.
+    await controller.newChat();
+    expect(mcpNotice(messages)).toHaveLength(1);
+    expect(loggedMcp()).toHaveLength(2);
+
+    // Restarting resets the notice latch and re-evaluates capabilities (now allow SSE, block HTTP only).
+    restoreEnv();
+    restoreEnv = withEnv({ FAKE_LOG: log, FAKE_NO_MCP_HTTP: "1" });
+    await controller.restart();
+    const httpOnlyNotices = ofType(messages, "notice").filter(
+      (n) => n.level === "info" && n.text.includes("Skipped configured HTTP MCP server(s)"),
+    );
+    expect(httpOnlyNotices).toHaveLength(1);
+    expect(loggedMcp().at(-1)).toEqual([stdioServer, sseServer]);
+
+    // Restarting with SSE disabled only allows stdio + HTTP.
+    restoreEnv();
+    restoreEnv = withEnv({ FAKE_LOG: log, FAKE_NO_MCP_SSE: "1" });
+    await controller.restart();
+    const sseOnlyNotices = ofType(messages, "notice").filter(
+      (n) => n.level === "info" && n.text.includes("Skipped configured SSE MCP server(s)"),
+    );
+    expect(sseOnlyNotices).toHaveLength(1);
+    expect(loggedMcp().at(-1)).toEqual([stdioServer, httpServer]);
   });
 
   it("shows a refusal as a notice", async () => {

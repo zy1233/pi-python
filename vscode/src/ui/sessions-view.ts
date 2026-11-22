@@ -23,7 +23,11 @@ export class SessionsView implements vscode.TreeDataProvider<SessionRow>, vscode
     this.view = vscode.window.createTreeView(SESSIONS_VIEW_ID, { treeDataProvider: this });
     this.subscription = controller.onSessionsChanged(() => this.update());
     // The text "5m ago" goes stale while nothing changes.
-    this.timer = setInterval(() => this.changed.fire(undefined), REPAINT_MS);
+    this.timer = setInterval(() => {
+      if (this.view.visible && this.getChildren().length > 0) {
+        this.changed.fire(undefined);
+      }
+    }, REPAINT_MS);
     this.update();
   }
 

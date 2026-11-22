@@ -615,11 +615,16 @@ async def _finalize_executed_tool_call(
             if isinstance(after, AfterToolCallResult):
                 # Three-way merge mirroring pi's `?? ` semantics: each field falls
                 # back to the executed result independently.
-                result = AgentToolResult(
+                merged = AgentToolResult(
                     content=after.content if after.content is not None else result.content,
                     details=after.details if after.details is not None else result.details,
                     terminate=after.terminate if after.terminate is not None else result.terminate,
                 )
+                # Event-only data describes the executed result: keep it while ``details``
+                # stay the executed ones; a replaced ``details`` drops it.
+                if after.details is None:
+                    merged.with_event_details(getattr(result, "event_details", None))
+                result = merged
                 if after.is_error is not None:
                     is_error = after.is_error
         except Exception as e:

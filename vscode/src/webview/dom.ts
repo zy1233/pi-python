@@ -140,6 +140,210 @@ function cellNode(tag: "th" | "td", inline: Inline[], align: Align | undefined):
   return cell;
 }
 
+const CODE_KEYWORDS = new Set([
+  "as",
+  "async",
+  "await",
+  "break",
+  "case",
+  "catch",
+  "class",
+  "const",
+  "continue",
+  "crate",
+  "def",
+  "default",
+  "delete",
+  "do",
+  "elif",
+  "else",
+  "enum",
+  "except",
+  "export",
+  "extends",
+  "false",
+  "False",
+  "finally",
+  "fn",
+  "for",
+  "from",
+  "function",
+  "if",
+  "impl",
+  "import",
+  "in",
+  "instanceof",
+  "interface",
+  "lambda",
+  "let",
+  "match",
+  "mod",
+  "mut",
+  "new",
+  "None",
+  "null",
+  "of",
+  "pass",
+  "pub",
+  "raise",
+  "readonly",
+  "return",
+  "static",
+  "struct",
+  "super",
+  "switch",
+  "this",
+  "throw",
+  "true",
+  "True",
+  "try",
+  "type",
+  "typeof",
+  "undefined",
+  "use",
+  "var",
+  "void",
+  "where",
+  "while",
+  "with",
+  "yield",
+]);
+
+const HASH_COMMENT_LANGS = new Set([
+  "py",
+  "python",
+  "sh",
+  "bash",
+  "zsh",
+  "shell",
+  "yaml",
+  "yml",
+  "toml",
+  "rb",
+  "ruby",
+  "makefile",
+  "dockerfile",
+  "conf",
+  "ini",
+]);
+
+function isIdentStart(ch: string): boolean {
+  return (ch >= "a" && ch <= "z") || (ch >= "A" && ch <= "Z") || ch === "_" || ch === "$";
+}
+
+function isIdentPart(ch: string): boolean {
+  return isIdentStart(ch) || (ch >= "0" && ch <= "9");
+}
+
+function isDigit(ch: string): boolean {
+  return ch >= "0" && ch <= "9";
+}
+
+function isHexDigit(ch: string): boolean {
+  return isDigit(ch) || (ch >= "a" && ch <= "f") || (ch >= "A" && ch <= "F");
+}
+
+/**
+ * Splits a single line of code into text nodes and `<span class="tok-*">` elements using
+ * `textContent` only (never `innerHTML`). The concatenated `textContent` of the returned nodes
+ * always equals `line` byte-for-byte.
+ */
+export function tokenizeCodeLine(line: string, lang?: string): Node[] {
+  if (line === "") return [document.createTextNode("")];
+  const lowerLang = (lang ?? "").trim().toLowerCase();
+  if (lowerLang === "text" || lowerLang === "plain" || lowerLang === "plaintext" || lowerLang === "txt") {
+    return [document.createTextNode(line)];
+  }
+  const allowHashComment = lowerLang === "" || HASH_COMMENT_LANGS.has(lowerLang);
+  const nodes: Node[] = [];
+  let plain = "";
+  const flushPlain = () => {
+    if (plain !== "") {
+      nodes.push(document.createTextNode(plain));
+      plain = "";
+    }
+  };
+
+  let i = 0;
+  const n = line.length;
+  while (i < n) {
+    const ch = line[i]!;
+    const prev = i > 0 ? line[i - 1]! : "";
+
+    // Line comments: // (when not part of ://) or # (in shell/python/config or at start/after space)
+    if (ch === "/" && line[i + 1] === "/" && prev !== ":") {
+      flushPlain();
+      nodes.push(el("span", { class: "tok-com", text: line.slice(i) }));
+      return nodes;
+    }
+    if (ch === "#" && allowHashComment && (i === 0 || prev === " " || prev === "\t")) {
+      flushPlain();
+      nodes.push(el("span", { class: "tok-com", text: line.slice(i) }));
+      return nodes;
+    }
+
+    // Quoted strings: "...", '...', `...`
+    if ((ch === '"' || ch === "'" || ch === "`") && !(ch === "'" && isIdentPart(prev))) {
+      let j = i + 1;
+      while (j < n) {
+        const c = line[j]!;
+        if (c === "\\" && j + 1 < n) {
+          j += 2;
+          continue;
+        }
+        j++;
+        if (c === ch) break;
+      }
+      flushPlain();
+      nodes.push(el("span", { class: "tok-str", text: line.slice(i, j) }));
+      i = j;
+      continue;
+    }
+
+    // Identifiers and keywords
+    if (isIdentStart(ch) && !isIdentPart(prev)) {
+      let j = i + 1;
+      while (j < n && isIdentPart(line[j]!)) j++;
+      const word = line.slice(i, j);
+      if (CODE_KEYWORDS.has(word)) {
+        flushPlain();
+        nodes.push(el("span", { class: "tok-kw", text: word }));
+      } else {
+        plain += word;
+      }
+      i = j;
+      continue;
+    }
+
+    // Numeric literals
+    if (isDigit(ch) && !isIdentPart(prev)) {
+      let j = i + 1;
+      if (ch === "0" && (line[j] === "x" || line[j] === "X")) {
+        j++;
+        while (j < n && (isHexDigit(line[j]!) || line[j] === "_")) j++;
+      } else {
+        while (j < n && (isDigit(line[j]!) || line[j] === "_")) j++;
+        if (line[j] === "." && j + 1 < n && isDigit(line[j + 1]!)) {
+          j++;
+          while (j < n && (isDigit(line[j]!) || line[j] === "_")) j++;
+        }
+      }
+      if (j >= n || !isIdentStart(line[j]!)) {
+        flushPlain();
+        nodes.push(el("span", { class: "tok-num", text: line.slice(i, j) }));
+        i = j;
+        continue;
+      }
+    }
+
+    plain += ch;
+    i++;
+  }
+
+  flushPlain();
+  return nodes;
+}
+
 function blockNodes(block: Block): Node[] {
   switch (block.t) {
     case "p":
@@ -161,7 +365,7 @@ function blockNodes(block: Block): Node[] {
       const lines = block.text.split("\n");
       lines.forEach((line, index) => {
         if (index > 0) codeEl.append(document.createTextNode("\n"));
-        const lineEl = el("span", { class: "code-line" }, document.createTextNode(line));
+        const lineEl = el("span", { class: "code-line" }, ...tokenizeCodeLine(line, block.lang));
         if (line.trim() !== "") {
           lineEl.append(copyButton(cleanCodeLine(line, block.lang), "Copy line", "line-copy", ""));
         }

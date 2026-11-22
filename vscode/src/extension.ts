@@ -1,9 +1,11 @@
-import { existsSync } from "node:fs";
+import { existsSync, statSync } from "node:fs";
+import path from "node:path";
 
 import * as vscode from "vscode";
 
 import { ChatController } from "./core/chat-controller.js";
 import { agentConfigPath } from "./core/first-run.js";
+import { normalizeRelativePath } from "./core/mentions.js";
 import type { SessionRow } from "./core/session-list.js";
 import { CHAT_VIEW_ID, ChatViewProvider } from "./ui/chat-view.js";
 import { DIFF_SCHEME, DiffDocuments } from "./ui/diff-documents.js";
@@ -99,8 +101,51 @@ export function activate(context: vscode.ExtensionContext): void {
     vscode.commands.registerCommand("zycode.deleteSession", async (row: SessionRow | undefined) => {
       if (row && typeof row.id === "string") await chat.deleteSession(row.id);
     }),
+    vscode.commands.registerCommand("zycode.addSelectionToChat", async () => {
+      const editor = vscode.window.activeTextEditor;
+      const folder = chat.currentCwd ?? host.sessionFolder();
+      if (!editor || editor.document.uri.scheme !== "file" || !folder) return;
+      const rel = path.relative(folder, editor.document.uri.fsPath);
+      const isSelection = !editor.selection.isEmpty;
+      const normalized = normalizeRelativePath(rel, isSelection ? "selection" : "file");
+      if (!normalized) {
+        host.notify("info", "zycode: this file is outside the current chat folder.");
+        return;
+      }
+      if (isSelection) {
+        const startLine = editor.selection.start.line + 1;
+        const endLine =
+          editor.selection.end.character === 0 && editor.selection.end.line > editor.selection.start.line
+            ? editor.selection.end.line
+            : editor.selection.end.line + 1;
+        await view.insertMention({ kind: "selection", path: normalized, range: { startLine, endLine } });
+      } else {
+        await view.insertMention({ kind: "file", path: normalized });
+      }
+    }),
+    vscode.commands.registerCommand("zycode.addFileToChat", async (uri?: vscode.Uri) => {
+      const targetUri = uri ?? vscode.window.activeTextEditor?.document.uri;
+      const folder = chat.currentCwd ?? host.sessionFolder();
+      if (!targetUri || targetUri.scheme !== "file" || !folder) return;
+      let isDir = false;
+      try {
+        isDir = statSync(targetUri.fsPath).isDirectory();
+      } catch {
+        isDir = false;
+      }
+      const kind = isDir ? "folder" : "file";
+      const normalized = normalizeRelativePath(path.relative(folder, targetUri.fsPath), kind);
+      if (!normalized) {
+        host.notify("info", "zycode: this file is outside the current chat folder.");
+        return;
+      }
+      await view.insertMention({ kind, path: normalized });
+    }),
     vscode.workspace.onDidGrantWorkspaceTrust(() => {
       if (chat.currentStatus === "untrusted") void chat.start();
+    }),
+    vscode.workspace.onDidChangeWorkspaceFolders(() => {
+      if (chat.currentStatus === "no-folder") void chat.start();
     }),
     vscode.workspace.onDidChangeConfiguration((event) => {
       if (event.affectsConfiguration("zycode.permissionMode")) {

@@ -6,6 +6,7 @@ import {
   formatMentionToken,
   formatPromptWithMentions,
   fuzzyScore,
+  isLikelySecretPath,
   mentionDetail,
   mentionKey,
   mentionLabel,
@@ -153,13 +154,91 @@ describe("mention formatting and prompt assembly", () => {
     expect(formatMentionToken(folder)).toBe("@src/core/");
   });
 
-  it("avoids duplicating inline tokens and prepends only missing attachments", () => {
+  it("avoids duplicating inline tokens, prepends only missing attachments, and leaves /slash commands unprefixed", () => {
     const a = { kind: "file" as const, path: "src/a.ts" };
     const b = { kind: "file" as const, path: "src/b.ts" };
 
     expect(formatPromptWithMentions("Inspect @src/a.ts", [a, a])).toBe("Inspect @src/a.ts");
     expect(formatPromptWithMentions("Inspect @src/a.ts", [a, b])).toBe("Referenced context: @src/b.ts\n\nInspect @src/a.ts");
     expect(formatPromptWithMentions("Explain", [a, b])).toBe("Referenced context: @src/a.ts @src/b.ts\n\nExplain");
+    expect(formatPromptWithMentions("/mcp", [a])).toBe("/mcp");
+    expect(formatPromptWithMentions("  /goal inspect @src/a.ts", [a, b])).toBe("  /goal inspect @src/a.ts");
+  });
+
+  it("identifies secret-looking paths while excluding safe templates, public keys, CA certs, and type defs", () => {
+    for (const secretPath of [
+      ".env",
+      ".env.local",
+      ".envrc",
+      "config/prod.env",
+      "certs/server.pem",
+      "certs/private.key",
+      "bundle.p12",
+      "cert.pfx",
+      "store.jks",
+      "app.keystore",
+      "putty.ppk",
+      "prod.tfvars",
+      "prod.tfstate",
+      "app.secrets",
+      "ssh.keys",
+      "keys/id_rsa",
+      "keys/id_ed25519",
+      "keys/id_ecdsa.key",
+      "keys/id_dsa",
+      ".npmrc",
+      ".pypirc",
+      ".netrc",
+      "credentials",
+      "config/credentials.json",
+      ".git-credentials",
+      "service-account.json",
+      "serviceaccountkey.json",
+      "client_secret.json",
+      ".htpasswd",
+      "secrets.json",
+      "secrets.yaml",
+      "secrets.yml",
+      "secrets.toml",
+      ".secrets",
+      "secret.txt",
+      "kubeconfig",
+      ".pgpass",
+      ".dockercfg",
+      "terraform.tfvars",
+      "terraform.tfstate",
+      ".env.bak",
+      "keys/.env.bak",
+      "id_rsa.bak",
+      "keys/id_rsa.bak",
+      ".aws/credentials",
+      "home/.aws/credentials",
+      ".docker/config.json",
+      "users/me/.docker/config.json",
+    ]) {
+      expect(isLikelySecretPath(secretPath), secretPath).toBe(true);
+    }
+
+    for (const safePath of [
+      ".env.example",
+      ".env.sample",
+      ".env.template",
+      ".env.dist",
+      ".env.d.ts",
+      "local.env.example",
+      "keys/id_rsa.pub",
+      "keys/id_ed25519.pub",
+      "ca.pem",
+      "certs/ca.pem",
+      "certs/cacert.pem",
+      "certs/root-ca.pem",
+      "config.json",
+      "docs/secrets.md",
+      "src/app.ts",
+      "package.json",
+    ]) {
+      expect(isLikelySecretPath(safePath), safePath).toBe(false);
+    }
   });
 
   it("removes mention tokens cleanly without eating unrelated tokens or newlines", () => {

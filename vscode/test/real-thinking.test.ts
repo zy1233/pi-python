@@ -112,10 +112,11 @@ async function say(controller: ChatController, text: string): Promise<void> {
 }
 
 describe.skipIf(!enabled)("the thinking level with the real agent", () => {
-  it("shows in the model request: a level, a change, the same chat reopened, a restart", async () => {
+  it("shows in the model request: a level, a live change without restart, and default on restart", async () => {
     const { log, file, make } = await rig((port) => MODEL(port, 'thinking_level = "low"\n\n'));
     const first = make();
     await first.start();
+    const initialSessionId = first.currentSessionId;
     expect(first.stateMessage().thinking).toMatchObject({ current: "low" });
     await say(first, "first question");
     const one = requests(log);
@@ -124,9 +125,11 @@ describe.skipIf(!enabled)("the thinking level with the real agent", () => {
 
     await first.applyThinkingLevel("high");
     expect(first.currentStatus).toBe("ready");
+    expect(first.currentSessionId).toBe(initialSessionId);
     expect(first.stateMessage().thinking).toMatchObject({ current: "high" });
-    expect(readFileSync(file, "utf8")).toMatch(/^thinking_level = "high"\n\n\[model\]/);
-    // The chat is the same: the agent replayed it, and the model gets the earlier question again.
+    // Live switching via session/set_config_option leaves agent.toml untouched.
+    expect(readFileSync(file, "utf8")).toMatch(/^thinking_level = "low"\n\n\[model\]/);
+    // The chat stays open in place without restart, so the model gets the earlier question again.
     expect(first.transcript().some((item) => item.type === "user" && item.text === "first question")).toBe(true);
     await say(first, "second question");
     const two = requests(log);
@@ -137,9 +140,9 @@ describe.skipIf(!enabled)("the thinking level with the real agent", () => {
     await first.dispose();
     const second = make();
     await second.start();
-    expect(second.stateMessage().thinking).toMatchObject({ current: "high" });
+    expect(second.stateMessage().thinking).toMatchObject({ current: "low" });
     await say(second, "third question");
-    expect(thinkingParams(requests(log)[2]!)).toMatchObject({ reasoning_effort: "high" });
+    expect(thinkingParams(requests(log)[2]!)).toMatchObject({ reasoning_effort: "low" });
   });
 
   it("asks the provider for no thinking at off", async () => {

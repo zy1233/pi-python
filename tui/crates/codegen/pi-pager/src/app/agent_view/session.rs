@@ -149,6 +149,8 @@ impl AgentView {
             modal_buttons: Vec::new(),
             modal_hovered_key: None,
             context_state: None,
+            usage_cost_usd: None,
+            usage_cost_currency: None,
             status_context: None,
             attached_at: Instant::now(),
             last_status_line_size: None,

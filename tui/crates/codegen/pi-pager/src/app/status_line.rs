@@ -62,6 +62,10 @@ pub(crate) struct ClientOwnedFields {
     pub(crate) session_id: Option<String>,
     pub(crate) model_id: Option<String>,
     pub(crate) model_name: Option<String>,
+    pub(crate) context_window_size: Option<u64>,
+    pub(crate) context_tokens: Option<u64>,
+    pub(crate) used_percentage: Option<u8>,
+    pub(crate) total_cost_usd_bits: Option<u64>,
     /// Whether a turn is running. Only the staleness check reads it: the row is
     /// built again when a turn starts and when it ends, so a timer item, or a
     /// script that draws one, does not keep the last value of a turn that is
@@ -81,6 +85,10 @@ impl ClientOwnedFields {
             session_id,
             model_id,
             model_name,
+            context_window_size,
+            context_tokens,
+            used_percentage,
+            total_cost_usd_bits,
             // Watched, not applied: see the field.
             turn_running: _,
         } = self;
@@ -94,6 +102,22 @@ impl ClientOwnedFields {
         ctx.session_id = ctx.session_id.take().or(session_id);
         ctx.model.id = ctx.model.id.take().or(model_id);
         ctx.model.display_name = ctx.model.display_name.take().or(model_name);
+        if ctx.context_window.context_window_size.is_none() {
+            ctx.context_window.context_window_size = context_window_size;
+        }
+        if ctx.context_window.context_tokens.is_none() {
+            ctx.context_window.context_tokens = context_tokens;
+        }
+        if ctx.context_window.used_percentage.is_none() {
+            ctx.context_window.used_percentage = used_percentage;
+        }
+        if ctx.context_window.remaining_percentage.is_none() {
+            ctx.context_window.remaining_percentage =
+                used_percentage.map(|pct| 100u8.saturating_sub(pct.min(100)));
+        }
+        if ctx.cost.total_cost_usd.is_none() {
+            ctx.cost.total_cost_usd = total_cost_usd_bits.map(f64::from_bits);
+        }
         if ctx.version.is_empty() {
             ctx.version = crate::client_identity::PAGER_CLIENT_VERSION.to_owned();
         }

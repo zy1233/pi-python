@@ -202,6 +202,24 @@ pub(crate) fn handle(msg: AcpClientMessage, app: &mut AppView) -> bool {
                         agent.mark_reload_todo_update();
                         advance_reconnect_cursor(agent, &mut meta);
                         !meta.is_replay && !agent.session.loading_replay
+                    } else if let acp::SessionUpdate::UsageUpdate(usage) = notif.request.update {
+                        let used = usage.used;
+                        let size = usage.size;
+                        if size > 0 {
+                            agent.session.models.override_context_window(size);
+                        }
+                        agent.apply_context_used(used, size);
+                        agent.session.note_context_used(used);
+                        if let Some(cost) = usage.cost
+                            && cost.amount.is_finite()
+                            && cost.amount >= 0.0
+                        {
+                            let currency = cost.currency.trim().to_ascii_uppercase();
+                            agent.usage_cost_usd = (currency == "USD").then_some(cost.amount);
+                            agent.usage_cost_currency = (!currency.is_empty()).then_some(currency);
+                        }
+                        advance_reconnect_cursor(agent, &mut meta);
+                        !meta.is_replay && !agent.session.loading_replay
                     } else if !meta.is_replay
                         && let Some(notif_pid) = meta.prompt_id.as_ref()
                         && agent.session.current_prompt_id.as_ref() != Some(notif_pid)

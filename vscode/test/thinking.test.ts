@@ -455,4 +455,27 @@ describe("the thinking picker in the controller", () => {
     await controller.applyThinkingLevel("high");
     expect(notices(messages).at(-1)).toMatch(/Always approve is off again/);
   });
+
+  it("switches thinking_level live via session/set_config_option without editing agent.toml or restarting", async () => {
+    const initialToml = `thinking_level = "low"\n${MODEL}`;
+    const { controller, host, toml, log, messages } = rig({
+      toml: initialToml,
+      env: { FAKE_AGENT_VERSION: MAX_LEVEL_SINCE, FAKE_LIVE_THINKING: "1" },
+    });
+    await controller.start();
+    expect(thinkingOf(controller)).toMatchObject({ current: "low" });
+    expect(starts(log)).toEqual(["start thinking_level=low"]);
+
+    await controller.applyThinkingLevel("high");
+
+    expect(host.confirmations).toHaveLength(0);
+    expect(readFileSync(toml, "utf8")).toBe(initialToml);
+    expect(starts(log)).toHaveLength(1);
+    expect(readLog(log)).toContain("session/set_config_option thinking_level=high");
+    expect(thinkingOf(controller)?.current).toBe("high");
+    expect(notices(messages).at(-1)).toBe("Thinking level: high.");
+
+    await say(controller, "level");
+    expect(agentText(controller)).toContain("level:high");
+  });
 });

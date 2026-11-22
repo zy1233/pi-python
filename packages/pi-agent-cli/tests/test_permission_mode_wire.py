@@ -126,7 +126,7 @@ async def test_the_model_option_is_still_there_beside_the_mode_option(tmp_path: 
 
     created = await agent.new_session(cwd=_project(tmp_path))
 
-    assert [option.id for option in created.config_options] == ["model", "mode"]
+    assert [option.id for option in created.config_options] == ["model", "mode", "thinking_level"]
 
 
 async def test_a_session_starts_in_the_mode_of_agent_toml(tmp_path: Path):

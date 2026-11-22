@@ -541,6 +541,10 @@ fn client_facts() -> ClientOwnedFields {
         session_id: Some("sess-1".into()),
         model_id: Some("model-a".into()),
         model_name: Some("Model A".into()),
+        context_window_size: None,
+        context_tokens: None,
+        used_percentage: None,
+        total_cost_usd_bits: None,
         turn_running: true,
     }
 }

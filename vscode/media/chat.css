@@ -311,8 +311,7 @@ pre.code code {
 .code-line {
   display: flex;
   align-items: center;
-  justify-content: space-between;
-  gap: 12px;
+  justify-content: flex-start;
   padding: 1px 10px;
   min-height: 1.5em;
   white-space: pre;
@@ -320,6 +319,19 @@ pre.code code {
 }
 .code-line:hover {
   background: color-mix(in srgb, var(--vscode-list-hoverBackground, rgba(128, 128, 128, 0.14)) 75%, transparent);
+}
+.tok-com {
+  color: var(--vscode-debugTokenExpression-name, var(--vscode-descriptionForeground));
+  font-style: italic;
+}
+.tok-str {
+  color: var(--vscode-debugTokenExpression-string, var(--vscode-terminal-ansiGreen, #ce9178));
+}
+.tok-kw {
+  color: var(--vscode-debugTokenExpression-type, var(--vscode-terminal-ansiMagenta, #569cd6));
+}
+.tok-num {
+  color: var(--vscode-debugTokenExpression-number, var(--vscode-terminal-ansiCyan, #b5cea8));
 }
 
 .copy-btn {
@@ -668,6 +680,10 @@ pre.code code {
   color: var(--vscode-textLink-foreground, var(--vscode-focusBorder));
   border-color: color-mix(in srgb, var(--vscode-textLink-foreground, var(--vscode-focusBorder)) 55%, transparent);
 }
+.popover-badge.secret {
+  color: var(--vscode-editorWarning-foreground, var(--vscode-notificationsWarningIcon-foreground, #cca700));
+  border-color: color-mix(in srgb, currentColor 40%, transparent);
+}
 .popover-detail {
   font-size: 0.82em;
   color: var(--vscode-descriptionForeground);
@@ -713,6 +729,18 @@ mark.match {
   overflow: hidden;
   text-overflow: ellipsis;
   max-width: 28ch;
+}
+.chip-label.clickable {
+  cursor: pointer;
+}
+.chip-label.clickable:hover {
+  text-decoration: underline;
+  color: var(--vscode-textLink-foreground, var(--vscode-foreground));
+}
+.chip-label.clickable:focus-visible {
+  outline: 1px solid var(--vscode-focusBorder);
+  outline-offset: 1px;
+  border-radius: 2px;
 }
 .chip-remove {
   display: inline-flex;

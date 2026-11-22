@@ -2,7 +2,7 @@
 
 > Date: 2026-11-19.
 > Scope: `vscode/` (extension `1.6.0`, post-`51b054c`), with optional future coordination in `packages/pi-agent-cli/` (bundled agent `1.0.0`).
-> Status: **P0 implemented (unit and headless-Chrome tested; not yet verified in a live VS Code window) (2026-11-19); P1–P3 recorded as roadmap.**
+> Status: **P0–P3 implemented (unit, pytest, and headless-Chrome tested; not yet verified in a live VS Code window) (2026-11-21).**
 > Related: `docs/specs/2026-11-04-vscode-extension-design.md`, `docs/specs/2026-11-05-acp-extension-registry.md`, `docs/specs/2026-11-13-agent-context-usage.md`, `docs/specs/2026-11-16-thinking-max-and-turn-limit.md`.
 
 ---
@@ -119,7 +119,24 @@ Every optimization below preserves the core design invariants:
   - **P0-2:** Enabled `retainContextWhenHidden: true` in `src/extension.ts`, persisted/restored `{ draft, attachments, followTail, scrollTop, openDetails }` via `vscode.getState`/`setState` in `src/webview/main.ts` (initial `reset` restores, subsequent `reset` clears), and added state-mock support to `scripts/webview-harness.mjs`.
   - **P0-3:** Removed duplicate `view.text` storage when `view.terminal` is present and added `ToolCallStore.applyWithDelta` (`src/core/tool-calls.ts`), `toolCallOutput` incremental message (`src/core/protocol.ts`), $O(1)$ `toolItemIndices` lookup and deduplicated `canDiff` finish emissions (`src/core/chat-controller.ts`), and in-place throttled DOM updates for tool outputs and thinking blocks (`src/webview/main.ts`).
   - **P0-4:** Added Model `<select>` in header and cleared stale `usage` on model switch with rollback on failure (`src/webview/main.ts`, `src/core/chat-controller.ts`), added boundary-checked `containsMentionToken` chip sync (`src/core/mentions.ts`, `src/webview/main.ts`), added `src/core/mention-excludes.ts` + `.gitignore` / brace-expansion / excluded-event filtering in `src/ui/workspace-mentions.ts` (300 s cache TTL), made `/mode` `argHint` dynamic, and enabled safe non-`ready` client `/` commands (`src/core/composer.ts`, `src/webview/main.ts`).
-- **Verification (`vscode/`):**
-  - `npm run check` (`tsc --noEmit -p tsconfig.json`, `tsc --noEmit -p src/webview/tsconfig.json`, `eslint .`, `vitest run` — rerun cleanly with `--pool=forks --poolOptions.forks.maxForks=2` on Windows when heavy Chrome concurrency triggers a Vitest worker RPC timeout): passed (**`25` test files / `419` tests passed**; **`3` opt-in real-agent files / `18` tests skipped**, including `1` `locate` platform skip and `1` `thinking` POSIX-symlink skip on Windows; Linux CI also runs those 2 platform tests).
+- **P1 Implementation (2026-11-21):**
+  - Added image paste/drop and attachment chips (`ImageAttachment`, `ALLOWED_IMAGE_MIMES`, `MAX_IMAGES = 4`, `MAX_IMAGE_DATA_CHARS = 7_000_000`) forwarded via `AcpConnection.prompt()`.
+  - Added application-scoped `zycode.mcpServers` setting and `parseMcpServers()` validator forwarded in `session/new` and `session/load`.
+  - Added `zycode.addSelectionToChat` (`editor/context`) and `zycode.addFileToChat` (`explorer/context`) commands, `insertMention`, `saveAll` notice action, `openFile`, active-editor workspace folder preference in `VsCodeHost.sessionFolder()`, `onDidChangeWorkspaceFolders` recovery, Up/Down prompt history recall, and `Escape` to cancel while `busy`.
+- **P2 Implementation (2026-11-21):**
+  - Added `view/title` toolbar buttons (`zycode.newChat`, `zycode.restartAgent`, `zycode.openAgentConfig`) for `zycode.chat`.
+  - Added pure-DOM code syntax highlighting (`tokenizeCodeLine` in `src/webview/dom.ts` and `.tok-*` rules in `media/chat.css`), preserving zero `innerHTML` and exact `.code-line` `textContent`.
+  - Added one-time `context_window` discoverability hint for bundled agent `>= 1.0.0`, host-backed `{ type: "copy", text }` clipboard message, and `SessionsView` 60s timer skip when hidden or empty.
+- **P3 Implementation (2026-11-21):**
+  - Normalized Windows backslash paths in `DiffDocuments.open()` and added `taskkill /T /F /PID` process-tree cleanup on Windows in `AgentProcess.stop()`.
+  - Added live `thinking_level` support in `PiAcpAgent` (`packages/pi-agent-cli/pi_agent_cli/agent.py` now advertises `thinking_level` with `category="thought_level"` when reasoning is enabled and handles it in `set_config_option()`) and `ChatController.applyThinkingLevel()`, falling back to editing `agent.toml` + restart for agents up to 1.0.1 (they do not advertise the option).
+  - Added structured `old_text` / `new_text` diff content support in `pi_agent_core/coding_tools/edit.py` (built-in `edit` puts the LF-normalized `old_text`/`new_text` for files `<= 256 KiB` on the `tool_execution_end` event only, as `AgentToolResult.event_details`; they are not in `details`, the session file or `rawOutput`), `packages/pi-agent-cli/pi_agent_cli/events.py` (emits ACP `diff` blocks), and `DiffTracker` fallback (`vscode/src/core/diff-tracker.ts`).
+- **Post-Review Hardening & Capability Compliance (2026-11-21):**
+  - Honored ACP `promptCapabilities.image` (refusing image paste/drop/send with a warning when unsupported) and `mcpCapabilities` (`http` / `sse` filtering with a one-time notice and log warning while preserving stdio servers).
+  - Fixed multi-root command folder resolution (`chat.currentCwd ?? host.sessionFolder()` with out-of-folder notification) and resolved workspace-contained absolute `rawInput.path` values on tool card **Open** buttons.
+  - Hardened `globToRegExpSource()` against ReDoS (`MAX_GLOB_WILDCARDS = 6`, segment `*` collapsing), exposed `compileGitignoreFilter()` for deterministic regex-count verification, consumed `gitignore.truncated` in `WorkspaceMentions` with a one-time warning, and refined `isLikelySecretPath()` (expanded credential names/paths/extensions and safe allow-lists for `.pub`, `.d.ts`, and public CA certs; a `.bak` backup of a secret file, such as `.env.bak` or `id_rsa.bak`, still counts as a secret path).
+- **Verification (`vscode/` & `packages/pi-agent-cli/`):**
+  - `npm run build && npm run check` (`tsc --noEmit -p tsconfig.json`, `tsc --noEmit -p src/webview/tsconfig.json`, `eslint .`, `vitest run`): passed (**`26` test files / `450` tests passed**; **`3` opt-in real-agent files / `16` tests skipped** on Linux).
   - `npm run build` and `node esbuild.mjs --production`: both host (`dist/extension.js`) and webview (`dist/webview.js`) bundled cleanly.
-  - **Not verified in a live VS Code host:** `PermissionFallback` (`vscode.window.showWarningMessage`), `StatusBar` rendering, `WorkspaceMentions` live `FileSystemWatcher`, and `retainContextWhenHidden` across real sidebar tab switches (covered by typecheck/lint + pure unit tests).
+  - `.venv/bin/ruff check . && .venv/bin/ruff format --check .` and `.venv/bin/python -m pytest packages/pi-agent-cli/tests/`: passed.
+  - **Not verified in a live VS Code host:** `PermissionFallback` (`vscode.window.showWarningMessage`), `StatusBar` rendering, `WorkspaceMentions` live `FileSystemWatcher` and multi-root `addSelectionToChat` / `addFileToChat` commands, `retainContextWhenHidden` across real sidebar tab switches, host clipboard (`vscode.env.clipboard.writeText`), real Windows `taskkill /T /F /PID` process-tree teardown, and live `view/title` toolbar layout (all covered by typecheck/lint + unit/mock/headless-Chrome tests).

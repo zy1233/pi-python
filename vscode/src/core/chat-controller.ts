@@ -13,7 +13,7 @@ import { AgentProcess, type StopTimings } from "./agent-process.js";
 import { parseAvailableCommandsUpdate, sameSlashCommands, type SlashCommandInfo } from "./composer.js";
 import { DiffTracker, type DiffInfo } from "./diff-tracker.js";
 import { classifyAuthRequired, classifyTurnFailure, failureNotice, setupText } from "./first-run.js";
-import type { Host } from "./host.js";
+import type { Host, McpServerConfig } from "./host.js";
 import {
   prepareBundledBinary,
   resolveAgentCommand,
@@ -22,12 +22,14 @@ import {
 import {
   DEFAULT_MENTION_LIMIT,
   formatPromptWithMentions,
+  normalizeRelativePath,
   type MentionAttachment,
   type RankedMention,
 } from "./mentions.js";
 import {
   ALWAYS_APPROVE,
   type HostMessage,
+  type ImageAttachment,
   type ModeState,
   type ModelState,
   type NoticeAction,
@@ -58,6 +60,7 @@ import {
 } from "./session-list.js";
 import { readUsageUpdate, sameUsage } from "./status-row.js";
 import {
+  MAX_LEVEL_SINCE,
   isThinkingLevel,
   noThinkingReason,
   readThinking,
@@ -66,7 +69,7 @@ import {
   type ThinkingRead,
 } from "./thinking.js";
 import { ToolCallStore, summarizeInput } from "./tool-calls.js";
-import { checkAgentIdentity } from "./version.js";
+import { agentVersionAtLeast, checkAgentIdentity } from "./version.js";
 
 export const TRUST_NOTE =
   "This is the zycode agent's own question about this project. It is not the VS Code Workspace Trust " +
@@ -145,6 +148,7 @@ export class ChatController {
   /** When the prompt of the running turn was sent, and how long the last turn took (our clock). */
   private turnStartedAt: number | undefined;
   private lastTurnMs: number | undefined;
+  private turnInFlight = false;
   private opening = false;
   private earlyUpdates: SessionNotification[] = [];
   private generation = 0;
@@ -155,6 +159,8 @@ export class ChatController {
   private segmentId: string | undefined;
   private modeNoticeShown = false;
   private stuckModeNoticeShown = false;
+  private contextHintShown = false;
+  private mcpFilteredNoticeShown = false;
   private setupInfo: SetupInfo | undefined;
   private settingUp = false;
   private projectTrustRefused = false;
@@ -168,6 +174,7 @@ export class ChatController {
   private thinkingText: ThinkingText | undefined;
   /** What that text says for the agent that runs. It is set after `initialize`: it needs the version. */
   private thinkingFile: ThinkingRead | undefined;
+  private liveThinkingLevel: ThinkingLevel | undefined;
   private reopenId: string | undefined;
   private changingThinking = false;
   private readonly sessionListeners = new Set<() => void>();
@@ -200,6 +207,10 @@ export class ChatController {
     return { dispose: () => this.sessionListeners.delete(listener) };
   }
 
+  private supportsImages(): boolean {
+    return this.initResult?.agentCapabilities?.promptCapabilities?.image === true;
+  }
+
   stateMessage(): StateMessage {
     const message: StateMessage = {
       type: "state",
@@ -214,6 +225,7 @@ export class ChatController {
         source: this.command.source,
       };
     }
+    if (this.initResult) message.supportsImages = this.supportsImages();
     if (this.cwd !== undefined) message.cwd = this.cwd;
     if (this.mode) message.mode = this.visibleMode(this.mode);
     if (this.model !== undefined) message.model = this.model;
@@ -254,14 +266,22 @@ export class ChatController {
   }
 
   /**
-   * The thinking picker (design section 7c). The level is the one in `agent.toml` when the agent
-   * started: the agent reads it at its start and has no way to change it while it runs.
+   * The thinking picker (design section 7c). When the agent advertises the `thinking_level` option
+   * (category `thought_level`), the level is the live level of this session (`liveThinkingLevel`).
+   * Otherwise (agents up to 1.0.1) it is the level in `agent.toml` when the agent started: such an
+   * agent reads the file at its start and cannot change the level while it runs.
    */
   private thinkingState(): ThinkingState | undefined {
-    const file = this.thinkingFile;
-    if (!file) return undefined;
     if (this.status !== "ready" && this.status !== "busy" && this.status !== "cancelling") return undefined;
     const levels = [...this.thinkingLevels()];
+    if (this.liveThinkingLevel !== undefined) {
+      const state: ThinkingState = { current: this.liveThinkingLevel, levels };
+      if (this.status !== "ready") state.disabled = "Wait until the answer ends.";
+      else if (!this.sessionId) state.disabled = "No chat is open.";
+      return state;
+    }
+    const file = this.thinkingFile;
+    if (!file) return undefined;
     if (!file.ok) return { levels, disabled: file.reason };
     const state: ThinkingState = { current: file.value.level, levels };
     if (file.value.invalidLevel !== undefined) {
@@ -299,9 +319,9 @@ export class ChatController {
   }
 
   /**
-   * Sets the thinking level. The agent has no live setting (v0.9.1), so this edits `thinking_level`
-   * in `agent.toml`, restarts the agent, and opens this chat again with `session/load`. It asks first,
-   * because it writes a file of the user.
+   * Sets the thinking level. When the agent advertises a `thinking_level` config option, switches it
+   * live via `session/set_config_option`; otherwise edits `thinking_level` in `agent.toml`, restarts
+   * the agent, and opens this chat again with `session/load`.
    */
   async applyThinkingLevel(level: ThinkingLevel): Promise<void> {
     if (this.changingThinking) return;
@@ -314,6 +334,18 @@ export class ChatController {
       return;
     }
     if (level === state.current) return;
+    if (this.liveThinkingLevel !== undefined && this.conn && this.sessionId && this.status === "ready") {
+      try {
+        const options = await this.conn.setConfigOption(this.sessionId, "thinking_level", level);
+        if (options.length > 0) this.readConfigOptions(options);
+        else this.liveThinkingLevel = level;
+        this.pushNotice("info", `Thinking level: ${level}.`);
+        this.emit(this.stateMessage());
+      } catch (error) {
+        this.pushNotice("warning", `Could not set the thinking level: ${messageOf(error)}`);
+      }
+      return;
+    }
     const sessionId = this.sessionId;
     const generation = this.generation;
     const path = this.host.agentConfigPath();
@@ -404,6 +436,10 @@ export class ChatController {
     return this.status;
   }
 
+  get currentCwd(): string | undefined {
+    return this.cwd;
+  }
+
   // ----- lifecycle
 
   /** Starts the agent and opens a session. Does nothing if the agent is running. */
@@ -424,6 +460,7 @@ export class ChatController {
     this.stopping = false;
     this.projectTrustRefused = false;
     this.deleteSupported = true;
+    this.mcpFilteredNoticeShown = false;
     if (!this.host.isTrusted()) {
       this.setStatus("untrusted", "Workspace Trust is off for this folder. zycode does not start in Restricted Mode.");
       return;
@@ -542,6 +579,39 @@ export class ChatController {
     await this.loadSessionInto(id);
   }
 
+  private mcpServers(): McpServerConfig[] {
+    if (!this.host.isTrusted()) return [];
+    const configured = this.host.settings().mcpServers ?? [];
+    if (configured.length === 0) return [];
+    const mcpCaps = this.initResult?.agentCapabilities?.mcpCapabilities;
+    const allowed: McpServerConfig[] = [];
+    const skippedTransports = new Set<"http" | "sse">();
+    for (const server of configured) {
+      if ("type" in server) {
+        if (server.type === "http" && mcpCaps?.http !== true) {
+          skippedTransports.add("http");
+          continue;
+        }
+        if (server.type === "sse" && mcpCaps?.sse !== true) {
+          skippedTransports.add("sse");
+          continue;
+        }
+      }
+      allowed.push(server);
+    }
+    if (skippedTransports.size > 0 && !this.mcpFilteredNoticeShown) {
+      this.mcpFilteredNoticeShown = true;
+      const transports = (["http", "sse"] as const)
+        .filter((transport) => skippedTransports.has(transport))
+        .map((transport) => transport.toUpperCase())
+        .join(" and ");
+      const text = `Skipped configured ${transports} MCP server(s) because this agent did not advertise support for ${transports}.`;
+      this.host.log.warn(text);
+      this.pushNotice("info", text);
+    }
+    return allowed;
+  }
+
   private async openSession(): Promise<void> {
     const conn = this.conn;
     const cwd = this.cwd;
@@ -552,7 +622,7 @@ export class ChatController {
     this.agentCommands = [];
     let response: NewSessionResponse;
     try {
-      response = await conn.newSession(cwd);
+      response = await conn.newSession(cwd, this.mcpServers());
     } catch (error) {
       this.opening = false;
       if (generation !== this.generation) return;
@@ -581,6 +651,7 @@ export class ChatController {
   private readConfigOptions(options: SessionConfigOption[], modesCurrent?: string): void {
     this.mode = undefined;
     this.models = undefined;
+    this.liveThinkingLevel = undefined;
     for (const option of options) {
       if (option.type !== "select") continue;
       const flat = flattenSelect(option);
@@ -591,6 +662,11 @@ export class ChatController {
         const current = flat.find((choice) => choice.id === currentId);
         this.model = current?.name ?? currentId;
         this.models = { current: currentId, options: flat };
+      } else if (option.id === "thinking_level") {
+        const currentVal = String(option.currentValue);
+        if (isThinkingLevel(currentVal, this.thinkingLevels())) {
+          this.liveThinkingLevel = currentVal;
+        }
       }
     }
     if (!this.mode && modesCurrent !== undefined) {
@@ -753,6 +829,7 @@ export class ChatController {
   async stop(): Promise<void> {
     this.generation++;
     this.stopping = true;
+    this.turnInFlight = false;
     this.clearCancelTimer();
     this.cancelAllPermissions();
     const conn = this.conn;
@@ -765,6 +842,7 @@ export class ChatController {
     this.models = undefined;
     this.agentCommands = [];
     this.opening = false;
+    this.mcpFilteredNoticeShown = false;
     this.clearSessionStats();
     this.setStatus("stopped");
   }
@@ -786,12 +864,14 @@ export class ChatController {
   }
 
   async dispose(): Promise<void> {
+    this.turnInFlight = false;
     await this.stop();
     this.listeners.clear();
   }
 
   private onProcessExit(generation: number, proc: AgentProcess, info: { code: number | null; signal: NodeJS.Signals | null }): void {
     if (generation !== this.generation || this.stopping || proc !== this.proc) return;
+    this.turnInFlight = false;
     this.cancelAllPermissions();
     this.clearCancelTimer();
     const text = this.exitText(info, proc);
@@ -803,6 +883,7 @@ export class ChatController {
     this.models = undefined;
     this.agentCommands = [];
     this.opening = false;
+    this.mcpFilteredNoticeShown = false;
     this.clearSessionStats();
     this.pushNotice("error", text);
     this.setError(text);
@@ -817,39 +898,80 @@ export class ChatController {
   // ----- chat
 
   /** Sends a prompt. Returns `false` if it was not sent (the view should not offer it). */
-  async send(text: string, mentions: readonly MentionAttachment[] = []): Promise<boolean> {
+  async send(
+    text: string,
+    mentions: readonly MentionAttachment[] = [],
+    images: readonly ImageAttachment[] = [],
+  ): Promise<boolean> {
     const conn = this.conn;
     const sessionId = this.sessionId;
     const promptText = formatPromptWithMentions(text, mentions);
-    if (this.status !== "ready" || !conn || !sessionId || promptText.trim() === "") return false;
+    const hasImages = images.length > 0;
+    if (this.status !== "ready" || !conn || !sessionId || (promptText.trim() === "" && !hasImages)) return false;
+    if (hasImages && !this.supportsImages()) {
+      this.pushNotice("warning", "This agent does not support image attachments.");
+      return false;
+    }
     const dirty = this.cwd !== undefined ? this.host.dirtyFiles(this.cwd) : [];
     if (dirty.length > 0) {
       this.pushNotice(
         "info",
         `${dirty.length} file${dirty.length === 1 ? " has" : "s have"} unsaved changes. The agent reads the files on disk.`,
+        [{ id: "saveAll", label: "Save all" }],
       );
     }
     this.segmentId = undefined;
     const id = this.nextId("user");
-    this.items.push({ type: "user", id, text: promptText });
+    const imageLabels = hasImages ? images.map((img) => `[Image: ${img.name ?? img.mimeType}]`).join(" ") : "";
+    const displayText = hasImages
+      ? promptText.trim() !== ""
+        ? `${imageLabels}\n\n${promptText}`
+        : imageLabels
+      : promptText;
+    this.items.push({ type: "user", id, text: displayText });
     this.turnStart = this.items.length;
     this.turnStartedAt = this.now();
     this.lastTurnMs = undefined;
-    this.emit({ type: "userMessage", id, text: promptText });
+    this.emit({ type: "userMessage", id, text: displayText });
     this.setStatus("busy");
+    this.turnInFlight = true;
     const generation = this.generation;
     try {
-      const stopReason = await conn.prompt(sessionId, promptText);
+      const stopReason = await conn.prompt(sessionId, promptText, hasImages ? images : undefined);
       if (generation !== this.generation) return true;
       this.finishTurn(stopReason);
     } catch (error) {
       if (generation !== this.generation) return true;
+      this.turnInFlight = false;
       if ((this.status as Status) !== "error") {
         this.pushNotice("error", `The turn failed: ${messageOf(error)}`);
         this.finishTurn("error");
       }
     }
     return true;
+  }
+
+  /** Saves all dirty files in the workspace. */
+  async saveAll(): Promise<void> {
+    if (!this.host.saveAll) return;
+    try {
+      await this.host.saveAll();
+    } catch (error) {
+      this.host.log.warn(`saveAll failed: ${messageOf(error)}`);
+    }
+  }
+
+  /** Opens a workspace-relative file in the host editor, optionally at `line` (1-based). */
+  async openFile(relPath: string, line?: number): Promise<void> {
+    const folder = this.cwd ?? this.host.sessionFolder();
+    if (folder === undefined || !this.host.openFile) return;
+    const normalized = normalizeRelativePath(relPath, "file");
+    if (!normalized) return;
+    try {
+      await this.host.openFile(folder, normalized, line);
+    } catch (error) {
+      this.host.log.warn(`openFile failed: ${messageOf(error)}`);
+    }
   }
 
   /** Searches workspace files, folders, and active editor context for `@` mention completion. */
@@ -866,6 +988,7 @@ export class ChatController {
   }
 
   private finishTurn(stopReason: string): void {
+    this.turnInFlight = false;
     this.segmentId = undefined;
     this.clearCancelTimer();
     this.cancelAllPermissions();
@@ -875,6 +998,20 @@ export class ChatController {
     }
     if (stopReason !== "end_turn" && stopReason !== "cancelled" && stopReason !== "error") {
       this.pushNotice("info", `The turn ended: ${stopReason}.`);
+    }
+    if (
+      stopReason === "end_turn" &&
+      this.usage === undefined &&
+      !this.contextHintShown &&
+      this.command?.source === "bundled" &&
+      agentVersionAtLeast(this.initResult?.agentInfo?.version, MAX_LEVEL_SINCE)
+    ) {
+      this.contextHintShown = true;
+      this.pushNotice(
+        "info",
+        "Tip: set context_window in agent.toml to show the Context usage bar in the header.",
+        [{ id: "openAgentConfig", label: "Open agent.toml" }],
+      );
     }
     this.noteTurnFailure();
     this.emit({ type: "turnEnd", stopReason });
@@ -934,6 +1071,7 @@ export class ChatController {
   }
 
   private resetTranscript(): void {
+    this.turnInFlight = false;
     this.items = [];
     this.toolItemIndices.clear();
     this.tools.clear();
@@ -1163,7 +1301,7 @@ export class ChatController {
     await this.closeSessionQuietly(previous);
     let response: Awaited<ReturnType<AcpConnection["loadSession"]>>;
     try {
-      response = await conn.loadSession(cwd, id);
+      response = await conn.loadSession(cwd, id, this.mcpServers());
     } catch (error) {
       this.opening = false;
       this.earlyUpdates = [];
@@ -1257,7 +1395,7 @@ export class ChatController {
         return;
       case "agent_message_chunk":
       case "agent_thought_chunk":
-        this.onChunk(update, update.sessionUpdate === "agent_thought_chunk");
+        this.onChunk(update, update.sessionUpdate === "agent_thought_chunk", replay);
         return;
       case "tool_call":
       case "tool_call_update":
@@ -1310,7 +1448,7 @@ export class ChatController {
     }
   }
 
-  private onChunk(update: Record<string, unknown>, thought: boolean): void {
+  private onChunk(update: Record<string, unknown>, thought: boolean, replay = false): void {
     const content = update.content;
     if (!isRecord(content) || content.type !== "text" || typeof content.text !== "string" || content.text === "") return;
     const text = content.text;
@@ -1326,8 +1464,13 @@ export class ChatController {
       item.thought += text;
       this.emit({ type: "agentThought", messageId: item.id, text });
     } else {
-      item.text += text;
-      this.emit({ type: "agentText", messageId: item.id, text });
+      const outOfTurn = !replay && !this.turnInFlight && this.status !== "busy" && this.status !== "cancelling";
+      const chunkText =
+        outOfTurn && item.text !== "" && !item.text.endsWith("\n") && !text.startsWith("\n")
+          ? `\n\n${text}`
+          : text;
+      item.text += chunkText;
+      this.emit({ type: "agentText", messageId: item.id, text: chunkText });
     }
   }
 

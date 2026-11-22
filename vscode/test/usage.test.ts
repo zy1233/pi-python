@@ -104,6 +104,28 @@ describe("context window from the agent (design section 7d)", () => {
     await controller.stop();
     expect(controller.stateMessage().usage).toBeUndefined();
   });
+
+  it("shows a one-time context_window discoverability hint for bundled agent >= 1.0.0 when no usage_update arrives", async () => {
+    const { controller, messages } = setup();
+    await controller.start();
+    // Simulate a bundled agent >= 1.0.0
+    const internal = controller as unknown as {
+      command: { command: string; args: string[]; source: "bundled" | "setting" };
+      initResult: { protocolVersion: number; agentInfo: { name: string; version: string } };
+    };
+    internal.command = { ...internal.command, source: "bundled" };
+    internal.initResult = { ...internal.initResult, agentInfo: { name: "pi-agent-cli", version: "1.0.0" } };
+
+    await controller.send("hello");
+    const hints1 = ofType(messages, "notice").filter((n) => n.text.includes("context_window"));
+    expect(hints1).toHaveLength(1);
+    expect(hints1[0]?.actions).toEqual([{ id: "openAgentConfig", label: "Open agent.toml" }]);
+
+    // Second turn without usage_update does not repeat the hint.
+    await controller.send("hello");
+    const hints2 = ofType(messages, "notice").filter((n) => n.text.includes("context_window"));
+    expect(hints2).toHaveLength(1);
+  });
 });
 
 describe("the clock of the turn (design section 7d)", () => {

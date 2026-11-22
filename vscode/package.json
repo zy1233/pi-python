@@ -73,7 +73,8 @@
       {
         "command": "zycode.restartAgent",
         "title": "Restart agent",
-        "category": "zycode"
+        "category": "zycode",
+        "icon": "$(refresh)"
       },
       {
         "command": "zycode.runSetup",
@@ -88,7 +89,8 @@
       {
         "command": "zycode.openAgentConfig",
         "title": "Open agent.toml",
-        "category": "zycode"
+        "category": "zycode",
+        "icon": "$(gear)"
       },
       {
         "command": "zycode.showLog",
@@ -111,6 +113,16 @@
         "title": "Delete chat",
         "category": "zycode",
         "icon": "$(trash)"
+      },
+      {
+        "command": "zycode.addSelectionToChat",
+        "title": "Add selection to chat",
+        "category": "zycode"
+      },
+      {
+        "command": "zycode.addFileToChat",
+        "title": "Add to chat context",
+        "category": "zycode"
       }
     ],
     "configuration": {
@@ -150,6 +162,12 @@
           "default": true,
           "scope": "window",
           "description": "Show the thinking blocks of the model in the chat (collapsed)."
+        },
+        "zycode.mcpServers": {
+          "type": "array",
+          "default": [],
+          "scope": "application",
+          "markdownDescription": "MCP servers forwarded to the agent in `session/new` and `session/load`. Each entry is either a stdio server (`{ \"name\": \"...\", \"command\": \"...\", \"args\": [], \"env\": [{ \"name\": \"...\", \"value\": \"...\" }] }`) or an HTTP/SSE server (`{ \"type\": \"http\" | \"sse\", \"name\": \"...\", \"url\": \"...\", \"headers\": [{ \"name\": \"...\", \"value\": \"...\" }] }`). Application-scoped so workspace settings cannot inject executables."
         }
       }
     },
@@ -189,7 +207,35 @@
           "when": "false"
         }
       ],
+      "editor/context": [
+        {
+          "command": "zycode.addSelectionToChat",
+          "when": "editorTextFocus",
+          "group": "z_commands"
+        }
+      ],
+      "explorer/context": [
+        {
+          "command": "zycode.addFileToChat",
+          "group": "z_commands"
+        }
+      ],
       "view/title": [
+        {
+          "command": "zycode.newChat",
+          "when": "view == zycode.chat",
+          "group": "navigation@1"
+        },
+        {
+          "command": "zycode.restartAgent",
+          "when": "view == zycode.chat",
+          "group": "navigation@2"
+        },
+        {
+          "command": "zycode.openAgentConfig",
+          "when": "view == zycode.chat",
+          "group": "navigation@3"
+        },
         {
           "command": "zycode.newChat",
           "when": "view == zycode.sessions",

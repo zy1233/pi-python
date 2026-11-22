@@ -54,6 +54,8 @@ export class TestHost implements Host {
   readonly notifications: { level: string; text: string }[] = [];
   readonly setupRequests: SetupTerminalRequest[] = [];
   readonly confirmations: ConfirmRequest[] = [];
+  readonly openedFiles: { folder: string; relPath: string; line?: number }[] = [];
+  savedAllCount = 0;
   trusted: boolean;
   private readonly folder: string | undefined;
   private readonly tempDirs: string[] = [];
@@ -102,6 +104,13 @@ export class TestHost implements Host {
     if (!this.options.mentions) return [];
     if (typeof this.options.mentions === "function") return this.options.mentions(folder, query, limit);
     return rankMentions(this.options.mentions, query, limit);
+  }
+  async saveAll(): Promise<boolean> {
+    this.savedAllCount++;
+    return true;
+  }
+  async openFile(folder: string, relPath: string, line?: number): Promise<void> {
+    this.openedFiles.push(line !== undefined ? { folder, relPath, line } : { folder, relPath });
   }
   cleanup(): void {
     for (const dir of this.tempDirs) rmSync(dir, { recursive: true, force: true });

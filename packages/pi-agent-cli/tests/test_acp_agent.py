@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import ast
 import asyncio
+import json
 from datetime import datetime
 from pathlib import Path
 from typing import Any
@@ -1160,3 +1161,235 @@ async def test_a_workflow_cannot_send_a_subagent_outside_the_workspace(tmp_path,
 
     assert client.asked_about() == ["workflow"]  # no sub-agent ever got as far as a write
     assert not (elsewhere / "note.txt").exists()
+
+
+@pytest.mark.asyncio
+async def test_set_config_option_thinking_level_updates_harness_live(tmp_path):
+    agent = _agent(tmp_path)
+    agent.on_connect(FakeClient())
+    created = await agent.new_session(cwd=str(tmp_path.resolve()))
+    harness = agent._harnesses[created.session_id]
+    assert harness.thinking_level == "off"
+
+    thinking_opt = next(o for o in created.config_options if o.id == "thinking_level")
+    assert thinking_opt.category == "thought_level"
+    assert thinking_opt.current_value == "off"
+    assert [opt.value for opt in thinking_opt.options] == [
+        "max",
+        "xhigh",
+        "high",
+        "medium",
+        "low",
+        "minimal",
+        "off",
+    ]
+
+    resp = await agent.set_config_option(
+        config_id="thinking_level", session_id=created.session_id, value="high"
+    )
+    assert harness.thinking_level == "high"
+    assert harness.model.reasoning is True
+    updated_opt = next(o for o in resp.config_options if o.id == "thinking_level")
+    assert updated_opt.current_value == "high"
+
+    with pytest.raises(RequestError):
+        await agent.set_config_option(
+            config_id="thinking_level", session_id=created.session_id, value="invalid"
+        )
+
+
+@pytest.mark.asyncio
+async def test_thinking_level_omitted_and_rejected_when_reasoning_disabled(tmp_path):
+    agent = PiAcpAgent(
+        stream_fn=mock_text_stream,
+        home=tmp_path,
+        config=CliConfig(permission="ask", provider="mock", model_id="mock", reasoning=False),
+    )
+    agent.on_connect(FakeClient())
+    created = await agent.new_session(cwd=str(tmp_path.resolve()))
+
+    assert all(option.id != "thinking_level" for option in created.config_options)
+    with pytest.raises(RequestError):
+        await agent.set_config_option(
+            config_id="thinking_level", session_id=created.session_id, value="high"
+        )
+    # "off" remains accepted without error even when reasoning is disabled.
+    resp = await agent.set_config_option(
+        config_id="thinking_level", session_id=created.session_id, value="off"
+    )
+    assert all(option.id != "thinking_level" for option in resp.config_options)
+
+
+@pytest.mark.asyncio
+async def test_set_config_option_thinking_level_leaves_state_unchanged_if_set_model_fails(
+    tmp_path, monkeypatch
+):
+    agent = _agent(tmp_path)
+    agent.on_connect(FakeClient())
+    created = await agent.new_session(cwd=str(tmp_path.resolve()))
+    harness = agent._harnesses[created.session_id]
+    assert harness.thinking_level == "off"
+
+    async def fail_set_model(_model: Any) -> None:
+        raise RuntimeError("model switch failed")
+
+    monkeypatch.setattr(harness, "set_model", fail_set_model)
+    with pytest.raises(RuntimeError, match="model switch failed"):
+        await agent.set_config_option(
+            config_id="thinking_level", session_id=created.session_id, value="high"
+        )
+    assert harness.thinking_level == "off"
+
+
+def test_project_event_edit_structured_old_and_new_text():
+    from pi_agent_core.types import (
+        AgentToolResult,
+        ToolExecutionEndEvent,
+        ToolExecutionStartEvent,
+    )
+
+    start_ev = ToolExecutionStartEvent(
+        tool_call_id="edit_1",
+        tool_name="edit",
+        args={"path": "src/app.py"},
+    )
+    assert len(list(project_event(start_ev))) == 1
+
+    ev = ToolExecutionEndEvent(
+        tool_call_id="edit_1",
+        tool_name="edit",
+        result=AgentToolResult(
+            content=[{"type": "text", "text": "Edited src/app.py"}],
+            details={"old_text": "a = 1\n", "new_text": "a = 2\n"},
+        ),
+        is_error=False,
+    )
+    updates = list(project_event(ev))
+    assert len(updates) == 1
+    diff_block = updates[0].content[0]
+    assert diff_block.type == "diff"
+    assert diff_block.path == "src/app.py"
+    assert diff_block.old_text == "a = 1\n"
+    assert diff_block.new_text == "a = 2\n"
+
+
+@pytest.mark.asyncio
+async def test_project_event_real_edit_tool_produces_structured_acp_diff(tmp_path):
+    from pi_agent_core.coding_tools.edit import EditParams, create_edit_tool
+    from pi_agent_core.types import ToolExecutionEndEvent, ToolExecutionStartEvent
+
+    target = tmp_path / "demo.py"
+    target.write_text("value = 1\n", encoding="utf-8")
+    tool = create_edit_tool(str(tmp_path))
+
+    start_ev = ToolExecutionStartEvent(
+        tool_call_id="real_edit_1",
+        tool_name="edit",
+        args={"path": "demo.py"},
+    )
+    assert len(list(project_event(start_ev))) == 1
+
+    result = await tool.execute(
+        "real_edit_1",
+        EditParams(path="demo.py", edits=[{"oldText": "value = 1", "newText": "value = 2"}]),
+    )
+    end_ev = ToolExecutionEndEvent(
+        tool_call_id="real_edit_1",
+        tool_name="edit",
+        result=result,
+        is_error=False,
+    )
+    updates = list(project_event(end_ev))
+    assert len(updates) == 1
+    diff_block = updates[0].content[0]
+    assert diff_block.type == "diff"
+    assert diff_block.path == "demo.py"
+    assert diff_block.old_text == "value = 1\n"
+    assert diff_block.new_text == "value = 2\n"
+
+    # The texts are on the event only: ``rawOutput`` and the result's dump do not carry them.
+    raw_output = updates[0].raw_output
+    assert set(raw_output["details"]) == {"diff", "patch", "firstChangedLine"}
+    assert raw_output == result.model_dump(exclude_none=True)
+    for key in ("old_text", "new_text", "oldText", "newText"):
+        assert key not in json.dumps(raw_output)
+
+
+@pytest.mark.asyncio
+async def test_project_event_real_edit_above_the_cap_falls_back_to_the_patch(tmp_path):
+    from pi_agent_core.coding_tools.edit import _MAX_DIFF_TEXT_CHARS, EditParams, create_edit_tool
+    from pi_agent_core.types import ToolExecutionEndEvent, ToolExecutionStartEvent
+
+    target = tmp_path / "big.txt"
+    target.write_text("x" * (_MAX_DIFF_TEXT_CHARS + 1) + "\ntarget\n", encoding="utf-8")
+    tool = create_edit_tool(str(tmp_path))
+    result = await tool.execute(
+        "big_edit_1",
+        EditParams(path="big.txt", edits=[{"oldText": "target", "newText": "updated"}]),
+    )
+    assert result.event_details is None
+
+    start_ev = ToolExecutionStartEvent(
+        tool_call_id="big_edit_1", tool_name="edit", args={"path": "big.txt"}
+    )
+    assert len(list(project_event(start_ev))) == 1
+    end_ev = ToolExecutionEndEvent(
+        tool_call_id="big_edit_1", tool_name="edit", result=result, is_error=False
+    )
+    (update,) = list(project_event(end_ev))
+    diff_block = update.content[0]
+    assert diff_block.type == "diff"
+    assert diff_block.old_text is None
+    assert diff_block.new_text == result.details["patch"]
+    assert "-target" in diff_block.new_text
+
+
+def test_project_event_edit_without_event_texts_falls_back_to_the_patch():
+    """A result that lost its event data (rebuilt, or from a replayed session) must not raise."""
+    from pi_agent_core.types import (
+        AgentToolResult,
+        ToolExecutionEndEvent,
+        ToolExecutionStartEvent,
+    )
+
+    start_ev = ToolExecutionStartEvent(
+        tool_call_id="edit_2", tool_name="edit", args={"path": "src/app.py"}
+    )
+    assert len(list(project_event(start_ev))) == 1
+    end_ev = ToolExecutionEndEvent(
+        tool_call_id="edit_2",
+        tool_name="edit",
+        result=AgentToolResult(
+            content=[{"type": "text", "text": "Edited src/app.py"}],
+            details={"diff": "@@ -1 +1 @@\n-a\n+b\n", "patch": "@@ -1 +1 @@\n-a\n+b\n"},
+        ),
+        is_error=False,
+    )
+    (update,) = list(project_event(end_ev))
+    assert update.content[0].new_text == "@@ -1 +1 @@\n-a\n+b\n"
+    assert update.content[0].old_text is None
+
+
+def test_project_event_caps_tool_call_args():
+    from pi_agent_cli import events as events_mod
+    from pi_agent_core.types import ToolExecutionStartEvent
+
+    saved = dict(events_mod._tool_call_args)
+    events_mod._tool_call_args.clear()
+    try:
+        for i in range(520):
+            ev = ToolExecutionStartEvent(
+                tool_call_id=f"edit_{i}",
+                tool_name="edit",
+                args={"path": f"file_{i}.py"},
+            )
+            list(project_event(ev))
+
+        assert len(events_mod._tool_call_args) == 512
+        assert "edit_0" not in events_mod._tool_call_args
+        assert "edit_7" not in events_mod._tool_call_args
+        assert "edit_8" in events_mod._tool_call_args
+        assert "edit_519" in events_mod._tool_call_args
+    finally:
+        events_mod._tool_call_args.clear()
+        events_mod._tool_call_args.update(saved)

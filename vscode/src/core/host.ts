@@ -12,12 +12,74 @@ export interface Logger {
   error(message: string): void;
 }
 
+export type McpServerConfig =
+  | {
+      name: string;
+      command: string;
+      args: string[];
+      env: { name: string; value: string }[];
+    }
+  | {
+      type: "http" | "sse";
+      name: string;
+      url: string;
+      headers: { name: string; value: string }[];
+    };
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
+function parseNameValuePairs(raw: unknown): { name: string; value: string }[] | undefined {
+  if (raw === undefined) return [];
+  if (!Array.isArray(raw)) return undefined;
+  const out: { name: string; value: string }[] = [];
+  for (const item of raw) {
+    if (!isRecord(item) || typeof item.name !== "string" || item.name.trim() === "" || typeof item.value !== "string") {
+      return undefined;
+    }
+    out.push({ name: item.name.trim(), value: item.value });
+  }
+  return out;
+}
+
+/** Validates user-configured MCP server entries from `zycode.mcpServers`, skipping malformed items. */
+export function parseMcpServers(raw: unknown): McpServerConfig[] {
+  if (!Array.isArray(raw)) return [];
+  const out: McpServerConfig[] = [];
+  for (const entry of raw) {
+    if (!isRecord(entry) || typeof entry.name !== "string" || entry.name.trim() === "") continue;
+    const name = entry.name.trim();
+    if (entry.type === "http" || entry.type === "sse") {
+      if (typeof entry.url !== "string" || entry.url.trim() === "") continue;
+      const headers = parseNameValuePairs(entry.headers);
+      if (!headers) continue;
+      out.push({ type: entry.type, name, url: entry.url.trim(), headers });
+    } else if (entry.type === undefined || entry.type === "stdio") {
+      if (typeof entry.command !== "string" || entry.command.trim() === "") continue;
+      if (entry.args !== undefined && (!Array.isArray(entry.args) || !entry.args.every((a): a is string => typeof a === "string"))) {
+        continue;
+      }
+      const env = parseNameValuePairs(entry.env);
+      if (!env) continue;
+      out.push({
+        name,
+        command: entry.command.trim(),
+        args: entry.args ? [...entry.args] : [],
+        env,
+      });
+    }
+  }
+  return out;
+}
+
 export interface Settings {
   agentPath: string;
   agentArgs: string[];
   /** The mode of a start. It is never `always-approve`: that is chosen in the chat and is not kept. */
   permissionMode: StartModeName;
   showThinking: boolean;
+  mcpServers?: McpServerConfig[];
 }
 
 export interface SetupTerminalRequest {
@@ -65,4 +127,8 @@ export interface Host {
   notify(level: "info" | "warning" | "error", text: string): void;
   /** Searches files, folders, and active editor context for `@` mentions in `folder`. */
   searchMentions?(folder: string, query: string, limit?: number): Promise<RankedMention[]>;
+  /** Saves all dirty files in the workspace. */
+  saveAll?(): Promise<boolean>;
+  /** Opens a workspace-relative file in the editor, optionally positioning the cursor at `line` (1-based). */
+  openFile?(folder: string, relPath: string, line?: number): Promise<void>;
 }

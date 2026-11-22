@@ -100,6 +100,12 @@ export class AgentProcess {
     exit = await this.waitFor(timings.termMs);
     if (exit) return exit;
     this.log.warn("agent did not exit after SIGTERM; sending SIGKILL");
+    if (process.platform === "win32" && this.child.pid !== undefined) {
+      spawn("taskkill", ["/T", "/F", "/PID", String(this.child.pid)], {
+        windowsHide: true,
+        stdio: "ignore",
+      }).on("error", () => undefined);
+    }
     this.child.kill("SIGKILL");
     return this.exited;
   }

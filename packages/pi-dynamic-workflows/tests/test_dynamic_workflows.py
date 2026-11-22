@@ -855,6 +855,27 @@ class TestHarnessSubagentExecutor:
         assert (model.provider, model.model_id) == ("anthropic", "claude-sonnet-4-20250514")
         assert model.base_url is None  # the parent's gateway must not front another vendor
 
+    def test_parse_model_id_preserves_thinking_format_only_for_same_model(self) -> None:
+        from pi_dynamic_workflows.subagent import _parse_model_id
+
+        from pi_agent_core.types import Model
+
+        parent = Model(
+            provider="openai",
+            model_id="gemini-2.5-pro",
+            base_url="https://gw/v1",
+            thinking_format="gemini",
+        )
+
+        for same_spec in ("gemini-2.5-pro", "openai/gemini-2.5-pro", "OpenAI/gemini-2.5-pro"):
+            resolved = _parse_model_id(same_spec, parent)
+            assert (resolved.provider, resolved.model_id) == ("openai", "gemini-2.5-pro")
+            assert resolved.thinking_format == "gemini"
+
+        for other_spec in ("gpt-4o", "openai/gpt-4o", "anthropic/gemini-2.5-pro"):
+            resolved = _parse_model_id(other_spec, parent)
+            assert resolved.thinking_format is None
+
     async def test_subagent_asks_for_the_key_of_the_provider_it_actually_uses(self) -> None:
         """End to end: which provider a sub-agent runs on, and which key it is handed."""
         from pi_dynamic_workflows.subagent import HarnessSubagentExecutor

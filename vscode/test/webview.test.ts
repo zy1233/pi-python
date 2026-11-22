@@ -4,10 +4,14 @@ import { spawnSync } from "node:child_process";
 import { existsSync, writeFileSync } from "node:fs";
 import path from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
-import { describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it } from "vitest";
 
 import { buildHarness } from "../scripts/webview-harness.mjs";
 import { tempDir } from "./helpers.js";
+
+// Each test invokes Chrome via spawnSync (~1s); yielding a macrotask between tests lets
+// Vitest's worker IPC drain onTaskUpdate acknowledgments instead of starving past 60s.
+afterEach(() => new Promise((resolve) => setTimeout(resolve, 0)));
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const built = existsSync(path.join(root, "dist", "webview.js"));
@@ -1104,7 +1108,7 @@ describe.skipIf(!chrome || !built)("webview: slash commands and @ mentions", () 
         afterPickGoal,
         modeNotClipped,
       };`);
-    expect(out).toMatchObject({
+      expect(out).toMatchObject({
       ok: true,
       afterMidSentence: "解释@src/main.ts 然后改一下这个文件",
       afterConfigNotice: {
@@ -1121,6 +1125,111 @@ describe.skipIf(!chrome || !built)("webview: slash commands and @ mentions", () 
       afterEscSend: { value: "", sentText: "explain this" },
       afterPickGoal: { value: "/goal explain this", hidden: true },
       modeNotClipped: true,
+    });
+  });
+
+  it("handles / button no-arg client commands on a draft, client commands with @ chips, Shift+Tab, secret badge, and mention loading timeout", () => {
+    const out = run(`${richState}
+      const input = document.querySelector("textarea");
+      const menu = document.getElementById("composer-menu");
+      const chips = document.querySelector(".composer-chips");
+      const slashBtn = document.querySelector("[aria-label='Slash commands']");
+      const lastQuery = () => [...window.__posted].filter((m) => m.type === "queryMentions").at(-1);
+
+      // 1. Attach an @ chip with a secret badge, verify "may hold secrets" badge and Shift+Tab does not accept.
+      input.value = "explain @env";
+      input.setSelectionRange(12, 12);
+      input.dispatchEvent(new Event("input", { bubbles: true }));
+      const qEnv = lastQuery();
+      host({
+        type: "mentionResults",
+        requestId: qEnv.requestId,
+        query: qEnv.query,
+        items: [{ kind: "file", path: ".env", label: ".env", detail: "", badge: "secret" }],
+      });
+      const secretBadgeText = menu.querySelector(".popover-badge.secret")?.textContent;
+      const shiftTabEv = new KeyboardEvent("keydown", { key: "Tab", shiftKey: true, cancelable: true, bubbles: true });
+      input.dispatchEvent(shiftTabEv);
+      const afterShiftTab = {
+        defaultPrevented: shiftTabEv.defaultPrevented,
+        value: input.value,
+        menuHidden: menu.hidden,
+      };
+      input.dispatchEvent(new KeyboardEvent("keydown", { key: "Enter", bubbles: true }));
+      const afterAttachSecret = {
+        value: input.value,
+        chipCount: chips.querySelectorAll(".chip").length,
+      };
+
+      // 2. Click / button on non-empty draft ("explain @.env ") and pick /log (no-arg client command):
+      // executes openLog immediately while keeping the user's draft and attached chip intact.
+      slashBtn.click();
+      const logIdx = [...menu.querySelectorAll("[role='option'] .popover-title")].findIndex((n) => n.textContent === "/log");
+      menu.querySelectorAll("[role='option']")[logIdx].click();
+      const afterSlashBtnLog = {
+        value: input.value,
+        chipCount: chips.querySelectorAll(".chip").length,
+        openLogCount: window.__posted.filter((m) => m.type === "openLog").length,
+      };
+
+      // 3. Click / button on non-empty draft with attached chip and pick /new:
+      // executes newChat while preserving both the draft and the attached chip.
+      slashBtn.click();
+      const newIdx = [...menu.querySelectorAll("[role='option'] .popover-title")].findIndex((n) => n.textContent === "/new");
+      menu.querySelectorAll("[role='option']")[newIdx].click();
+      const afterSlashBtnNew = {
+        value: input.value,
+        chipCount: chips.querySelectorAll(".chip").length,
+        chipsHidden: chips.hidden,
+        newChatCount: window.__posted.filter((m) => m.type === "newChat").length,
+      };
+
+      // 4. mentionLoading times out after 1000ms if host never answers queryMentions, unblocking Enter to submit.
+      input.value = "hello @unanswered";
+      input.setSelectionRange(input.value.length, input.value.length);
+      input.dispatchEvent(new Event("input", { bubbles: true }));
+      const statusBeforeTimeout = menu.querySelector(".popover-empty")?.textContent;
+      setTimeout(() => {
+        const statusAfterTimeout = menu.querySelector(".popover-empty")?.textContent;
+        input.dispatchEvent(new KeyboardEvent("keydown", { key: "Enter", bubbles: true }));
+        document.getElementById("result").textContent = JSON.stringify({
+          ok: true,
+          secretBadgeText,
+          afterShiftTab,
+          afterAttachSecret,
+          afterSlashBtnLog,
+          afterSlashBtnNew,
+          statusBeforeTimeout,
+          statusAfterTimeout,
+          sends: window.__posted.filter((m) => m.type === "send"),
+        });
+      }, 1100);`);
+    expect(out).toMatchObject({
+      ok: true,
+      secretBadgeText: "may hold secrets",
+      afterShiftTab: {
+        defaultPrevented: false,
+        value: "explain @env",
+        menuHidden: false,
+      },
+      afterAttachSecret: {
+        value: "explain @.env ",
+        chipCount: 1,
+      },
+      afterSlashBtnLog: {
+        value: "explain @.env ",
+        chipCount: 1,
+        openLogCount: 1,
+      },
+      afterSlashBtnNew: {
+        value: "explain @.env ",
+        chipCount: 1,
+        chipsHidden: false,
+        newChatCount: 1,
+      },
+      statusBeforeTimeout: "Searching workspace…",
+      statusAfterTimeout: "No matching files or folders",
+      sends: [{ type: "send", text: "hello @unanswered" }],
     });
   });
 });
@@ -1336,12 +1445,532 @@ describe.skipIf(!chrome || !built)("webview: P0 state restore, streaming tools, 
         newPosted: window.__posted.some((m) => m.type === "newChat"),
         notices,
       };`);
-    expect(out).toMatchObject({
+      expect(out).toMatchObject({
       ok: true,
       afterLog: { value: "", posted: [{ type: "openLog" }] },
       afterNewValue: "/new",
       newPosted: false,
       notices: ["Wait until the current action finishes before running this command."],
+    });
+  });
+
+  it("throttles rapid agentThought and toolCallOutput updates and flushes them immediately on turnEnd", () => {
+    const out = run(`${state}
+      state({ status: "busy", showThinking: true });
+      host({ type: "agentThought", messageId: "a1", text: "step 1" });
+      host({ type: "toolCall", toolCall: { id: "t1", title: "bash", kind: "execute", status: "in_progress", terminal: { output: "line 1\\n" } } });
+      const thoughtEl = document.querySelector(".thought-body");
+      const toolPre = document.querySelector(".tool-output pre");
+      const afterFirst = {
+        thought: thoughtEl.textContent,
+        tool: toolPre.textContent,
+      };
+
+      // Immediate second delta within the 80ms throttle window stays buffered before turnEnd.
+      host({ type: "agentThought", messageId: "a1", text: " + step 2" });
+      host({ type: "toolCallOutput", id: "t1", delta: "line 2\\n", status: "in_progress" });
+      const whileThrottled = {
+        thought: thoughtEl.textContent,
+        tool: toolPre.textContent,
+      };
+
+      // turnEnd cancels pending timers and flushes both immediately.
+      host({ type: "turnEnd", stopReason: "end_turn" });
+      const afterTurnEnd = {
+        thought: thoughtEl.textContent,
+        tool: toolPre.textContent,
+      };
+      window.__result = { afterFirst, whileThrottled, afterTurnEnd };`);
+      expect(out).toMatchObject({
+      ok: true,
+      afterFirst: { thought: "step 1", tool: "line 1\n" },
+      whileThrottled: { thought: "step 1", tool: "line 1\n" },
+      afterTurnEnd: { thought: "step 1 + step 2", tool: "line 1\nline 2\n" },
+    });
+  });
+});
+
+describe.skipIf(!chrome || !built)("webview: P1 images, insertMention, saveAll, history, and Escape cancel", () => {
+  it("handles insertMention, saveAll notice action, prompt history recall, and Escape to cancel when busy", () => {
+    const out = run(`${state}
+      state({});
+      const input = document.querySelector("textarea");
+      const chips = document.querySelector(".composer-chips");
+
+      // 1. insertMention inserts token at cursor and adds chip.
+      input.value = "inspect";
+      input.setSelectionRange(7, 7);
+      host({ type: "insertMention", item: { kind: "selection", path: "src/app.ts", range: { startLine: 10, endLine: 20 } } });
+      const afterInsert = {
+        value: input.value,
+        chipLabels: [...chips.querySelectorAll(".chip-label")].map((c) => c.textContent),
+      };
+
+      // Send first prompt, then second prompt.
+      input.dispatchEvent(new KeyboardEvent("keydown", { key: "Enter", bubbles: true }));
+      input.value = "second prompt";
+      input.dispatchEvent(new KeyboardEvent("keydown", { key: "Enter", bubbles: true }));
+
+      // 2. Type a draft, press ArrowUp twice to recall history, then ArrowDown twice to restore draft.
+      input.value = "unsent draft";
+      input.setSelectionRange(0, 0);
+      input.dispatchEvent(new KeyboardEvent("keydown", { key: "ArrowUp", bubbles: true }));
+      const up1 = input.value;
+      input.setSelectionRange(0, 0);
+      input.dispatchEvent(new KeyboardEvent("keydown", { key: "ArrowUp", bubbles: true }));
+      const up2 = input.value;
+      input.dispatchEvent(new KeyboardEvent("keydown", { key: "ArrowDown", bubbles: true }));
+      const down1 = input.value;
+      input.dispatchEvent(new KeyboardEvent("keydown", { key: "ArrowDown", bubbles: true }));
+      const down2 = input.value;
+
+      // 3. saveAll notice action posts saveAll.
+      host({ type: "notice", level: "info", text: "1 file has unsaved changes.", actions: [{ id: "saveAll", label: "Save all" }] });
+      document.querySelector(".notice button").click();
+
+      // 4. Escape while busy and menu closed posts cancel.
+      state({ status: "busy" });
+      input.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", bubbles: true }));
+
+      window.__result = {
+        afterInsert,
+        up1,
+        up2,
+        down1,
+        down2,
+        saveAllPosted: window.__posted.some((m) => m.type === "saveAll"),
+        cancelPosted: window.__posted.some((m) => m.type === "cancel"),
+      };`);
+    expect(out).toMatchObject({
+      ok: true,
+      afterInsert: {
+        value: "inspect @src/app.ts:L10-L20 ",
+        chipLabels: ["app.ts:L10-L20"],
+      },
+      up1: "second prompt",
+      up2: "inspect @src/app.ts:L10-L20 ",
+      down1: "second prompt",
+      down2: "unsent draft",
+      saveAllPosted: true,
+      cancelPosted: true,
+    });
+  });
+
+  it("attaches pasted and dropped images as chips, supports removing an image chip, and submits image-only prompts", () => {
+    const out = run(
+      `${state}
+      state({});
+      const input = document.querySelector("textarea");
+      const chips = document.querySelector(".composer-chips");
+
+      // Simulate image paste on input.
+      const pasteEvent = new Event("paste", { bubbles: true, cancelable: true });
+      Object.defineProperty(pasteEvent, "clipboardData", {
+        value: {
+          items: [
+            {
+              type: "image/png",
+              getAsFile: () => ({ type: "image/png", name: "clip.png", __base64: "iVBORw0KGgo=" }),
+            },
+            {
+              type: "image/jpeg",
+              getAsFile: () => ({ type: "image/jpeg", name: "photo.jpg", __base64: "AAAA" }),
+            },
+          ],
+        },
+      });
+      input.dispatchEvent(pasteEvent);
+
+      const chipLabelsBefore = [...chips.querySelectorAll(".chip-label")].map((c) => c.textContent);
+
+      // Remove first image chip.
+      chips.querySelector(".image-chip .chip-remove").click();
+      const chipLabelsAfterRemove = [...chips.querySelectorAll(".chip-label")].map((c) => c.textContent);
+
+      // Submit with empty text and remaining image attachment.
+      input.dispatchEvent(new KeyboardEvent("keydown", { key: "Enter", bubbles: true }));
+      const sends = window.__posted.filter((m) => m.type === "send");
+      window.__result = {
+        chipLabelsBefore,
+        chipLabelsAfterRemove,
+        chipsHiddenAfterSend: chips.hidden,
+        sends,
+      };`,
+      `window.FileReader = class {
+        constructor() { this._listeners = []; this.result = ""; }
+        addEventListener(type, fn) { if (type === "load") this._listeners.push(fn); }
+        readAsDataURL(file) {
+          this.result = "data:" + file.type + ";base64," + (file.__base64 || "iVBORw0KGgo=");
+          for (const fn of this._listeners) fn();
+        }
+      };`,
+    );
+    expect(out).toMatchObject({
+      ok: true,
+      chipLabelsBefore: ["[Image: clip.png]", "[Image: photo.jpg]"],
+      chipLabelsAfterRemove: ["[Image: photo.jpg]"],
+      chipsHiddenAfterSend: true,
+      sends: [
+        {
+          type: "send",
+          text: "",
+          images: [{ mimeType: "image/jpeg", data: "AAAA", name: "photo.jpg" }],
+        },
+      ],
+    });
+  });
+
+  it("tokenizes code blocks into tok-kw, tok-str, tok-num, and tok-com spans without altering textContent and posts copy to host", () => {
+    const code = 'const count = 42; // answer\nconst label = "hi";';
+    const out = run(`${mockClipboard}
+      ${state}
+      state({});
+      host({ type: "agentText", messageId: "a", text: ${lit("```ts\n" + code + "\n```")} });
+      const codeEl = document.querySelector("pre.code code");
+      const kws = [...codeEl.querySelectorAll(".tok-kw")].map((n) => n.textContent);
+      const nums = [...codeEl.querySelectorAll(".tok-num")].map((n) => n.textContent);
+      const strs = [...codeEl.querySelectorAll(".tok-str")].map((n) => n.textContent);
+      const coms = [...codeEl.querySelectorAll(".tok-com")].map((n) => n.textContent);
+      document.querySelector(".code-copy").click();
+      window.__result = {
+        fullText: codeEl.textContent,
+        kws,
+        nums,
+        strs,
+        coms,
+        copyPosted: window.__posted.filter((m) => m.type === "copy"),
+      };`);
+    expect(out).toMatchObject({
+      ok: true,
+      fullText: code,
+      kws: ["const", "const"],
+      nums: ["42"],
+      strs: ['"hi"'],
+      coms: ["// answer"],
+      copyPosted: [{ type: "copy", text: code }],
+    });
+  });
+
+  it("posts openFile when clicking a file or selection @ chip label and a tool card Open button", () => {
+    const out = run(`${state}
+      state({ cwd: "/workspace/proj" });
+      host({ type: "insertMention", item: { kind: "selection", path: "src/app.ts", range: { startLine: 10, endLine: 20 } } });
+      host({ type: "insertMention", item: { kind: "file", path: "src/util.ts" } });
+      host({ type: "insertMention", item: { kind: "folder", path: "src/" } });
+
+      const chips = [...document.querySelectorAll(".composer-chips .chip")];
+      const selectionLabel = chips[0].querySelector(".chip-label");
+      const fileLabel = chips[1].querySelector(".chip-label");
+      const folderLabel = chips[2].querySelector(".chip-label");
+
+      const chipMeta = {
+        selectionRole: selectionLabel.getAttribute("role"),
+        selectionTabIndex: selectionLabel.tabIndex,
+        fileRole: fileLabel.getAttribute("role"),
+        folderRole: folderLabel.getAttribute("role"),
+      };
+
+      selectionLabel.click();
+      fileLabel.click();
+      folderLabel.click();
+      // Removing the selection chip must not fire another openFile message.
+      chips[0].querySelector(".chip-remove").click();
+
+      host({ type: "toolCall", toolCall: { id: "t-open", title: "read src/app.ts", kind: "read", status: "completed", rawInput: { path: "./src\\\\app.ts" } } });
+      host({ type: "toolCall", toolCall: { id: "t-unsafe", title: "read ../secret.txt", kind: "read", status: "completed", rawInput: { path: "../secret.txt" } } });
+      host({ type: "toolCall", toolCall: { id: "t-both", title: "edit src/app.ts", kind: "edit", status: "completed", rawInput: { path: "src/app.ts" }, canDiff: true } });
+      host({ type: "toolCall", toolCall: { id: "t-abs-in", title: "read /workspace/proj/src/abs.ts", kind: "read", status: "completed", rawInput: { path: "/workspace/proj/src/abs.ts" } } });
+      host({ type: "toolCall", toolCall: { id: "t-abs-out", title: "read /other/proj/src/abs.ts", kind: "read", status: "completed", rawInput: { path: "/other/proj/src/abs.ts" } } });
+      host({ type: "toolCall", toolCall: { id: "t-abs-sibling", title: "read /workspace/proj-2/src/abs.ts", kind: "read", status: "completed", rawInput: { path: "/workspace/proj-2/src/abs.ts" } } });
+
+      // Windows drive-letter case-insensitive prefix matching.
+      state({ cwd: "C:\\\\Workspace\\\\Proj" });
+      host({ type: "toolCall", toolCall: { id: "t-win-in", title: "read win", kind: "read", status: "completed", rawInput: { path: "c:\\\\workspace\\\\proj\\\\src\\\\win.ts" } } });
+      host({ type: "toolCall", toolCall: { id: "t-win-out", title: "read win out", kind: "read", status: "completed", rawInput: { path: "D:\\\\Workspace\\\\Proj\\\\src\\\\win.ts" } } });
+
+      const openButtons = [...document.querySelectorAll(".tool-open-btn")];
+      openButtons[0].click();
+      openButtons[2].click();
+      openButtons[3].click();
+
+      const bothButtons = [...document.querySelectorAll(".tool")][2].querySelectorAll(".actions button");
+      window.__result = {
+        chipMeta,
+        remainingChips: document.querySelectorAll(".composer-chips .chip").length,
+        openButtonCount: openButtons.length,
+        bothButtonLabels: [...bothButtons].map((b) => b.textContent),
+        openFiles: window.__posted.filter((m) => m.type === "openFile"),
+      };`);
+    expect(out).toMatchObject({
+      ok: true,
+      chipMeta: {
+        selectionRole: "button",
+        selectionTabIndex: 0,
+        fileRole: "button",
+        folderRole: null,
+      },
+      remainingChips: 2,
+      openButtonCount: 4,
+      bothButtonLabels: ["Open", "Show diff"],
+      openFiles: [
+        { type: "openFile", path: "src/app.ts", line: 10 },
+        { type: "openFile", path: "src/util.ts" },
+        { type: "openFile", path: "src/app.ts" },
+        { type: "openFile", path: "src/abs.ts" },
+        { type: "openFile", path: "src/win.ts" },
+      ],
+    });
+  });
+
+  it("refuses pasted and dropped images with a warning notice when supportsImages is false", () => {
+    const out = run(
+      `${state}
+      state({ supportsImages: false });
+      const input = document.querySelector("textarea");
+      const composer = document.querySelector(".composer");
+      const chips = document.querySelector(".composer-chips");
+
+      const pasteEvent = new Event("paste", { bubbles: true, cancelable: true });
+      Object.defineProperty(pasteEvent, "clipboardData", {
+        value: {
+          items: [
+            {
+              type: "image/png",
+              getAsFile: () => ({ type: "image/png", name: "clip.png", __base64: "iVBORw0KGgo=" }),
+            },
+          ],
+        },
+      });
+      input.dispatchEvent(pasteEvent);
+
+      const dropEvent = new Event("drop", { bubbles: true, cancelable: true });
+      Object.defineProperty(dropEvent, "dataTransfer", {
+        value: {
+          files: [{ type: "image/jpeg", name: "drop.jpg", __base64: "AAAA" }],
+        },
+      });
+      composer.dispatchEvent(dropEvent);
+
+      const notices = [...document.querySelectorAll(".notice.warning")].map((n) => n.textContent);
+      window.__result = {
+        pastePrevented: pasteEvent.defaultPrevented,
+        dropPrevented: dropEvent.defaultPrevented,
+        chipCount: chips.querySelectorAll(".chip").length,
+        chipsHidden: chips.hidden,
+        notices,
+        sends: window.__posted.filter((m) => m.type === "send"),
+      };`,
+      `window.FileReader = class {
+        constructor() { this._listeners = []; this.result = ""; }
+        addEventListener(type, fn) { if (type === "load") this._listeners.push(fn); }
+        readAsDataURL(file) {
+          this.result = "data:" + file.type + ";base64," + (file.__base64 || "iVBORw0KGgo=");
+          for (const fn of this._listeners) fn();
+        }
+      };`,
+    );
+    expect(out).toMatchObject({
+      ok: true,
+      pastePrevented: true,
+      dropPrevented: true,
+      chipCount: 0,
+      chipsHidden: true,
+      notices: [
+        "This agent does not support image attachments.",
+        "This agent does not support image attachments.",
+      ],
+      sends: [],
+    });
+  });
+
+  it("preserves drafts and @ chips across ArrowUp/ArrowDown/Escape history navigation and guards mid-draft ArrowUp", () => {
+    const out = run(`${state}
+      state({});
+      const input = document.querySelector("textarea");
+      const chips = document.querySelector(".composer-chips");
+
+      // Send two prompts into history.
+      input.value = "first prompt";
+      input.dispatchEvent(new KeyboardEvent("keydown", { key: "Enter", bubbles: true }));
+      input.value = "second prompt";
+      input.dispatchEvent(new KeyboardEvent("keydown", { key: "Enter", bubbles: true }));
+
+      // 1. ArrowUp on empty box recalls latest history entry.
+      input.dispatchEvent(new KeyboardEvent("keydown", { key: "ArrowUp", bubbles: true }));
+      const recalledFromEmpty = input.value;
+      input.dispatchEvent(new KeyboardEvent("keydown", { key: "ArrowDown", bubbles: true }));
+      const restoredEmpty = input.value;
+
+      // 2. ArrowUp with cursor in the middle of a draft (pos 2) must NOT overwrite the draft.
+      input.value = "my long draft G";
+      input.setSelectionRange(2, 2);
+      input.dispatchEvent(new KeyboardEvent("keydown", { key: "ArrowUp", bubbles: true }));
+      const afterMidDraftUp = input.value;
+
+      // 3. Build a draft with an attached @ chip, recall at cursor 0, edit recalled text,
+      // verify ArrowUp does not clobber the edit, then ArrowDown restores draft + chip.
+      input.value = "check";
+      input.setSelectionRange(5, 5);
+      host({ type: "insertMention", item: { kind: "file", path: "src/app.ts" } });
+      const originalDraft = input.value;
+      input.setSelectionRange(0, 0);
+      input.dispatchEvent(new KeyboardEvent("keydown", { key: "ArrowUp", bubbles: true }));
+      const afterRecall = {
+        value: input.value,
+        chipCount: chips.querySelectorAll(".chip").length,
+      };
+      input.value = "second prompt edited";
+      input.dispatchEvent(new Event("input", { bubbles: true }));
+      input.setSelectionRange(0, 0);
+      input.dispatchEvent(new KeyboardEvent("keydown", { key: "ArrowUp", bubbles: true }));
+      const afterEditedUp = input.value;
+      input.setSelectionRange(input.value.length, input.value.length);
+      input.dispatchEvent(new KeyboardEvent("keydown", { key: "ArrowDown", bubbles: true }));
+      const afterEditedDown = {
+        value: input.value,
+        chipLabels: [...chips.querySelectorAll(".chip-label")].map((c) => c.textContent),
+      };
+
+      // 4. Recall again, edit, then press Escape while ready to restore draft + chip.
+      input.setSelectionRange(0, 0);
+      input.dispatchEvent(new KeyboardEvent("keydown", { key: "ArrowUp", bubbles: true }));
+      input.value = "another edit";
+      input.dispatchEvent(new Event("input", { bubbles: true }));
+      input.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", bubbles: true }));
+      const afterEscape = {
+        value: input.value,
+        chipLabels: [...chips.querySelectorAll(".chip-label")].map((c) => c.textContent),
+      };
+
+      window.__result = {
+        recalledFromEmpty,
+        restoredEmpty,
+        afterMidDraftUp,
+        originalDraft,
+        afterRecall,
+        afterEditedUp,
+        afterEditedDown,
+        afterEscape,
+      };`);
+    expect(out).toMatchObject({
+      ok: true,
+      recalledFromEmpty: "second prompt",
+      restoredEmpty: "",
+      afterMidDraftUp: "my long draft G",
+      originalDraft: "check @src/app.ts ",
+      afterRecall: { value: "second prompt", chipCount: 0 },
+      afterEditedUp: "second prompt edited",
+      afterEditedDown: { value: "check @src/app.ts ", chipLabels: ["app.ts"] },
+      afterEscape: { value: "check @src/app.ts ", chipLabels: ["app.ts"] },
+    });
+  });
+
+  it("preserves pasted images across non-/new client commands and restores sanitized images from webview state", () => {
+    const mockFileReader = `window.FileReader = class {
+      constructor() { this._listeners = []; this.result = ""; }
+      addEventListener(type, fn) { if (type === "load") this._listeners.push(fn); }
+      readAsDataURL(file) {
+        this.result = "data:" + file.type + ";base64," + (file.__base64 || "iVBORw0KGgo=");
+        for (const fn of this._listeners) fn();
+      }
+    };`;
+    const out = run(
+      `${state}
+      state({ mode: { current: "ask", options: [{ id: "ask", name: "Ask" }, { id: "auto", name: "Auto" }] } });
+      const input = document.querySelector("textarea");
+      const chips = document.querySelector(".composer-chips");
+
+      // Paste an image and verify state persistence.
+      const pasteEvent = new Event("paste", { bubbles: true, cancelable: true });
+      Object.defineProperty(pasteEvent, "clipboardData", {
+        value: {
+          items: [
+            {
+              type: "image/png",
+              getAsFile: () => ({ type: "image/png", name: "clip.png", __base64: "iVBORw0KGgo=" }),
+            },
+          ],
+        },
+      });
+      input.dispatchEvent(pasteEvent);
+      const persistedAfterPaste = window.__webviewState?.images;
+
+      // Typing /log + Enter must preserve attached images.
+      input.value = "/log";
+      input.dispatchEvent(new KeyboardEvent("keydown", { key: "Enter", bubbles: true }));
+      const afterLog = {
+        value: input.value,
+        chipLabels: [...chips.querySelectorAll(".chip-label")].map((c) => c.textContent),
+        persistedImages: window.__webviewState?.images,
+        openLogCount: window.__posted.filter((m) => m.type === "openLog").length,
+      };
+
+      // Typing /new + Enter clears attached images.
+      input.value = "/new";
+      input.dispatchEvent(new KeyboardEvent("keydown", { key: "Enter", bubbles: true }));
+      const afterNew = {
+        value: input.value,
+        chipCount: chips.querySelectorAll(".chip").length,
+        persistedImages: window.__webviewState?.images,
+        newChatCount: window.__posted.filter((m) => m.type === "newChat").length,
+      };
+
+      window.__result = { persistedAfterPaste, afterLog, afterNew };`,
+      mockFileReader,
+    );
+    expect(out).toMatchObject({
+      ok: true,
+      persistedAfterPaste: [{ mimeType: "image/png", data: "iVBORw0KGgo=", name: "clip.png" }],
+      afterLog: {
+        value: "",
+        chipLabels: ["[Image: clip.png]"],
+        persistedImages: [{ mimeType: "image/png", data: "iVBORw0KGgo=", name: "clip.png" }],
+        openLogCount: 1,
+      },
+      afterNew: {
+        value: "",
+        chipCount: 0,
+        persistedImages: [],
+        newChatCount: 1,
+      },
+    });
+
+    // Reloading with preseeded window.__webviewState.images restores valid images and filters invalid ones.
+    const preseed = `window.__webviewState = ${JSON.stringify({
+      draft: "look at this",
+      attachments: [],
+      images: [
+        { mimeType: "image/png", data: "iVBORw0KGgo=", name: "saved.png" },
+        { mimeType: "image/svg+xml", data: "AAAA", name: "bad.svg" },
+        { mimeType: "image/jpeg", data: "not base64!!!", name: "bad.jpg" },
+      ],
+      followTail: true,
+      scrollTop: 0,
+      openDetails: {},
+    })};`;
+    const reloaded = run(
+      `${state}
+      state({});
+      const input = document.querySelector("textarea");
+      const chips = document.querySelector(".composer-chips");
+      const restoredLabels = [...chips.querySelectorAll(".chip-label")].map((c) => c.textContent);
+      input.dispatchEvent(new KeyboardEvent("keydown", { key: "Enter", bubbles: true }));
+      window.__result = {
+        restoredLabels,
+        sends: window.__posted.filter((m) => m.type === "send"),
+      };`,
+      preseed,
+    );
+    expect(reloaded).toMatchObject({
+      ok: true,
+      restoredLabels: ["[Image: saved.png]"],
+      sends: [
+        {
+          type: "send",
+          text: "look at this",
+          images: [{ mimeType: "image/png", data: "iVBORw0KGgo=", name: "saved.png" }],
+        },
+      ],
     });
   });
 });

@@ -23,15 +23,20 @@ import {
   type MentionAttachment,
   type RankedMention,
 } from "../core/mentions.js";
-import type {
-  HostMessage,
-  NoticeAction,
-  PermissionRequestView,
-  StateMessage,
-  ToolCallView,
-  ToolStatus,
-  TranscriptItem,
-  WebviewMessage,
+import {
+  ALLOWED_IMAGE_MIMES,
+  MAX_IMAGES,
+  MAX_IMAGE_DATA_CHARS,
+  type HostMessage,
+  type ImageAttachment,
+  type ImageMimeType,
+  type NoticeAction,
+  type PermissionRequestView,
+  type StateMessage,
+  type ToolCallView,
+  type ToolStatus,
+  type TranscriptItem,
+  type WebviewMessage,
 } from "../core/protocol.js";
 import { describeContext, folderName, formatCost, formatDuration } from "../core/status-row.js";
 import { throttle, type Scheduler, type Throttled } from "../core/throttle.js";
@@ -40,6 +45,7 @@ import { copyButton, el, highlightedText, renderBlocks } from "./dom.js";
 interface PersistedWebviewState {
   draft: string;
   attachments: MentionAttachment[];
+  images?: ImageAttachment[];
   followTail: boolean;
   scrollTop: number;
   openDetails: Record<string, boolean>;
@@ -173,6 +179,9 @@ type ToolEntry = {
   outputPre: HTMLPreElement;
   outputCopyBtn: HTMLButtonElement;
   diffWrap: HTMLElement;
+  diffBtn: HTMLButtonElement;
+  openBtn: HTMLButtonElement;
+  openFilePath: string | undefined;
   call: ToolCallView;
   drawnOutput: string;
   drawOutput: Throttled;
@@ -197,6 +206,8 @@ type MenuItem =
   | { kind: "slash-arg"; command: SlashArgCommand; option: SlashArgOption; labelMatches?: number[] }
   | { kind: "mention"; item: RankedMention };
 
+const MENTION_LOADING_TIMEOUT_MS = 1000;
+
 let activeTrigger: ComposerTrigger | undefined;
 let menuItems: MenuItem[] = [];
 let activeIndex = 0;
@@ -205,7 +216,19 @@ let mentionLoading = false;
 let dismissedKey: string | undefined;
 let mentionSeq = 0;
 let mentionTimer: number | undefined;
+let mentionLoadingTimer: number | undefined;
 let attachments: MentionAttachment[] = [];
+let imageAttachments: ImageAttachment[] = [];
+
+const MAX_HISTORY = 50;
+const sentHistory: string[] = [];
+let historyIndex = -1;
+let historyDraft: { text: string; attachments: MentionAttachment[] } | undefined;
+let historyEdited = false;
+
+function cloneAttachments(items: readonly MentionAttachment[]): MentionAttachment[] {
+  return items.map((item) => (item.range ? { ...item, range: { ...item.range } } : { ...item }));
+}
 
 function isPlainRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value);
@@ -249,6 +272,33 @@ function sanitizeAttachments(raw: unknown): MentionAttachment[] {
   return out;
 }
 
+function sanitizeImages(raw: unknown): ImageAttachment[] {
+  if (!Array.isArray(raw)) return [];
+  const out: ImageAttachment[] = [];
+  for (const entry of raw) {
+    if (!isPlainRecord(entry)) continue;
+    if (typeof entry.mimeType !== "string" || !(ALLOWED_IMAGE_MIMES as readonly string[]).includes(entry.mimeType)) {
+      continue;
+    }
+    if (
+      typeof entry.data !== "string" ||
+      entry.data === "" ||
+      entry.data.length > MAX_IMAGE_DATA_CHARS ||
+      !/^[A-Za-z0-9+/=]+$/.test(entry.data)
+    ) {
+      continue;
+    }
+    const cleanName = typeof entry.name === "string" && entry.name.trim() !== "" ? entry.name.trim().slice(0, 128) : undefined;
+    out.push({
+      mimeType: entry.mimeType as ImageMimeType,
+      data: entry.data,
+      ...(cleanName ? { name: cleanName } : {}),
+    });
+    if (out.length >= MAX_IMAGES) break;
+  }
+  return out;
+}
+
 function loadPersistedState(): PersistedWebviewState | undefined {
   let raw: unknown;
   try {
@@ -259,6 +309,7 @@ function loadPersistedState(): PersistedWebviewState | undefined {
   if (!isPlainRecord(raw)) return undefined;
   const draft = typeof raw.draft === "string" ? raw.draft.slice(0, 200_000) : "";
   const restoredAttachments = sanitizeAttachments(raw.attachments);
+  const restoredImages = sanitizeImages(raw.images);
   const follow = typeof raw.followTail === "boolean" ? raw.followTail : true;
   const scrollTop =
     typeof raw.scrollTop === "number" && Number.isFinite(raw.scrollTop) && raw.scrollTop >= 0 ? raw.scrollTop : 0;
@@ -276,6 +327,7 @@ function loadPersistedState(): PersistedWebviewState | undefined {
   return {
     draft,
     attachments: restoredAttachments,
+    images: restoredImages,
     followTail: follow,
     scrollTop,
     openDetails: details,
@@ -286,7 +338,8 @@ function saveWebviewState(): void {
   try {
     vscode.setState?.({
       draft: input.value,
-      attachments: attachments.map((item) => (item.range ? { ...item, range: { ...item.range } } : { ...item })),
+      attachments: cloneAttachments(attachments),
+      images: imageAttachments.map((img) => ({ ...img })),
       followTail,
       scrollTop: Math.max(0, transcript.scrollTop),
       openDetails: Object.fromEntries(openDetails),
@@ -346,6 +399,7 @@ function legacyCopy(text: string): boolean {
 
 async function writeClipboard(text: string): Promise<boolean> {
   (window as unknown as { __copied?: string }).__copied = text;
+  if (text !== "") send({ type: "copy", text });
   try {
     await navigator.clipboard.writeText(text);
     return true;
@@ -722,6 +776,26 @@ function drawToolOutput(entry: ToolEntry): void {
   scrollToEnd();
 }
 
+function toolFilePath(call: ToolCallView): string | undefined {
+  if (!isPlainRecord(call.rawInput) || typeof call.rawInput.path !== "string") return undefined;
+  const rawPath = call.rawInput.path;
+  const isAbs = rawPath.startsWith("/") || /^[A-Za-z]:[\\/]/.test(rawPath);
+  if (isAbs) {
+    if (!state.cwd) return undefined;
+    const cwdNorm = state.cwd.replace(/\\/g, "/").replace(/\/+/g, "/").replace(/\/+$/, "");
+    const pathNorm = rawPath.replace(/\\/g, "/").replace(/\/+/g, "/");
+    const prefix = `${cwdNorm}/`;
+    const isWinDrive = /^[A-Za-z]:\//.test(prefix);
+    const matchesPrefix = isWinDrive
+      ? pathNorm.length > prefix.length &&
+        pathNorm.slice(0, prefix.length).toLowerCase() === prefix.toLowerCase()
+      : pathNorm.startsWith(prefix);
+    if (!matchesPrefix) return undefined;
+    return normalizeRelativePath(pathNorm.slice(prefix.length), "file");
+  }
+  return normalizeRelativePath(rawPath, "file");
+}
+
 function createToolEntry(call: ToolCallView): ToolEntry {
   const badge = el("span", { class: `badge ${call.status}`, text: call.status.replace("_", " ") });
   const titleEl = el("span", { class: "tool-title", text: call.title });
@@ -732,7 +806,15 @@ function createToolEntry(call: ToolCallView): ToolEntry {
   const outputCopyBtn = copyButton("", "Copy output", "output-copy", "Copy");
   const outputBody = el("div", { class: "tool-output-body" }, outputPre);
   const outputDetails = el("details", { class: "tool-output" }, outputSummary, outputBody);
-  const diffWrap = el("div", { class: "actions" }, button("Show diff", () => send({ type: "showDiff", toolCallId: call.id })));
+  const diffBtn = button("Show diff", () => send({ type: "showDiff", toolCallId: call.id }));
+  const openBtn = button(
+    "Open",
+    () => {
+      if (entry.openFilePath !== undefined) send({ type: "openFile", path: entry.openFilePath });
+    },
+    "secondary tool-open-btn",
+  );
+  const diffWrap = el("div", { class: "actions" });
   const rootEl = el("article", { class: "tool" }, headerLine);
 
   const savedOpen = openDetails.get(`tool:${call.id}`);
@@ -752,6 +834,9 @@ function createToolEntry(call: ToolCallView): ToolEntry {
     outputPre,
     outputCopyBtn,
     diffWrap,
+    diffBtn,
+    openBtn,
+    openFilePath: undefined,
     call,
     drawnOutput: "",
     drawOutput: throttle(() => drawToolOutput(entry), DRAW_INTERVAL_MS, scheduler),
@@ -820,7 +905,24 @@ function upsertTool(call: ToolCallView): void {
   const hasOutput = body !== "" || call.terminal?.exitCode !== undefined;
   syncToolOutputState(entry, body, hasOutput);
 
+  const filePath = toolFilePath(call);
+  entry.openFilePath = filePath;
+  if (filePath !== undefined) {
+    entry.openBtn.title = `Open ${filePath}`;
+    entry.openBtn.setAttribute("aria-label", `Open ${filePath}`);
+    if (!entry.openBtn.isConnected) {
+      if (entry.diffBtn.isConnected) entry.diffWrap.insertBefore(entry.openBtn, entry.diffBtn);
+      else entry.diffWrap.append(entry.openBtn);
+    }
+  } else if (entry.openBtn.isConnected) {
+    entry.openBtn.remove();
+  }
   if (call.canDiff) {
+    if (!entry.diffBtn.isConnected) entry.diffWrap.append(entry.diffBtn);
+  } else if (entry.diffBtn.isConnected) {
+    entry.diffBtn.remove();
+  }
+  if (call.canDiff || filePath !== undefined) {
     if (!entry.diffWrap.isConnected) entry.root.append(entry.diffWrap);
   } else if (entry.diffWrap.isConnected) {
     entry.diffWrap.remove();
@@ -907,6 +1009,7 @@ const NOTICE_MESSAGE: Record<NoticeAction["id"], WebviewMessage> = {
   openGuide: { type: "openGuide" },
   openAgentConfig: { type: "openAgentConfig" },
   openLog: { type: "openLog" },
+  saveAll: { type: "saveAll" },
 };
 
 function addNotice(level: string, text: string, actions?: NoticeAction[]): void {
@@ -959,6 +1062,7 @@ function resetTranscript(items: TranscriptItem[]): void {
   closePopover();
   if (!isInitial) {
     attachments = [];
+    imageAttachments = [];
     renderChips();
     openDetails.clear();
     pendingScrollRestore = undefined;
@@ -1047,11 +1151,29 @@ function onHostMessage(message: HostMessage): void {
       return;
     case "mentionResults":
       if (message.requestId !== mentionSeq || activeTrigger?.kind !== "mention") return;
+      clearMentionLoadingTimer();
       mentionLoading = false;
       menuItems = message.items.map((item) => ({ kind: "mention", item }));
       activeIndex = 0;
       renderPopover();
       return;
+    case "insertMention": {
+      const item = message.item;
+      const token = formatMentionToken(item);
+      const cursor = input.selectionStart ?? input.value.length;
+      const before = input.value.slice(0, cursor);
+      const after = input.value.slice(cursor);
+      const leadSpace = before.length > 0 && !/\s$/.test(before) ? " " : "";
+      const trailSpace = after.startsWith(" ") ? "" : " ";
+      const inserted = `${leadSpace}${token}${trailSpace}`;
+      input.value = before + inserted + after;
+      const nextPos = before.length + inserted.length;
+      input.setSelectionRange(nextPos, nextPos);
+      addAttachment(item);
+      saveWebviewState();
+      input.focus();
+      return;
+    }
   }
   scrollToEnd();
 }
@@ -1061,6 +1183,25 @@ function clearMentionTimer(): void {
     window.clearTimeout(mentionTimer);
     mentionTimer = undefined;
   }
+}
+
+function clearMentionLoadingTimer(): void {
+  if (mentionLoadingTimer !== undefined) {
+    window.clearTimeout(mentionLoadingTimer);
+    mentionLoadingTimer = undefined;
+  }
+}
+
+function startMentionLoading(): void {
+  mentionLoading = true;
+  clearMentionLoadingTimer();
+  mentionLoadingTimer = window.setTimeout(() => {
+    mentionLoadingTimer = undefined;
+    if (mentionLoading) {
+      mentionLoading = false;
+      renderPopover();
+    }
+  }, MENTION_LOADING_TIMEOUT_MS);
 }
 
 function syncComboboxAria(): void {
@@ -1074,6 +1215,7 @@ function syncComboboxAria(): void {
 
 function closePopover(): void {
   clearMentionTimer();
+  clearMentionLoadingTimer();
   mentionLoading = false;
   activeTrigger = undefined;
   menuItems = [];
@@ -1173,7 +1315,12 @@ function renderPopover(): void {
         el("span", { class: "popover-title" }, ...highlightedText(item.label, item.labelMatches)),
       );
       if (item.badge) {
-        top.append(el("span", { class: `popover-badge ${item.badge}`, text: item.badge }));
+        top.append(
+          el("span", {
+            class: `popover-badge ${item.badge}`,
+            text: item.badge === "secret" ? "may hold secrets" : item.badge,
+          }),
+        );
       }
       row.append(top);
       if (item.detail !== "") {
@@ -1189,7 +1336,7 @@ function renderPopover(): void {
 
 function renderChips(): void {
   chipsBar.replaceChildren();
-  chipsBar.hidden = attachments.length === 0;
+  chipsBar.hidden = attachments.length === 0 && imageAttachments.length === 0;
   for (const att of attachments) {
     const label = mentionLabel(att);
     const title =
@@ -1204,16 +1351,102 @@ function renderChips(): void {
       title: `Remove ${label}`,
     });
     removeBtn.addEventListener("click", () => removeAttachment(att));
+    const canOpen = att.kind === "file" || att.kind === "selection";
+    const labelEl = el("span", {
+      class: canOpen ? "chip-label clickable" : "chip-label",
+      text: label,
+      ...(canOpen ? { role: "button", title: `Open ${title}` } : {}),
+    });
+    if (canOpen) {
+      labelEl.tabIndex = 0;
+      const open = () =>
+        send({
+          type: "openFile",
+          path: att.path,
+          ...(att.range ? { line: att.range.startLine } : {}),
+        });
+      labelEl.addEventListener("click", open);
+      labelEl.addEventListener("keydown", (event) => {
+        if (event.key === "Enter" || event.key === " ") {
+          event.preventDefault();
+          open();
+        }
+      });
+    }
     chipsBar.append(
       el(
         "div",
         { class: "chip", role: "listitem", title },
         el("span", { class: `mention-icon ${att.kind}`, ariaHidden: true }),
-        el("span", { class: "chip-label", text: label }),
+        labelEl,
         removeBtn,
       ),
     );
   }
+  imageAttachments.forEach((img, index) => {
+    const label = `[Image: ${img.name ?? img.mimeType}]`;
+    const removeBtn = el("button", {
+      class: "chip-remove",
+      type: "button",
+      text: "×",
+      ariaLabel: `Remove ${label}`,
+      title: `Remove ${label}`,
+    });
+    removeBtn.addEventListener("click", () => {
+      imageAttachments.splice(index, 1);
+      renderChips();
+      saveWebviewState();
+      input.focus();
+    });
+    chipsBar.append(
+      el(
+        "div",
+        { class: "chip image-chip", role: "listitem", title: label },
+        el("span", { class: "chip-label", text: label }),
+        removeBtn,
+      ),
+    );
+  });
+}
+
+function addImageAttachment(mimeType: string, base64Data: string, name?: string): void {
+  if (input.disabled) return;
+  if (state.supportsImages === false) {
+    addNotice("warning", "This agent does not support image attachments.");
+    scrollToEnd();
+    return;
+  }
+  if (!(ALLOWED_IMAGE_MIMES as readonly string[]).includes(mimeType)) return;
+  if (imageAttachments.length >= MAX_IMAGES) {
+    addNotice("warning", `At most ${MAX_IMAGES} images can be attached to a message.`);
+    scrollToEnd();
+    return;
+  }
+  if (base64Data === "" || base64Data.length > MAX_IMAGE_DATA_CHARS || !/^[A-Za-z0-9+/=]+$/.test(base64Data)) {
+    addNotice("warning", "Image is empty or too large (limit 5 MB).");
+    scrollToEnd();
+    return;
+  }
+  const cleanName = name && name.trim() !== "" ? name.trim().slice(0, 128) : undefined;
+  imageAttachments.push({
+    mimeType: mimeType as ImageMimeType,
+    data: base64Data,
+    ...(cleanName ? { name: cleanName } : {}),
+  });
+  renderChips();
+  saveWebviewState();
+}
+
+function readImageFile(file: File): void {
+  if (!(ALLOWED_IMAGE_MIMES as readonly string[]).includes(file.type)) return;
+  const reader = new FileReader();
+  reader.addEventListener("load", () => {
+    if (typeof reader.result !== "string") return;
+    const comma = reader.result.indexOf(",");
+    if (comma < 0) return;
+    addImageAttachment(file.type, reader.result.slice(comma + 1), file.name);
+  });
+  reader.readAsDataURL(file);
 }
 
 function addAttachment(attachment: MentionAttachment): void {
@@ -1244,7 +1477,7 @@ function syncAttachmentsWithInput(): void {
   }
 }
 
-function dispatchClientCommand(text: string): "dispatched" | "notice" | "none" {
+function dispatchClientCommand(text: string): "dispatched-new" | "dispatched" | "notice" | "none" {
   const resolved = resolveClientSlashCommand(text, state);
   if (!resolved) return "none";
   if (resolved.kind === "message") {
@@ -1254,7 +1487,7 @@ function dispatchClientCommand(text: string): "dispatched" | "notice" | "none" {
       return "notice";
     }
     send(resolved.message);
-    return "dispatched";
+    return resolved.message.type === "newChat" ? "dispatched-new" : "dispatched";
   }
   addNotice(resolved.level, resolved.text);
   scrollToEnd();
@@ -1264,7 +1497,7 @@ function dispatchClientCommand(text: string): "dispatched" | "notice" | "none" {
 function requestMentions(query: string): void {
   clearMentionTimer();
   const requestId = ++mentionSeq;
-  mentionLoading = true;
+  startMentionLoading();
   send({ type: "queryMentions", requestId, query });
 }
 
@@ -1323,6 +1556,7 @@ function updateTrigger(force = false): void {
 
   if (trigger.kind === "slash" || trigger.kind === "slash-arg") {
     clearMentionTimer();
+    clearMentionLoadingTimer();
     mentionLoading = false;
     refreshOpenMenu();
     return;
@@ -1340,7 +1574,7 @@ function updateTrigger(force = false): void {
     renderPopover();
   } else {
     clearMentionTimer();
-    mentionLoading = true;
+    startMentionLoading();
     renderPopover();
     const query = trigger.query;
     mentionTimer = window.setTimeout(() => {
@@ -1373,17 +1607,33 @@ function acceptMenuItem(index: number, mode: "enter" | "tab"): void {
 
   if (selected.kind === "slash") {
     const cmd = selected.command;
-    if (!cmd.takesArgs && mode === "enter" && prefix.trim() === "" && suffix.trim() === "" && cmd.source === "client") {
+    const openedViaButtonOnDraft = trigger.range.start === 0 && trigger.range.end === 0 && suffix.trim() !== "";
+    if (
+      !cmd.takesArgs &&
+      mode === "enter" &&
+      cmd.source === "client" &&
+      ((prefix.trim() === "" && suffix.trim() === "") || openedViaButtonOnDraft)
+    ) {
       const resolved = resolveClientSlashCommand(`/${cmd.name}`, state);
       if (resolved?.kind === "message" && canRunClientCommandInStatus(resolved.message, state.status)) {
         closePopover();
-        input.value = "";
+        if (!openedViaButtonOnDraft) {
+          input.value = "";
+          attachments = [];
+          if (cmd.name === "new") imageAttachments = [];
+          renderChips();
+        }
         saveWebviewState();
         dispatchClientCommand(`/${cmd.name}`);
       } else {
-        replaceTriggerRange(trigger, `/${cmd.name}`);
+        if (!openedViaButtonOnDraft) {
+          replaceTriggerRange(trigger, `/${cmd.name}`);
+        }
         closePopover();
         saveWebviewState();
+        if (openedViaButtonOnDraft) {
+          dispatchClientCommand(`/${cmd.name}`);
+        }
       }
       return;
     }
@@ -1400,6 +1650,8 @@ function acceptMenuItem(index: number, mode: "enter" | "tab"): void {
       const fullText = prefix + argId;
       closePopover();
       input.value = "";
+      attachments = [];
+      renderChips();
       saveWebviewState();
       dispatchClientCommand(fullText);
       return;
@@ -1429,36 +1681,125 @@ function acceptMenuItem(index: number, mode: "enter" | "tab"): void {
   closePopover();
 }
 
+function recordHistory(text: string): void {
+  historyIndex = -1;
+  historyEdited = false;
+  historyDraft = undefined;
+  if (text.trim() === "") return;
+  if (sentHistory.at(-1) !== text) {
+    sentHistory.push(text);
+    if (sentHistory.length > MAX_HISTORY) sentHistory.shift();
+  }
+}
+
+function restoreHistoryDraft(): void {
+  input.value = historyDraft?.text ?? "";
+  attachments = historyDraft ? cloneAttachments(historyDraft.attachments) : [];
+  historyIndex = -1;
+  historyEdited = false;
+  historyDraft = undefined;
+  input.setSelectionRange(input.value.length, input.value.length);
+  renderChips();
+  saveStateThrottled.request();
+}
+
 function submit(): void {
   syncAttachmentsWithInput();
   const text = input.value;
-  if (text.trim() === "") return;
-  if (attachments.length === 0) {
+  if (text.trim() === "" && imageAttachments.length === 0) return;
+  if (text.trim() !== "") {
     const outcome = dispatchClientCommand(text);
     if (outcome !== "none") {
       closePopover();
-      if (outcome === "dispatched") {
+      if (outcome === "dispatched" || outcome === "dispatched-new") {
+        recordHistory(text);
         input.value = "";
+        attachments = [];
+        if (outcome === "dispatched-new") {
+          imageAttachments = [];
+        }
+        renderChips();
         saveWebviewState();
       }
       return;
     }
   }
   if (state.status !== "ready") return;
+  if (imageAttachments.length > 0 && state.supportsImages === false) {
+    addNotice("warning", "This agent does not support image attachments.");
+    scrollToEnd();
+    return;
+  }
   closePopover();
   followTail = true;
   syncJumpBottom();
-  const payload: WebviewMessage =
-    attachments.length > 0 ? { type: "send", text, mentions: [...attachments] } : { type: "send", text };
+  recordHistory(text);
+  const payload: WebviewMessage = {
+    type: "send",
+    text,
+    ...(attachments.length > 0 ? { mentions: [...attachments] } : {}),
+    ...(imageAttachments.length > 0 ? { images: [...imageAttachments] } : {}),
+  };
   send(payload);
   input.value = "";
   attachments = [];
+  imageAttachments = [];
   renderChips();
   saveWebviewState();
 }
 
 sendButton.addEventListener("click", submit);
 stopButton.addEventListener("click", () => send({ type: "cancel" }));
+
+input.addEventListener("paste", (event) => {
+  if (input.disabled) return;
+  const items = event.clipboardData?.items;
+  if (!items) return;
+  let handledImage = false;
+  for (const item of Array.from(items)) {
+    if ((ALLOWED_IMAGE_MIMES as readonly string[]).includes(item.type)) {
+      const file = item.getAsFile();
+      if (file) {
+        if (state.supportsImages === false) {
+          event.preventDefault();
+          addNotice("warning", "This agent does not support image attachments.");
+          scrollToEnd();
+          return;
+        }
+        handledImage = true;
+        readImageFile(file);
+      }
+    }
+  }
+  if (handledImage) event.preventDefault();
+});
+
+composer.addEventListener("dragover", (event) => {
+  if (input.disabled) return;
+  if (event.dataTransfer?.types.includes("Files")) {
+    event.preventDefault();
+  }
+});
+
+composer.addEventListener("drop", (event) => {
+  if (input.disabled) return;
+  const files = event.dataTransfer?.files;
+  if (!files || files.length === 0) return;
+  let hasImage = false;
+  for (const file of Array.from(files)) {
+    if ((ALLOWED_IMAGE_MIMES as readonly string[]).includes(file.type)) {
+      if (state.supportsImages === false) {
+        event.preventDefault();
+        addNotice("warning", "This agent does not support image attachments.");
+        scrollToEnd();
+        return;
+      }
+      hasImage = true;
+      readImageFile(file);
+    }
+  }
+  if (hasImage) event.preventDefault();
+});
 
 mentionTriggerButton.addEventListener("click", () => {
   if (input.disabled) return;
@@ -1500,6 +1841,7 @@ slashTriggerButton.addEventListener("click", () => {
     activeIndex = 0;
     dismissedKey = undefined;
     clearMentionTimer();
+    clearMentionLoadingTimer();
     mentionLoading = false;
     refreshOpenMenu();
     return;
@@ -1549,6 +1891,9 @@ document.addEventListener("mousedown", (event) => {
 });
 
 input.addEventListener("input", () => {
+  if (historyIndex >= 0) {
+    historyEdited = true;
+  }
   syncAttachmentsWithInput();
   saveStateThrottled.request();
   updateTrigger();
@@ -1582,7 +1927,7 @@ input.addEventListener("keydown", (event) => {
       return;
     }
     if (activeTrigger?.kind === "mention" && mentionLoading) {
-      if (event.key === "Tab" || (event.key === "Enter" && !event.shiftKey)) {
+      if ((event.key === "Tab" && !event.shiftKey) || (event.key === "Enter" && !event.shiftKey)) {
         event.preventDefault();
         return;
       }
@@ -1600,7 +1945,7 @@ input.addEventListener("keydown", (event) => {
         syncActiveOption();
         return;
       }
-      if (event.key === "Tab") {
+      if (event.key === "Tab" && !event.shiftKey) {
         event.preventDefault();
         acceptMenuItem(activeIndex, "tab");
         return;
@@ -1610,6 +1955,66 @@ input.addEventListener("keydown", (event) => {
         acceptMenuItem(activeIndex, "enter");
         return;
       }
+    }
+  }
+
+  if (event.key === "Escape" && state.status === "busy") {
+    event.preventDefault();
+    send({ type: "cancel" });
+    return;
+  }
+
+  if (event.key === "Escape" && !menuOpen && state.status !== "busy" && historyIndex >= 0 && historyDraft !== undefined) {
+    event.preventDefault();
+    restoreHistoryDraft();
+    return;
+  }
+
+  const noModifiers = !event.shiftKey && !event.ctrlKey && !event.altKey && !event.metaKey;
+  if (event.key === "ArrowUp" && !menuOpen && noModifiers && sentHistory.length > 0) {
+    const cursor = input.selectionStart ?? 0;
+    const selectionEnd = input.selectionEnd ?? cursor;
+    const onFirstLine = !input.value.slice(0, cursor).includes("\n");
+    if (historyIndex === -1) {
+      if (input.value === "" || (cursor === 0 && selectionEnd === 0)) {
+        event.preventDefault();
+        historyDraft = { text: input.value, attachments: cloneAttachments(attachments) };
+        historyIndex = sentHistory.length - 1;
+        historyEdited = false;
+        input.value = sentHistory[historyIndex]!;
+        input.setSelectionRange(input.value.length, input.value.length);
+        syncAttachmentsWithInput();
+        saveStateThrottled.request();
+        return;
+      }
+    } else if (!historyEdited && onFirstLine) {
+      event.preventDefault();
+      if (historyIndex > 0) {
+        historyIndex--;
+      }
+      input.value = sentHistory[historyIndex]!;
+      input.setSelectionRange(input.value.length, input.value.length);
+      syncAttachmentsWithInput();
+      saveStateThrottled.request();
+      return;
+    }
+  }
+
+  if (event.key === "ArrowDown" && !menuOpen && noModifiers && historyIndex >= 0) {
+    const cursor = input.selectionEnd ?? input.value.length;
+    const onLastLine = !input.value.slice(cursor).includes("\n");
+    if (onLastLine) {
+      event.preventDefault();
+      if (!historyEdited && historyIndex < sentHistory.length - 1) {
+        historyIndex++;
+        input.value = sentHistory[historyIndex]!;
+        input.setSelectionRange(input.value.length, input.value.length);
+        syncAttachmentsWithInput();
+        saveStateThrottled.request();
+      } else {
+        restoreHistoryDraft();
+      }
+      return;
     }
   }
 
@@ -1645,6 +2050,7 @@ const restored = loadPersistedState();
 if (restored) {
   input.value = restored.draft;
   attachments = restored.attachments;
+  imageAttachments = restored.images ?? [];
   renderChips();
   for (const [key, value] of Object.entries(restored.openDetails)) {
     openDetails.set(key, value);

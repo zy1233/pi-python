@@ -4,8 +4,8 @@ import path from "node:path";
 import * as vscode from "vscode";
 
 import { agentConfigPath } from "../core/first-run.js";
-import type { ConfirmRequest, Host, Logger, Settings, SetupTerminalRequest } from "../core/host.js";
-import type { RankedMention } from "../core/mentions.js";
+import { parseMcpServers, type ConfirmRequest, type Host, type Logger, type Settings, type SetupTerminalRequest } from "../core/host.js";
+import { normalizeRelativePath, type RankedMention } from "../core/mentions.js";
 import type { StartModeName } from "../core/protocol.js";
 import { WorkspaceMentions } from "./workspace-mentions.js";
 
@@ -42,13 +42,14 @@ export class VsCodeHost implements Host, vscode.Disposable {
   readonly extensionVersion: string;
   readonly agentVersionPin: string;
   readonly platform = process.platform;
-  private readonly mentions = new WorkspaceMentions();
+  private readonly mentions: WorkspaceMentions;
 
   constructor(
     private readonly channel: vscode.LogOutputChannel,
     info: HostInfo,
   ) {
     this.log = new ChannelLogger(channel);
+    this.mentions = new WorkspaceMentions(this.log);
     this.extensionPath = info.extensionPath;
     this.extensionVersion = info.extensionVersion;
     this.agentVersionPin = info.agentVersionPin;
@@ -63,6 +64,7 @@ export class VsCodeHost implements Host, vscode.Disposable {
       agentArgs: config.get<string[]>("agentArgs", []).filter((arg) => typeof arg === "string"),
       permissionMode,
       showThinking: config.get<boolean>("showThinking", true),
+      mcpServers: parseMcpServers(config.get<unknown>("mcpServers", [])),
     };
   }
 
@@ -75,6 +77,13 @@ export class VsCodeHost implements Host, vscode.Disposable {
   }
 
   sessionFolder(): string | undefined {
+    const activeUri = vscode.window.activeTextEditor?.document.uri;
+    if (activeUri && activeUri.scheme === "file") {
+      const activeFolder = vscode.workspace.getWorkspaceFolder?.(activeUri);
+      if (activeFolder && activeFolder.uri.scheme === "file") {
+        return activeFolder.uri.fsPath;
+      }
+    }
     return vscode.workspace.workspaceFolders?.find((folder) => folder.uri.scheme === "file")?.uri.fsPath;
   }
 
@@ -134,6 +143,23 @@ export class VsCodeHost implements Host, vscode.Disposable {
 
   searchMentions(folder: string, query: string, limit?: number): Promise<RankedMention[]> {
     return this.mentions.search(folder, query, limit);
+  }
+
+  async saveAll(): Promise<boolean> {
+    return vscode.workspace.saveAll(false);
+  }
+
+  async openFile(folder: string, relPath: string, line?: number): Promise<void> {
+    const normalized = normalizeRelativePath(relPath, "file");
+    if (!normalized) return;
+    const target = path.resolve(folder, normalized);
+    if (!underFolder(target, folder)) return;
+    const zeroLine = line !== undefined && line >= 1 ? line - 1 : undefined;
+    const options =
+      zeroLine !== undefined
+        ? { selection: new vscode.Range(zeroLine, 0, zeroLine, 0) }
+        : undefined;
+    await vscode.window.showTextDocument(vscode.Uri.file(target), options);
   }
 
   dispose(): void {

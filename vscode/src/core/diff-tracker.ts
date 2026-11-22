@@ -6,6 +6,11 @@ import type { Host } from "./host.js";
 
 type PreImage = string | null | undefined;
 
+interface StructuredDiff {
+  oldText: string;
+  newText: string;
+}
+
 interface Track {
   id: string;
   tool: "write" | "edit";
@@ -19,6 +24,7 @@ interface Track {
   late: boolean;
   seenFirstUpdate: boolean;
   finished: boolean;
+  structuredDiff?: StructuredDiff;
 }
 
 export interface DiffInfo {
@@ -31,6 +37,36 @@ const MAX_TRACKS = 50;
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
+function readStructuredDiffPair(record: Record<string, unknown>): StructuredDiff | undefined {
+  const oldRaw = record.oldText ?? record.old_text;
+  const newRaw = record.newText ?? record.new_text;
+  if (typeof oldRaw === "string" && typeof newRaw === "string") {
+    return { oldText: normalizeLf(oldRaw), newText: normalizeLf(newRaw) };
+  }
+  return undefined;
+}
+
+function extractStructuredDiff(source: unknown): StructuredDiff | undefined {
+  if (!isRecord(source)) return undefined;
+  if (Array.isArray(source.content)) {
+    for (const item of source.content) {
+      if (isRecord(item) && item.type === "diff") {
+        const pair = readStructuredDiffPair(item);
+        if (pair) return pair;
+      }
+    }
+  }
+  if (isRecord(source._meta) && isRecord(source._meta.diff)) {
+    const pair = readStructuredDiffPair(source._meta.diff);
+    if (pair) return pair;
+  }
+  if (isRecord(source.details)) {
+    const pair = readStructuredDiffPair(source.details);
+    if (pair) return pair;
+  }
+  return readStructuredDiffPair(source);
 }
 
 /**
@@ -63,10 +99,12 @@ export class DiffTracker {
   }
 
   /** Called for each `tool_call` and `tool_call_update`. The first one of a `write` or `edit` call starts the read. */
-  observe(update: { toolCallId?: unknown; kind?: unknown; rawInput?: unknown }): void {
+  observe(update: { toolCallId?: unknown; kind?: unknown; rawInput?: unknown; content?: unknown; _meta?: unknown }): void {
     if (typeof update.toolCallId !== "string") return;
+    const structured = extractStructuredDiff(update);
     const known = this.tracks.get(update.toolCallId);
     if (known) {
+      if (structured) known.structuredDiff = structured;
       if (known.seenFirstUpdate && !known.preSettled) known.late = true;
       known.seenFirstUpdate = true;
       return;
@@ -91,6 +129,7 @@ export class DiffTracker {
       late: false,
       seenFirstUpdate: false,
       finished: false,
+      ...(structured ? { structuredDiff: structured } : {}),
     };
     track.pre = this.host.readFile(file).then(
       (value) => {
@@ -142,28 +181,41 @@ export class DiffTracker {
     if (status !== "completed" && status !== "failed") return false;
     track.finished = true;
     if (status === "failed") return false;
+    const outputStructured = extractStructuredDiff(rawOutput);
+    if (outputStructured) track.structuredDiff = outputStructured;
     if (!track.preSettled) track.late = true;
     const pre = await track.pre;
     const trustedPre = !track.late && pre !== undefined;
     const beforePre = trustedPre ? (pre === null ? "" : normalizeLf(pre)) : undefined;
 
     if (track.tool === "write") {
-      const after = normalizeLf(String(track.rawInput.content));
-      if (beforePre === undefined) {
+      const after = track.structuredDiff?.newText ?? normalizeLf(String(track.rawInput.content));
+      const before = beforePre ?? track.structuredDiff?.oldText;
+      if (before === undefined) {
         this.put(track, "result", "", after, `${track.display} (old content not available)`, "old content not available");
       } else {
-        this.put(track, "result", beforePre, after, `${track.display} (written)`);
+        this.put(track, "result", before, after, `${track.display} (written)`);
       }
       return true;
     }
 
     const current = await this.host.readFile(track.file);
-    if (typeof current !== "string") return this.keepProposal(track);
+    if (typeof current !== "string") {
+      if (track.structuredDiff) {
+        this.put(track, "result", track.structuredDiff.oldText, track.structuredDiff.newText, `${track.display} (edited)`);
+        return true;
+      }
+      return this.keepProposal(track);
+    }
     const after = normalizeLf(current);
     const patch = detailsPatch(rawOutput);
     const reversed = patch === undefined ? undefined : reversePatch(after, patch);
     if (reversed !== undefined) {
       this.put(track, "result", reversed, after, `${track.display} (edited)`);
+      return true;
+    }
+    if (track.structuredDiff) {
+      this.put(track, "result", track.structuredDiff.oldText, after, `${track.display} (edited)`);
       return true;
     }
     if (beforePre !== undefined) {

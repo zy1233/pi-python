@@ -112,6 +112,12 @@ class ThoughtTagSplitter:
     leading ``<thought>`` tag (and ``extra_content.google.thought: true`` on thought chunks),
     often ending with ``</thought>`` concatenated into the same chunk as the first visible
     answer token. One instance is created per stream so concurrent streams share no state.
+
+    While in the initial state before any non-whitespace character has been seen, at most 16
+    leading whitespace characters are buffered in case ``<thought>`` follows in a later chunk.
+    If leading whitespace exceeds 16 characters, the buffered whitespace is emitted as text
+    while remaining in ``init`` so memory stays strictly bounded and a subsequent ``<thought>``
+    tag (even split across chunks) is still parsed.
     """
 
     def __init__(self, *, parse_tags: bool = True) -> None:
@@ -143,20 +149,22 @@ class ThoughtTagSplitter:
             self._buf = ""
             stripped = buf.lstrip(" \t\r\n")
             ws_len = len(buf) - len(stripped)
-            if ws_len <= 16:
-                if stripped == "":
+            if stripped == "":
+                if ws_len <= 16:
                     self._buf = buf
                     return ("", "")
-                if stripped.startswith(_OPEN_THOUGHT_TAG):
-                    self._state = "in_thought"
-                    self._has_open_tag = True
-                    return self._consume_in_thought(
-                        stripped[len(_OPEN_THOUGHT_TAG) :],
-                        is_google_thought=is_google_thought,
-                    )
-                if _OPEN_THOUGHT_TAG.startswith(stripped):
-                    self._buf = buf
-                    return ("", "")
+                if not self._saw_google_thought:
+                    return ("", buf)
+            elif stripped.startswith(_OPEN_THOUGHT_TAG):
+                self._state = "in_thought"
+                self._has_open_tag = True
+                return self._consume_in_thought(
+                    stripped[len(_OPEN_THOUGHT_TAG) :],
+                    is_google_thought=is_google_thought,
+                )
+            elif _OPEN_THOUGHT_TAG.startswith(stripped):
+                self._buf = buf
+                return ("", "")
             if self._saw_google_thought:
                 self._state = "in_thought"
                 self._has_open_tag = False
