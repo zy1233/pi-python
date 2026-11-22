@@ -10,6 +10,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Fixed
 
 - **A loaded chat starts at the thinking level saved in it (`pi-agent-cli`)**: `session/load` and `session/resume` now apply the latest `thinking_level_change` entry of the chat, as they apply the saved model, and write nothing to the chat file. Before, a loaded chat always started at `thinking_level` of `agent.toml`. A saved level is used only when `reasoning` is not `false` and the `thinking_level` option offers it. A chat with no saved level, and a new chat, keep the level of `agent.toml`.
+- **The output limit of `bash` could miss a command that ended first (`pi-agent-core`)**: a `bash` call that has an output limit (Auto sets one) and prints more than the limit could pass when the command ended before the tool counted its output, which happens on a loaded machine. The tool now counts the output after the command ended too, and stops the call with the same message. Measured with 12 busy processes on 4 cores: 145 of 300 calls passed the limit before, 0 of 300 after.
 
 ## [1.0.1] - 2026-11-20
 

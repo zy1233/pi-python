@@ -556,6 +556,29 @@ async def test_bash_output_limit_does_not_apply_to_a_call_that_gets_no_limits(tm
     assert seen == ["free", "limited"]
 
 
+@needs_bash
+async def test_bash_output_limit_applies_to_a_command_that_ends_before_its_output_is_counted(
+    tmp_path, monkeypatch
+):
+    """The command ends first and its output is counted a moment later (a loaded machine).
+
+    The pump is slowed down on purpose, so that the exit is seen before the limit is hit: the
+    watcher of the limit never gets to run, and the call must still be stopped.
+    """
+    real_append = OutputAccumulator.append
+
+    def slow_append(self, data):
+        real_append(self, data)
+        time.sleep(0.15)
+
+    monkeypatch.setattr(OutputAccumulator, "append", slow_append)
+    tool = create_bash_tool(
+        str(tmp_path), limits_for_call=lambda _id: BashLimits(max_output_bytes=1_000)
+    )
+    with pytest.raises(RuntimeError, match="Command stopped: its output passed the limit"):
+        await tool.execute("t1", BashParams(command="seq 1 2000"))
+
+
 # --- agent-loop integration (create_coding_tools group incl. bash) ---
 
 

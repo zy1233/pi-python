@@ -497,6 +497,11 @@ def create_bash_tool(
                     with contextlib.suppress(Exception):
                         transport.close()
 
+        # The command can end before the pump counts its output: both tasks are ready on
+        # the same pass of the event loop, and ``exit_task`` can win. The watcher then never
+        # runs, so the output is counted now (the pump has drained the pipe by this point).
+        if kill_reason is None and max_output is not None and output.total_raw_bytes > max_output:
+            kill_reason = "output_limit"
         # pi checks abort before timeout, so abort wins when both fired.
         if signal is not None and getattr(signal, "aborted", False):
             kill_reason = "abort"
