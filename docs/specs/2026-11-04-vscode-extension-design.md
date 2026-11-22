@@ -19,7 +19,7 @@
 - **Added in 1.0.0.** A first-run guide, `always-approve` in the mode menu (with a warning, never restored), a Past chats view (list, open, delete), and a Thinking menu. All four use what the bundled agent already has (0.1.0 bundled 0.9.0; 1.0.0 bundles **0.9.1**): no wire item and no agent change. The Thinking menu edits one line of `agent.toml` and restarts the agent, because 0.9.0 has no live setting (section 7c).
 - **Added after 1.0.0.** Markdown in the chat (section 2, rule 5, and D34), and a richer status row (section 7d): the context window and the cost when the agent sends the standard `usage_update`, the time of the turn, and the folder. Agent 0.9.1 sent no `usage_update`, so the Context row did not show with the agent that 1.0.0 and 1.2.0 bundle. The agent change that sends it was built on 2026-11-16 (`docs/specs/2026-11-13-agent-context-usage.md`) and released in agent 1.0.0. Extension 1.4.0 bundles that agent, so the row shows for a model that has `context_window`.
 - **Added in 1.4.0.** The pin moves from agent 0.9.1 to agent 1.0.0. The Thinking menu offers the level `max` to an agent of 1.0.0 or later (section 7c), and the Context row shows with the bundled agent (section 7d). The agent still has no live thinking setting: `set_config_option` of 1.0.0 takes only `model` and `mode` (read in `pi_agent_cli/agent.py`), so the menu still edits `agent.toml` and restarts the agent.
-- **Not yet.** Model choice, images, `@file`, MCP servers, fallback package, and everything of report section 3.3 from Phase 2 on (section 12).
+- **Not yet.** Universal fallback package, per-hunk diff review, code signing/notarization, and native VS Code chat integration (remaining items of report section 3.3; section 12).
 
 ## 1. Facts the design rests on
 
@@ -140,7 +140,7 @@ host                                              agent
  │     clientCapabilities: {auth: {terminal: true}},│
  │     clientInfo: {name: "zycode-vscode", version}}►
  │◄─ agentInfo, authMethods, agentCapabilities ─────│
- │── session/new {cwd, mcpServers: []} ────────────►│
+ │── session/new {cwd, mcpServers} ────────────────►│   from zycode.mcpServers (trusted only, filtered by mcpCapabilities)
  │◄─ sessionId, configOptions, modes ───────────────│   (or -32000 auth_required: section 7)
  │── session/set_config_option {mode} ─────────────►│   only if the setting differs from the current value
  │◄─ session/update (available_commands_update) ────│
@@ -156,7 +156,7 @@ Details:
 
 - **Client capabilities.** `auth: {terminal: true}` and nothing else. The extension does not declare `fs` or `terminal` (F5). A client that declares them would be asked nothing, but a client that does not declare them is the honest one.
 - **`cwd`.** The folder of the active editor if it belongs to a workspace folder, else the first workspace folder. With no folder, the state is `no-folder` and the chat says to open one. A virtual workspace is refused by the manifest (`virtualWorkspaces: false`).
-- **`mcpServers`.** `[]` in Phase 1.
+- **`mcpServers`.** Forwarded from application-scoped `zycode.mcpServers` in trusted workspaces only (validated by `parseMcpServers`), keeping stdio servers and filtering `http` / `sse` servers against the agent's `mcpCapabilities` (logging and showing one info notice when an unsupported transport is skipped).
 - **Updates.** The notification handler puts each `session/update` on a queue, so that the controller applies them in the order they arrive. An update for another session id is dropped. Updates before the `session/new` response is known are held and applied after it.
 - **Update kinds handled:** `agent_message_chunk`, `agent_thought_chunk`, `tool_call`, `tool_call_update`, `user_message_chunk` (only for replay; Phase 1 has none), `available_commands_update` (stored; Phase 2 uses it), `current_mode_update` and `config_option_update` (update the status). Any other kind is ignored with one log line (the protocol is open).
 - **Prompt.** One text block. The turn ends with `stopReason` (`end_turn`, `cancelled`, `max_tokens`, `refusal`, ...). A non-`end_turn` reason other than `cancelled` shows as a notice line.
@@ -207,7 +207,7 @@ All messages are JSON objects with a string `type`. The types live in one file (
 
 | `type` | Fields | Meaning |
 |--------|--------|---------|
-| `state` | `status` (`stopped`, `starting`, `ready`, `busy`, `cancelling`, `needs-setup`, `error`, `no-folder`, `untrusted`, `unavailable`), `detail?` (text), `agent?` (`{version, source}`), `cwd?`, `mode?` (`{current, options[]}`), `model?` (text), `models?` (`{current, options[]}`), `usage?` (`{used, size?, cost?: {amount, currency}}`, section 7d), `turn?` (`{elapsedMs?}` while a turn runs, `{lastMs?}` after it), `thinking?` (`{current?, levels[], disabled?, note?}`), `commands?` (`{name, description, inputHint?}[]`), `pendingPermissions?` (number), `canRestart` | The full status. Sent at each change and when the view loads. |
+| `state` | `status` (`stopped`, `starting`, `ready`, `busy`, `cancelling`, `needs-setup`, `error`, `no-folder`, `untrusted`, `unavailable`), `detail?` (text), `agent?` (`{version, source}`), `cwd?`, `mode?` (`{current, options[]}`), `model?` (text), `models?` (`{current, options[]}`), `usage?` (`{used, size?, cost?: {amount, currency}}`, section 7d), `turn?` (`{elapsedMs?}` while a turn runs, `{lastMs?}` after it), `thinking?` (`{current?, levels[], disabled?, note?}`), `commands?` (`{name, description, inputHint?}[]`), `supportsImages?` (boolean), `pendingPermissions?` (number), `canRestart` | The full status. Sent at each change and when the view loads. |
 | `reset` | `transcript[]` | The view loaded or a new chat started. `transcript` is what the controller holds, so that a hidden view that loads again shows the same chat. |
 | `userMessage` | `id`, `text` | The prompt that was sent. |
 | `agentText` | `messageId`, `text` | Append to the current assistant text. |
@@ -220,6 +220,7 @@ All messages are JSON objects with a string `type`. The types live in one file (
 | `turnEnd` | `stopReason` | The turn is over. |
 | `diffState` | `toolCallId`, `available` | Updates the **Show diff** button. |
 | `mentionResults` | `requestId`, `query`, `items[]` (`{kind, path, range?, label, detail, ...}`) | Filtered workspace file, folder, and selection candidates for an `@` composer query. |
+| `insertMention` | `item` (`{kind, path, range?}`) | Insert an `@` context reference (from editor/explorer commands) into the composer and attach its chip. |
 
 `toolCall` object: `{id, title, kind, status, rawInput?, text?, terminal?: {output, exitCode?}, canDiff?}`. `text` holds non-terminal text blocks and is omitted while `terminal` output is active. It is plain text.
 
@@ -228,23 +229,26 @@ All messages are JSON objects with a string `type`. The types live in one file (
 | `type` | Fields | Meaning |
 |--------|--------|---------|
 | `ready` | | The script has loaded. The host sends `state` and `reset`. |
-| `send` | `text`, `mentions?` (`{kind, path, range?}[]`) | A prompt (with optional validated `@` context references). The host drops it if the state is not `ready`, or the text is empty. |
+| `send` | `text`, `mentions?` (`{kind, path, range?}[]`), `images?` (`{mimeType, data, name?}[]`) | A prompt (with optional validated `@` context references and up to 4 base64 image attachments). The host drops it if the state is not `ready`, both text and images are empty, or images are sent when the agent does not advertise `promptCapabilities.image`. |
 | `cancel` | | Stop the turn. |
 | `newChat` | | Close the session (if `session/close` is offered) and open a new one. |
 | `permissionAnswer` | `requestId`, `optionId` | The user chose. The host accepts only an `optionId` that the request listed. |
 | `showDiff` | `toolCallId` | Open the diff. |
 | `setMode` | `value` | `ask`, `auto` or `always-approve`. The host sets the mode of the open session only (section 9); it does not write the setting. |
 | `setModel` | `value` | Switch the session model via ACP `session/set_config_option` (`id="model"`). |
-| `setThinking` | `value` | One of `max`, `xhigh`, `high`, `medium`, `low`, `minimal`, `off`. The host drops `max` when the running agent does not know it. The host asks first, then changes `agent.toml` and restarts the agent (section 7c). |
+| `setThinking` | `value` | One of `max`, `xhigh`, `high`, `medium`, `low`, `minimal`, `off`. The host drops `max` when the running agent does not know it. Switches live via `session/set_config_option` when the agent advertises `thinking_level`; otherwise asks first, edits `agent.toml`, and restarts the agent (section 7c). |
 | `queryMentions` | `requestId`, `query` | Request workspace/editor `@` mention candidates matching `query` (trusted workspace only). |
 | `runSetup` | | Run the first-run setup in a terminal (section 7). |
 | `openGuide` | | Open the getting-started walkthrough (section 7a). |
 | `openAgentConfig` | | Open `agent.toml` of the agent (section 7a). |
 | `restartAgent` | | Section 3.4 and a start. |
 | `openLog` | | Show the output channel. |
+| `saveAll` | | Save all dirty workspace documents (triggered by the unsaved-changes notice action). |
+| `openFile` | `path`, `line?` | Open a validated workspace-relative file in VS Code, optionally positioning the cursor at 1-based `line`. |
+| `copy` | `text` | Write text to the host clipboard via `vscode.env.clipboard.writeText`. |
 | `openLink` | `url` | The host opens it if it is `http`, `https` or `mailto`. |
 
-There is no message that reads a file, runs a command, or sets a setting. The webview has no message for the Past chats view: it is a tree view of the host (section 7b). A notice (`notice`, `state.setup`) can carry `actions` (`runSetup`, `openGuide`, `openAgentConfig`, `openLog`): a fixed set of ids that the webview maps to the messages above.
+There is no message that reads a file, runs a command, or sets a setting. The webview has no message for the Past chats view: it is a tree view of the host (section 7b). A notice (`notice`, `state.setup`) can carry `actions` (`runSetup`, `openGuide`, `openAgentConfig`, `openLog`, `saveAll`): a fixed set of ids that the webview maps to the messages above.
 
 ## 7. First run: `--setup` through `auth.terminal`
 

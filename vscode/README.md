@@ -82,8 +82,9 @@ The **Thinking** menu in the chat header shows the thinking level that the runni
 | `zycode.agentArgs` | `[]` | Arguments for it. For a Python install: path `python`, arguments `["-m", "pi_agent_cli"]`. |
 | `zycode.permissionMode` | `ask` | The mode of a start: `ask` or `auto` (see above). It cannot be `always-approve`. |
 | `zycode.showThinking` | `true` | Show the thinking blocks of the model (collapsed). |
+| `zycode.mcpServers` | `[]` | Application-scoped MCP server definitions forwarded in `session/new` and `session/load` (trusted workspaces only). Supports stdio servers and HTTP/SSE servers when the agent advertises support (`mcpCapabilities`). Note: `env` and `headers` values are stored as plain text in `settings.json`. |
 
-`zycode.agentPath` and `zycode.agentArgs` do not read the settings of a folder (`.vscode/settings.json`): a folder must not choose the program that runs on your machine. The same is true for `zycode.permissionMode`.
+`zycode.agentPath`, `zycode.agentArgs` and `zycode.mcpServers` do not read the settings of a folder (`.vscode/settings.json`): a folder must not choose the program or MCP servers that run on your machine. The same is true for `zycode.permissionMode`.
 
 ## Privacy
 
@@ -94,9 +95,9 @@ The extension has no telemetry and sends nothing to its authors. The agent sends
 - The bundled agent is **not code-signed**. On macOS and Windows the system can warn when it starts.
 - The bundled agent has only the OpenAI-format provider (and services that speak that format). For the Anthropic or DeepSeek provider, install the Python agent and set `zycode.agentPath`.
 - On Linux the bundled agent needs glibc 2.35 or newer. There is no package for Alpine (musl), 32-bit ARM, or Windows on ARM.
-- The thinking level is a line of `agent.toml`, and a change restarts the agent (the chat is opened again; a running answer must end first; Always approve is off again after the restart). A live setting needs a change in the agent.
+- When an agent advertises a live `thinking_level` config option (`session/set_config_option`), switching the thinking level happens live without restarting. Older agents (0.9.1 through 1.0.1) do not expose it, so a change still edits one line of `agent.toml` and restarts the agent (the chat is opened again; a running answer must end first; Always approve is off again after the restart).
 - The **Context** row shows only when the agent sends the standard ACP message `usage_update`. The bundled agent sends it for a model that has `context_window` in `agent.toml` (a whole number of tokens, in `[model]` or in an entry of `[[models]]`). For a model with no `context_window`, the row does not show. The agent sends no cost, so the **Cost** line does not show with it. Part of the count is an estimate (the tool results of a turn, and the whole count after a compaction), and the next model call gives an exact number. A `context_window` that is too small can show more than 100 %. The extension does not count tokens and does not guess the size of the window. How this was found is in [the investigation record](https://github.com/zy1233/pi-python/blob/main/docs/specs/2026-11-13-agent-context-usage.md).
-- One chat at a time (open a past chat to switch). Slash commands (`/`), model switching (`/model` and the header Model menu when multiple models are configured), and `@` file, folder, and selection references are supported; no image attachments yet.
+- One chat at a time (open a past chat to switch). Slash commands (`/`), model switching (`/model` and the header Model menu when multiple models are configured), `@` file, folder, and selection references, and image attachments (paste or drag-and-drop, up to 4 images when the agent advertises `promptCapabilities.image`) are supported.
 - Markdown in an answer: raw HTML shows as text, and an image is not loaded (it shows as a link). There is no math, no footnote and no task-list box: their marks show as text (but the line of a footnote definition, `[^1]: …`, does not show, because Markdown reads it as the definition of a link). A link with an address that the extension does not open (for example `javascript:`) shows its text and its address as plain text. Bold, italic, strikethrough and links nest at most 32 levels deep (all kinds count together), and a deeper one shows only its text.
 
 ## Third-party software
