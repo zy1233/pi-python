@@ -1081,6 +1081,7 @@ function resetTranscript(items: TranscriptItem[]): void {
   if (!isInitial) {
     attachments = [];
     imageAttachments = [];
+    imageStateNotice = undefined;
     renderChips();
     openDetails.clear();
     pendingScrollRestore = undefined;
@@ -1672,6 +1673,7 @@ function acceptMenuItem(index: number, mode: "enter" | "tab"): void {
           attachments = [];
           if (cmd.name === "new") imageAttachments = [];
           renderChips();
+          syncImageStateNotice(false);
         }
         saveWebviewState();
         dispatchClientCommand(`/${cmd.name}`);
@@ -1773,6 +1775,7 @@ function submit(): void {
           imageAttachments = [];
         }
         renderChips();
+        syncImageStateNotice(false);
         saveWebviewState();
       }
       return;
@@ -1799,6 +1802,7 @@ function submit(): void {
   attachments = [];
   imageAttachments = [];
   renderChips();
+  syncImageStateNotice(false);
   saveWebviewState();
 }
 
