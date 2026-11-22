@@ -343,8 +343,8 @@ function imagesForState(): ImageAttachment[] {
   const kept: ImageAttachment[] = [];
   let total = 0;
   for (const img of imageAttachments) {
+    if (total + img.data.length > IMAGE_STATE_MAX_CHARS) continue;
     total += img.data.length;
-    if (total > IMAGE_STATE_MAX_CHARS) break;
     kept.push({ ...img });
   }
   return kept;
@@ -1028,7 +1028,7 @@ const NOTICE_MESSAGE: Record<NoticeAction["id"], WebviewMessage> = {
   saveAll: { type: "saveAll" },
 };
 
-function addNotice(level: string, text: string, actions?: NoticeAction[]): void {
+function addNotice(level: string, text: string, actions?: NoticeAction[]): HTMLElement {
   const node = el("div", { class: `notice ${level}` }, el("span", { text }));
   if (actions && actions.length > 0) {
     node.append(
@@ -1040,6 +1040,7 @@ function addNotice(level: string, text: string, actions?: NoticeAction[]): void 
     );
   }
   transcript.append(node);
+  return node;
 }
 
 function renderItem(item: TranscriptItem): void {
@@ -1424,6 +1425,7 @@ function renderChips(): void {
       imageAttachments.splice(index, 1);
       renderChips();
       saveWebviewState();
+      syncImageStateNotice(false);
       input.focus();
     });
     chipsBar.append(
@@ -1463,13 +1465,23 @@ function addImageAttachment(mimeType: string, base64Data: string, name?: string)
   });
   renderChips();
   saveWebviewState();
-  if (imagesForState().length < imageAttachments.length) {
-    addNotice(
-      "info",
-      "Large images are not kept when this view reloads. Send the message first, or attach the image again after a reload.",
-    );
-    scrollToEnd();
+  syncImageStateNotice(true);
+}
+
+let imageStateNotice: HTMLElement | undefined;
+
+function syncImageStateNotice(announce: boolean): void {
+  const allKept = imagesForState().length === imageAttachments.length;
+  if (allKept || announce) {
+    imageStateNotice?.remove();
+    imageStateNotice = undefined;
   }
+  if (allKept || !announce) return;
+  imageStateNotice = addNotice(
+    "info",
+    "Large images are not kept when this view reloads. Send the message first, or attach the image again after a reload.",
+  );
+  scrollToEnd();
 }
 
 function readImageFile(file: File): void {

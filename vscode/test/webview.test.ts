@@ -2181,4 +2181,81 @@ describe.skipIf(!chrome || !built)("webview: P1 images, insertMention, saveAll, 
     });
     expect((out.afterBig as { size: number }).size).toBeLessThan(2_100_000);
   });
+
+  it("saves three of four images (1.5M, 1.5M, 0.1M, 0.1M), shows one notice, and still sends all four", () => {
+    const mockFileReader = `window.FileReader = class {
+      constructor() { this._listeners = []; this.result = ""; }
+      addEventListener(type, fn) { if (type === "load") this._listeners.push(fn); }
+      readAsDataURL(file) {
+        this.result = "data:" + file.type + ";base64," + file.__base64;
+        for (const fn of this._listeners) fn();
+      }
+    };`;
+    const out = run(
+      `${state}
+      state({});
+      const input = document.querySelector("textarea");
+      for (const [name, chars] of [["a.png", 1_500_000], ["b.png", 1_500_000], ["c.png", 100_000], ["d.png", 100_000]]) {
+        const ev = new Event("paste", { bubbles: true, cancelable: true });
+        Object.defineProperty(ev, "clipboardData", { value: { items: [{ type: "image/png", getAsFile: () => ({ type: "image/png", name, __base64: "A".repeat(chars) }) }] } });
+        input.dispatchEvent(ev);
+      }
+      const saved = window.__webviewState.images.map((i) => i.name);
+      const notices = [...document.querySelectorAll(".notice")].filter((n) => n.textContent.includes("Large images")).length;
+      input.value = "go";
+      input.dispatchEvent(new KeyboardEvent("keydown", { key: "Enter", bubbles: true }));
+      window.__result = { saved, notices, sentImages: window.__posted.filter((m) => m.type === "send")[0].images.map((i) => i.name) };`,
+      mockFileReader,
+    );
+    expect(out).toMatchObject({
+      ok: true,
+      saved: ["a.png", "c.png", "d.png"],
+      notices: 1,
+      sentImages: ["a.png", "b.png", "c.png", "d.png"],
+    });
+  });
+
+  it("keeps the small images after a large one, in order, shows one notice, and drops the notice when all fit", () => {
+    const mockFileReader = `window.FileReader = class {
+      constructor() { this._listeners = []; this.result = ""; }
+      addEventListener(type, fn) { if (type === "load") this._listeners.push(fn); }
+      readAsDataURL(file) {
+        this.result = "data:" + file.type + ";base64," + file.__base64;
+        for (const fn of this._listeners) fn();
+      }
+    };`;
+    const out = run(
+      `${state}
+      state({});
+      const input = document.querySelector("textarea");
+      const paste = (name, chars) => {
+        const ev = new Event("paste", { bubbles: true, cancelable: true });
+        Object.defineProperty(ev, "clipboardData", { value: { items: [{ type: "image/png", getAsFile: () => ({ type: "image/png", name, __base64: "A".repeat(chars) }) }] } });
+        input.dispatchEvent(ev);
+      };
+      const notices = () => [...document.querySelectorAll(".notice")].filter((n) => n.textContent.includes("Large images")).length;
+      paste("a.png", 1_500_000);
+      paste("b.png", 1_500_000);
+      paste("c.png", 100_000);
+      paste("d.png", 100_000);
+      const afterPaste = { saved: window.__webviewState.images.map((i) => i.name), notices: notices(), size: JSON.stringify(window.__webviewState).length };
+      document.querySelectorAll(".composer-chips .image-chip .chip-remove")[1].click();
+      const afterRemove = { saved: window.__webviewState.images.map((i) => i.name), notices: notices() };
+      paste("b2.png", 1_500_000);
+      const afterBigAgain = { saved: window.__webviewState.images.map((i) => i.name), notices: notices() };
+      input.value = "go";
+      input.dispatchEvent(new KeyboardEvent("keydown", { key: "Enter", bubbles: true }));
+      const sent = window.__posted.filter((m) => m.type === "send");
+      window.__result = { afterPaste, afterRemove, afterBigAgain, sentImages: sent[0].images.map((i) => i.name) };`,
+      mockFileReader,
+    );
+    expect(out).toMatchObject({
+      ok: true,
+      afterPaste: { saved: ["a.png", "c.png", "d.png"], notices: 1 },
+      afterRemove: { saved: ["a.png", "c.png", "d.png"], notices: 0 },
+      afterBigAgain: { saved: ["a.png", "c.png", "d.png"], notices: 1 },
+      sentImages: ["a.png", "c.png", "d.png", "b2.png"],
+    });
+    expect((out.afterPaste as { size: number }).size).toBeLessThan(2_100_000);
+  });
 });
