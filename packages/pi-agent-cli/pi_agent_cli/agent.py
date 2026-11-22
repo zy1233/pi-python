@@ -172,7 +172,7 @@ _AGENT_INFO = Implementation(
 # ACP Session Config Option id for the model selector (``session/set_config_option``).
 MODEL_CONFIG_ID = "model"
 THINKING_LEVEL_CONFIG_ID = "thinking_level"
-_THINKING_LEVELS: tuple[str, ...] = ("off", "minimal", "low", "medium", "high", "xhigh", "max")
+_THINKING_LEVELS: tuple[str, ...] = ("max", "xhigh", "high", "medium", "low", "minimal", "off")
 
 
 @dataclass
@@ -573,13 +573,17 @@ class PiAcpAgent(Agent):
                 raise RequestError.invalid_params(
                     {"configId": config_id, "value": value, "reason": "unknown thinking level"}
                 )
-            await harness.set_thinking_level(value)  # type: ignore[arg-type]
+            if self._config.reasoning is False and value != "off":
+                raise RequestError.invalid_params(
+                    {"configId": config_id, "value": value, "reason": "reasoning is disabled"}
+                )
             choice = self._current_choice(session_id)
             reasoning = (
                 self._config.reasoning if self._config.reasoning is not None else (value != "off")
             )
             if harness.model.reasoning != reasoning:
                 await harness.set_model(model_for_choice(choice, reasoning=reasoning))
+            await harness.set_thinking_level(value)  # type: ignore[arg-type]
             return SetSessionConfigOptionResponse(config_options=self._config_options(session_id))
         if config_id != MODEL_CONFIG_ID:
             raise RequestError.invalid_params(
@@ -781,12 +785,13 @@ class PiAcpAgent(Agent):
 
     def _config_options(self, session_id: str) -> list[SessionConfigOptionSelect]:
         """ACP Session Config Options: a ``model`` select (category ``model``) for ``/model``,
-        and a ``mode`` select (category ``mode``) for the permission mode."""
+        a ``mode`` select (category ``mode``) for the permission mode, and (unless
+        ``reasoning = false``) a ``thinking_level`` select (category ``thought_level``)."""
         choices = list(self._config.model_choices())
         current = self._current_choice(session_id)
         if all(choice.id != current.id for choice in choices):
             choices.insert(0, current)  # e.g. a persisted model no longer listed in agent.toml
-        return [
+        options = [
             SessionConfigOptionSelect(
                 id=MODEL_CONFIG_ID,
                 name="Model",
@@ -800,6 +805,25 @@ class PiAcpAgent(Agent):
             ),
             mode_config_option(self._session_mode(session_id)),
         ]
+        if self._config.reasoning is not False:
+            harness = self._harnesses.get(session_id)
+            current_level = (
+                harness.thinking_level if harness is not None else self._config.thinking_level
+            )
+            options.append(
+                SessionConfigOptionSelect(
+                    id=THINKING_LEVEL_CONFIG_ID,
+                    name="Thinking",
+                    category="thought_level",
+                    type="select",
+                    current_value=current_level,
+                    options=[
+                        SessionConfigSelectOption(value=level, name=level)
+                        for level in _THINKING_LEVELS
+                    ],
+                )
+            )
+        return options
 
     def _session_response_meta(self, session_id: str) -> dict[str, Any] | None:
         """What the response that opens a session says beyond the standard fields.

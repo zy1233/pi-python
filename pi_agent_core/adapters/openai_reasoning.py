@@ -112,6 +112,12 @@ class ThoughtTagSplitter:
     leading ``<thought>`` tag (and ``extra_content.google.thought: true`` on thought chunks),
     often ending with ``</thought>`` concatenated into the same chunk as the first visible
     answer token. One instance is created per stream so concurrent streams share no state.
+
+    While in the initial state before any non-whitespace character has been seen, at most 16
+    leading whitespace characters are buffered in case ``<thought>`` follows in a later chunk.
+    If leading whitespace exceeds 16 characters, the buffered whitespace is emitted as text
+    while remaining in ``init`` so memory stays strictly bounded and a subsequent ``<thought>``
+    tag (even split across chunks) is still parsed.
     """
 
     def __init__(self, *, parse_tags: bool = True) -> None:
@@ -147,6 +153,8 @@ class ThoughtTagSplitter:
                 if ws_len <= 16:
                     self._buf = buf
                     return ("", "")
+                if not self._saw_google_thought:
+                    return ("", buf)
             elif stripped.startswith(_OPEN_THOUGHT_TAG):
                 self._state = "in_thought"
                 self._has_open_tag = True

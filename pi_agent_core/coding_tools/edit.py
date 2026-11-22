@@ -41,6 +41,8 @@ _DESCRIPTION = (
     "Do not include large unchanged regions just to connect distant changes."
 )
 
+_MAX_DIFF_TEXT_CHARS = 256 * 1024
+
 
 class EditReplacement(BaseModel):
     oldText: str = Field(
@@ -476,6 +478,12 @@ def create_edit_tool(cwd: str) -> AgentTool:
 
             patch = generate_unified_patch(params.path, base_content, new_content)
             details: dict[str, Any] = {"diff": patch, "patch": patch}
+            if (
+                len(base_content) <= _MAX_DIFF_TEXT_CHARS
+                and len(new_content) <= _MAX_DIFF_TEXT_CHARS
+            ):
+                details["old_text"] = base_content
+                details["new_text"] = new_content
             first_changed = _first_changed_line(base_content, new_content)
             if first_changed is not None:
                 details["firstChangedLine"] = first_changed

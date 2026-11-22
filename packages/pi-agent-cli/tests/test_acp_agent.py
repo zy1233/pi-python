@@ -1170,16 +1170,74 @@ async def test_set_config_option_thinking_level_updates_harness_live(tmp_path):
     harness = agent._harnesses[created.session_id]
     assert harness.thinking_level == "off"
 
-    await agent.set_config_option(
+    thinking_opt = next(o for o in created.config_options if o.id == "thinking_level")
+    assert thinking_opt.category == "thought_level"
+    assert thinking_opt.current_value == "off"
+    assert [opt.value for opt in thinking_opt.options] == [
+        "max",
+        "xhigh",
+        "high",
+        "medium",
+        "low",
+        "minimal",
+        "off",
+    ]
+
+    resp = await agent.set_config_option(
         config_id="thinking_level", session_id=created.session_id, value="high"
     )
     assert harness.thinking_level == "high"
     assert harness.model.reasoning is True
+    updated_opt = next(o for o in resp.config_options if o.id == "thinking_level")
+    assert updated_opt.current_value == "high"
 
     with pytest.raises(RequestError):
         await agent.set_config_option(
             config_id="thinking_level", session_id=created.session_id, value="invalid"
         )
+
+
+@pytest.mark.asyncio
+async def test_thinking_level_omitted_and_rejected_when_reasoning_disabled(tmp_path):
+    agent = PiAcpAgent(
+        stream_fn=mock_text_stream,
+        home=tmp_path,
+        config=CliConfig(permission="ask", provider="mock", model_id="mock", reasoning=False),
+    )
+    agent.on_connect(FakeClient())
+    created = await agent.new_session(cwd=str(tmp_path.resolve()))
+
+    assert all(option.id != "thinking_level" for option in created.config_options)
+    with pytest.raises(RequestError):
+        await agent.set_config_option(
+            config_id="thinking_level", session_id=created.session_id, value="high"
+        )
+    # "off" remains accepted without error even when reasoning is disabled.
+    resp = await agent.set_config_option(
+        config_id="thinking_level", session_id=created.session_id, value="off"
+    )
+    assert all(option.id != "thinking_level" for option in resp.config_options)
+
+
+@pytest.mark.asyncio
+async def test_set_config_option_thinking_level_leaves_state_unchanged_if_set_model_fails(
+    tmp_path, monkeypatch
+):
+    agent = _agent(tmp_path)
+    agent.on_connect(FakeClient())
+    created = await agent.new_session(cwd=str(tmp_path.resolve()))
+    harness = agent._harnesses[created.session_id]
+    assert harness.thinking_level == "off"
+
+    async def fail_set_model(_model: Any) -> None:
+        raise RuntimeError("model switch failed")
+
+    monkeypatch.setattr(harness, "set_model", fail_set_model)
+    with pytest.raises(RuntimeError, match="model switch failed"):
+        await agent.set_config_option(
+            config_id="thinking_level", session_id=created.session_id, value="high"
+        )
+    assert harness.thinking_level == "off"
 
 
 def test_project_event_edit_structured_old_and_new_text():
@@ -1212,6 +1270,41 @@ def test_project_event_edit_structured_old_and_new_text():
     assert diff_block.path == "src/app.py"
     assert diff_block.old_text == "a = 1\n"
     assert diff_block.new_text == "a = 2\n"
+
+
+@pytest.mark.asyncio
+async def test_project_event_real_edit_tool_produces_structured_acp_diff(tmp_path):
+    from pi_agent_core.coding_tools.edit import EditParams, create_edit_tool
+    from pi_agent_core.types import ToolExecutionEndEvent, ToolExecutionStartEvent
+
+    target = tmp_path / "demo.py"
+    target.write_text("value = 1\n", encoding="utf-8")
+    tool = create_edit_tool(str(tmp_path))
+
+    start_ev = ToolExecutionStartEvent(
+        tool_call_id="real_edit_1",
+        tool_name="edit",
+        args={"path": "demo.py"},
+    )
+    assert len(list(project_event(start_ev))) == 1
+
+    result = await tool.execute(
+        "real_edit_1",
+        EditParams(path="demo.py", edits=[{"oldText": "value = 1", "newText": "value = 2"}]),
+    )
+    end_ev = ToolExecutionEndEvent(
+        tool_call_id="real_edit_1",
+        tool_name="edit",
+        result=result,
+        is_error=False,
+    )
+    updates = list(project_event(end_ev))
+    assert len(updates) == 1
+    diff_block = updates[0].content[0]
+    assert diff_block.type == "diff"
+    assert diff_block.path == "demo.py"
+    assert diff_block.old_text == "value = 1\n"
+    assert diff_block.new_text == "value = 2\n"
 
 
 def test_project_event_caps_tool_call_args():

@@ -64,6 +64,62 @@
         assert_eq!(ctx.usage_pct, 42);
         assert_eq!(agent.session.models.get_context_window(), Some(100_000));
         assert_eq!(agent.usage_cost_usd, Some(1.25));
+        assert_eq!(agent.usage_cost_currency.as_deref(), Some("USD"));
+    }
+
+    #[test]
+    fn handle_usage_update_gates_cost_usd_by_currency_and_handles_edge_sizes() {
+        let mut app = make_app_with_agent("sess-1");
+        let send_usage = |app: &mut AppView, usage: acp::UsageUpdate| {
+            let (tx, _rx) = tokio::sync::oneshot::channel();
+            let request = acp::SessionNotification::new(
+                acp::SessionId::new("sess-1"),
+                acp::SessionUpdate::UsageUpdate(usage),
+            );
+            handle(
+                AcpClientMessage::SessionNotification(pi_acp_lib::AcpArgs {
+                    request,
+                    response_tx: tx,
+                }),
+                app,
+            )
+        };
+
+        // Lowercase "usd" populates usage_cost_usd and normalizes currency to "USD".
+        assert!(send_usage(
+            &mut app,
+            acp::UsageUpdate::new(20_000, 100_000).cost(acp::Cost::new(0.75, " usd ")),
+        ));
+        let agent = app.agents.get(&AgentId(0)).unwrap();
+        assert_eq!(agent.usage_cost_usd, Some(0.75));
+        assert_eq!(agent.usage_cost_currency.as_deref(), Some("USD"));
+
+        // Non-USD currency ("EUR") clears usage_cost_usd while recording currency.
+        assert!(send_usage(
+            &mut app,
+            acp::UsageUpdate::new(30_000, 0).cost(acp::Cost::new(1.25, "EUR")),
+        ));
+        let agent = app.agents.get(&AgentId(0)).unwrap();
+        assert_eq!(agent.usage_cost_usd, None);
+        assert_eq!(agent.usage_cost_currency.as_deref(), Some("EUR"));
+        // size == 0 preserves the prior total (100_000) while updating used.
+        let ctx = agent.context_state.as_ref().expect("context_state populated");
+        assert_eq!(ctx.used, 30_000);
+        assert_eq!(ctx.total, 100_000);
+        assert_eq!(ctx.usage_pct, 30);
+        assert_eq!(ctx.free_tokens, 70_000);
+
+        // used > size clamps usage_pct to 100 and saturates free_tokens to 0.
+        assert!(send_usage(
+            &mut app,
+            acp::UsageUpdate::new(150_000, 100_000),
+        ));
+        let agent = app.agents.get(&AgentId(0)).unwrap();
+        let ctx = agent.context_state.as_ref().expect("context_state populated");
+        assert_eq!(ctx.used, 150_000);
+        assert_eq!(ctx.total, 100_000);
+        assert_eq!(ctx.usage_pct, 100);
+        assert_eq!(ctx.free_tokens, 0);
     }
 
     #[test]

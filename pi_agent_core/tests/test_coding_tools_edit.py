@@ -7,6 +7,7 @@ import json
 import pytest
 
 from pi_agent_core.coding_tools.edit import (
+    _MAX_DIFF_TEXT_CHARS,
     EditParams,
     create_edit_tool,
     prepare_edit_arguments,
@@ -52,11 +53,25 @@ async def test_edit_details_contain_diff_patch_and_first_changed_line(tmp_path):
     result = await tool.execute("t1", _params("f.txt", ("line3", "LINE3")))
     details = result.details
     assert details["diff"] == details["patch"]
+    assert details["old_text"] == "line1\nline2\nline3\nline4\nline5\n"
+    assert details["new_text"] == "line1\nline2\nLINE3\nline4\nline5\n"
     assert "@@" in details["patch"]
     assert "-line3" in details["patch"]
     assert "+LINE3" in details["patch"]
     assert details["firstChangedLine"] == 3
     json.dumps(details)  # stays JSON-serializable
+
+
+async def test_edit_details_omits_old_and_new_text_when_oversized(tmp_path):
+    prefix = "x" * (_MAX_DIFF_TEXT_CHARS + 1)
+    (tmp_path / "big.txt").write_text(f"{prefix}\ntarget\n", encoding="utf-8")
+    tool = create_edit_tool(str(tmp_path))
+    result = await tool.execute("t1", _params("big.txt", ("target", "updated")))
+    details = result.details
+    assert "old_text" not in details
+    assert "new_text" not in details
+    assert "-target" in details["patch"]
+    assert "+updated" in details["patch"]
 
 
 # --- matching errors (pi wording) ---
