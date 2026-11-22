@@ -532,10 +532,13 @@ def create_bash_tool(
             if ended_before_limit:
                 # Nothing was stopped: the command ran to its end, with its side effects, and
                 # its exit code would be lost. Say so, so that the model does not run it again.
-                status += (
-                    f". The command had already ended (exit code {exit_task.result()})"
-                    " when its output was counted."
+                ended_code = exit_task.result()
+                how = (
+                    f"killed by signal {-ended_code}"
+                    if ended_code < 0
+                    else f"exit code {ended_code}"
                 )
+                status += f". The command had already ended ({how}) when its output was counted."
             raise RuntimeError(_append_status(text, status))
 
         text, details = _format_output(snapshot, output.get_last_line_bytes())

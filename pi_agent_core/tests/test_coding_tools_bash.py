@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import os
+import sys
 import time
 
 import pytest
@@ -600,6 +601,24 @@ async def test_bash_output_limit_says_when_the_command_had_already_ended(tmp_pat
     assert message.endswith(
         "Command stopped: its output passed the limit of 1000B."
         " The command had already ended (exit code 3) when its output was counted."
+    )
+
+
+@needs_bash
+@pytest.mark.skipif(sys.platform == "win32", reason="a signal is not an exit code on Windows")
+async def test_bash_output_limit_says_when_the_command_had_already_been_killed(
+    tmp_path, monkeypatch
+):
+    """A negative return code is a signal on POSIX: the text names the signal, not a code."""
+    _make_the_limit_watcher_lose(monkeypatch)
+    tool = create_bash_tool(
+        str(tmp_path), limits_for_call=lambda _id: BashLimits(max_output_bytes=1_000)
+    )
+    with pytest.raises(RuntimeError) as excinfo:
+        await tool.execute("t1", BashParams(command="seq 1 2000; kill -9 $$"))
+    assert str(excinfo.value).endswith(
+        "Command stopped: its output passed the limit of 1000B."
+        " The command had already ended (killed by signal 9) when its output was counted."
     )
 
 
