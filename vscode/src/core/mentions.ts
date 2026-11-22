@@ -111,7 +111,7 @@ export function formatMentionToken(item: Pick<MentionAttachment, "kind" | "path"
         ? `${item.path}:L${item.range.startLine}`
         : `${item.path}:L${item.range.startLine}-L${item.range.endLine}`
       : item.path;
-  return /\s/.test(ref) ? `@"${ref}"` : `@${ref}`;
+  return /\s/.test(ref) ? `@"${ref.replace(/"/g, '\\"')}"` : `@${ref}`;
 }
 
 export function deriveFolders(filePaths: readonly string[]): string[] {

@@ -2,6 +2,7 @@ import {
   buildCommandCatalog,
   canRunClientCommandInStatus,
   detectComposerTrigger,
+  mentionReplaceEnd,
   rankCommands,
   resolveClientSlashCommand,
   slashArgOptions,
@@ -82,24 +83,22 @@ const inputLabel = el("label", { class: "sr-only", for: "chat-input", text: "Mes
 const input = el("textarea", {
   id: "chat-input",
   class: "input",
-  role: "combobox",
   ariaAutocomplete: "list",
-  ariaExpanded: "false",
-  ariaControls: "composer-menu",
 });
-input.placeholder = "Ask zycode (@ to mention, / for commands; Enter to send, Shift+Enter for a new line)";
+input.placeholder =
+  "Ask zycode (@ to mention, / for commands, or use the @ and / buttons with an input method; Enter to send, Shift+Enter for a new line)";
 input.rows = 3;
 const popover = el("div", {
   id: "composer-menu",
   class: "composer-popover",
-  role: "listbox",
-  ariaLabel: "Suggestions",
   hidden: true,
 });
+popover.tabIndex = -1;
+const popoverStatus = el("span", { class: "sr-only", role: "status" });
 const chipsBar = el("div", {
   class: "composer-chips",
   role: "list",
-  ariaLabel: "Attached context",
+  ariaLabel: "References and images",
   hidden: true,
 });
 const mentionTriggerButton = el("button", {
@@ -132,7 +131,7 @@ const composerBar = el(
   el("div", { class: "composer-triggers" }, mentionTriggerButton, slashTriggerButton),
   el("div", { class: "actions" }, stopButton, sendButton),
 );
-const composer = el("footer", { class: "composer" }, jumpBottomButton, popover, chipsBar, inputLabel, input, composerBar);
+const composer = el("footer", { class: "composer" }, jumpBottomButton, popover, popoverStatus, chipsBar, inputLabel, input, composerBar);
 root.append(header, banner, transcript, composer);
 
 /**
@@ -334,12 +333,30 @@ function loadPersistedState(): PersistedWebviewState | undefined {
   };
 }
 
+/**
+ * `setState` serializes the whole state at each call, and the throttled call runs while the user types.
+ * Images beyond this total are not kept, so that a key press costs a few milliseconds at most (4 images of
+ * 7,000,000 characters cost 20 to 160 ms).
+ */
+const IMAGE_STATE_MAX_CHARS = 2_000_000;
+
+function imagesForState(): ImageAttachment[] {
+  const kept: ImageAttachment[] = [];
+  let total = 0;
+  for (const img of imageAttachments) {
+    if (total + img.data.length > IMAGE_STATE_MAX_CHARS) continue;
+    total += img.data.length;
+    kept.push({ ...img });
+  }
+  return kept;
+}
+
 function saveWebviewState(): void {
   try {
     vscode.setState?.({
       draft: input.value,
       attachments: cloneAttachments(attachments),
-      images: imageAttachments.map((img) => ({ ...img })),
+      images: imagesForState(),
       followTail,
       scrollTop: Math.max(0, transcript.scrollTop),
       openDetails: Object.fromEntries(openDetails),
@@ -1012,7 +1029,7 @@ const NOTICE_MESSAGE: Record<NoticeAction["id"], WebviewMessage> = {
   saveAll: { type: "saveAll" },
 };
 
-function addNotice(level: string, text: string, actions?: NoticeAction[]): void {
+function addNotice(level: string, text: string, actions?: NoticeAction[]): HTMLElement {
   const node = el("div", { class: `notice ${level}` }, el("span", { text }));
   if (actions && actions.length > 0) {
     node.append(
@@ -1024,6 +1041,7 @@ function addNotice(level: string, text: string, actions?: NoticeAction[]): void 
     );
   }
   transcript.append(node);
+  return node;
 }
 
 function renderItem(item: TranscriptItem): void {
@@ -1063,6 +1081,7 @@ function resetTranscript(items: TranscriptItem[]): void {
   if (!isInitial) {
     attachments = [];
     imageAttachments = [];
+    imageStateNotice = undefined;
     renderChips();
     openDetails.clear();
     pendingScrollRestore = undefined;
@@ -1151,6 +1170,7 @@ function onHostMessage(message: HostMessage): void {
       return;
     case "mentionResults":
       if (message.requestId !== mentionSeq || activeTrigger?.kind !== "mention") return;
+      if (message.query !== activeTrigger.query) return;
       clearMentionLoadingTimer();
       mentionLoading = false;
       menuItems = message.items.map((item) => ({ kind: "mention", item }));
@@ -1199,16 +1219,18 @@ function startMentionLoading(): void {
     mentionLoadingTimer = undefined;
     if (mentionLoading) {
       mentionLoading = false;
+      menuItems = [];
       renderPopover();
     }
   }, MENTION_LOADING_TIMEOUT_MS);
 }
 
 function syncComboboxAria(): void {
-  input.setAttribute("aria-expanded", menuOpen ? "true" : "false");
   if (menuOpen && menuItems.length > 0 && activeIndex >= 0 && activeIndex < menuItems.length) {
+    input.setAttribute("aria-controls", "composer-listbox");
     input.setAttribute("aria-activedescendant", `composer-opt-${activeIndex}`);
   } else {
+    input.removeAttribute("aria-controls");
     input.removeAttribute("aria-activedescendant");
   }
 }
@@ -1223,6 +1245,7 @@ function closePopover(): void {
   menuOpen = false;
   popover.hidden = true;
   popover.replaceChildren();
+  popoverStatus.textContent = "";
   syncComboboxAria();
   syncJumpBottom();
 }
@@ -1247,6 +1270,8 @@ function renderPopover(): void {
   }
   menuOpen = true;
   popover.hidden = false;
+  const stale = activeTrigger.kind === "mention" && mentionLoading && menuItems.length > 0;
+  popover.classList.toggle("stale", stale);
   syncJumpBottom();
 
   const headerText =
@@ -1254,8 +1279,8 @@ function renderPopover(): void {
       ? "Commands"
       : activeTrigger.kind === "slash-arg"
         ? `/${activeTrigger.command} options`
-        : "Context · files, folders, selection";
-  const nodes: Node[] = [el("div", { class: "popover-head", text: headerText })];
+        : "References · files, folders, selection";
+  const nodes: Node[] = [el("div", { class: "popover-head", ariaHidden: true, text: headerText })];
 
   if (menuItems.length === 0) {
     const emptyText =
@@ -1266,8 +1291,9 @@ function renderPopover(): void {
         : activeTrigger.kind === "slash-arg"
           ? `No matching options for /${activeTrigger.command}`
           : "No matching commands";
-    nodes.push(el("div", { class: "popover-empty", role: "status", text: emptyText }));
+    nodes.push(el("div", { class: "popover-empty", text: emptyText }));
     popover.replaceChildren(...nodes);
+    popoverStatus.textContent = emptyText;
     syncComboboxAria();
     return;
   }
@@ -1275,6 +1301,8 @@ function renderPopover(): void {
   if (activeIndex >= menuItems.length) activeIndex = menuItems.length - 1;
   if (activeIndex < 0) activeIndex = 0;
 
+  const list = el("div", { id: "composer-listbox", role: "listbox", ariaLabel: headerText });
+  if (stale) list.setAttribute("aria-busy", "true");
   menuItems.forEach((entry, index) => {
     const active = index === activeIndex;
     const row = el("div", {
@@ -1327,10 +1355,14 @@ function renderPopover(): void {
         row.append(el("div", { class: "popover-detail" }, ...highlightedText(item.detail, item.detailMatches)));
       }
     }
-    nodes.push(row);
+    list.append(row);
   });
+  nodes.push(list);
 
   popover.replaceChildren(...nodes);
+  popoverStatus.textContent = stale
+    ? "Searching workspace…"
+    : `${menuItems.length} ${menuItems.length === 1 ? "suggestion" : "suggestions"}`;
   syncComboboxAria();
 }
 
@@ -1396,6 +1428,7 @@ function renderChips(): void {
       imageAttachments.splice(index, 1);
       renderChips();
       saveWebviewState();
+      syncImageStateNotice(false);
       input.focus();
     });
     chipsBar.append(
@@ -1435,6 +1468,23 @@ function addImageAttachment(mimeType: string, base64Data: string, name?: string)
   });
   renderChips();
   saveWebviewState();
+  syncImageStateNotice(true);
+}
+
+let imageStateNotice: HTMLElement | undefined;
+
+function syncImageStateNotice(announce: boolean): void {
+  const allKept = imagesForState().length === imageAttachments.length;
+  if (allKept || announce) {
+    imageStateNotice?.remove();
+    imageStateNotice = undefined;
+  }
+  if (allKept || !announce) return;
+  imageStateNotice = addNotice(
+    "info",
+    "Large images are not kept when this view reloads. Send the message first, or attach the image again after a reload.",
+  );
+  scrollToEnd();
 }
 
 function readImageFile(file: File): void {
@@ -1566,7 +1616,7 @@ function updateTrigger(force = false): void {
     return;
   }
 
-  menuItems = [];
+  if (!wasMentionOpen) menuItems = [];
   activeIndex = 0;
 
   if (!wasMentionOpen || trigger.query === "" || force) {
@@ -1597,6 +1647,7 @@ function replaceTriggerRange(trigger: ComposerTrigger, inserted: string): void {
 
 function acceptMenuItem(index: number, mode: "enter" | "tab"): void {
   if (!activeTrigger || index < 0 || index >= menuItems.length) return;
+  if (activeTrigger.kind === "mention" && mentionLoading) return;
   const selected = menuItems[index];
   if (!selected) return;
 
@@ -1622,6 +1673,7 @@ function acceptMenuItem(index: number, mode: "enter" | "tab"): void {
           attachments = [];
           if (cmd.name === "new") imageAttachments = [];
           renderChips();
+          syncImageStateNotice(false);
         }
         saveWebviewState();
         dispatchClientCommand(`/${cmd.name}`);
@@ -1663,8 +1715,12 @@ function acceptMenuItem(index: number, mode: "enter" | "tab"): void {
   }
 
   const item = selected.item;
+  const replaced =
+    item.kind === "selection"
+      ? trigger
+      : { ...trigger, range: { ...trigger.range, end: mentionReplaceEnd(val, trigger, item.path) } };
   if (item.kind === "folder" && mode === "tab") {
-    replaceTriggerRange(trigger, `@${item.path}`);
+    replaceTriggerRange(replaced, `@${item.path}`);
     dismissedKey = undefined;
     saveWebviewState();
     updateTrigger(true);
@@ -1676,7 +1732,7 @@ function acceptMenuItem(index: number, mode: "enter" | "tab"): void {
       ? { kind: "selection", path: item.path, range: item.range }
       : { kind: item.kind, path: item.path };
   const token = formatMentionToken(attachment);
-  replaceTriggerRange(trigger, `${token} `);
+  replaceTriggerRange(replaced, `${token} `);
   addAttachment(attachment);
   closePopover();
 }
@@ -1719,6 +1775,7 @@ function submit(): void {
           imageAttachments = [];
         }
         renderChips();
+        syncImageStateNotice(false);
         saveWebviewState();
       }
       return;
@@ -1745,6 +1802,7 @@ function submit(): void {
   attachments = [];
   imageAttachments = [];
   renderChips();
+  syncImageStateNotice(false);
   saveWebviewState();
 }
 
@@ -2000,12 +2058,12 @@ input.addEventListener("keydown", (event) => {
     }
   }
 
-  if (event.key === "ArrowDown" && !menuOpen && noModifiers && historyIndex >= 0) {
+  if (event.key === "ArrowDown" && !menuOpen && noModifiers && historyIndex >= 0 && !historyEdited) {
     const cursor = input.selectionEnd ?? input.value.length;
     const onLastLine = !input.value.slice(cursor).includes("\n");
     if (onLastLine) {
       event.preventDefault();
-      if (!historyEdited && historyIndex < sentHistory.length - 1) {
+      if (historyIndex < sentHistory.length - 1) {
         historyIndex++;
         input.value = sentHistory[historyIndex]!;
         input.setSelectionRange(input.value.length, input.value.length);

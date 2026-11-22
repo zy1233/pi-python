@@ -159,14 +159,34 @@ function scanMentionTokenEnd(text: string, pos: number): number {
   return end;
 }
 
+/**
+ * `scanMentionTokenEnd` stops at the first character that is not an ASCII path character, so with the
+ * cursor inside a CJK name (`@文|件.md`) the rest of the name stays behind the inserted token. This gives
+ * the end of the text that the pick replaces: the end of the trigger, or, when the text after the cursor
+ * is exactly the rest of the picked path or file name, the end of that rest. Text that is not a name the
+ * index knows (`解释@ma|然后改一下`) is never taken.
+ */
+export function mentionReplaceEnd(text: string, trigger: { query: string; range: { start: number; end: number } }, pickedPath: string): number {
+  const cursor = trigger.range.start + 1 + trigger.query.length;
+  const slash = pickedPath.lastIndexOf("/");
+  const names = trigger.query.includes("/") || slash < 0 ? [pickedPath] : [pickedPath, pickedPath.slice(slash + 1)];
+  let end = trigger.range.end;
+  for (const name of names) {
+    if (name.length <= trigger.query.length || !name.startsWith(trigger.query)) continue;
+    const rest = name.slice(trigger.query.length);
+    if (text.startsWith(rest, cursor)) end = Math.max(end, cursor + rest.length);
+  }
+  return end;
+}
+
 export function detectComposerTrigger(text: string, cursor: number): ComposerTrigger | undefined {
   const pos = Math.max(0, Math.min(cursor, text.length));
   const before = text.slice(0, pos);
 
   if (!before.includes("\n")) {
-    const slashMatch = /^[ \t]*\/([^\s]*)$/.exec(before);
+    const slashMatch = /^[ \t]*[/／]([^\s]*)$/.exec(before);
     if (slashMatch) {
-      const slashIdx = before.indexOf("/");
+      const slashIdx = before.length - slashMatch[1]!.length - 1;
       const end = scanTokenEnd(text, pos, /\s/);
       return {
         kind: "slash",
@@ -192,7 +212,7 @@ export function detectComposerTrigger(text: string, cursor: number): ComposerTri
     }
   }
 
-  const atIdx = before.lastIndexOf("@");
+  const atIdx = Math.max(before.lastIndexOf("@"), before.lastIndexOf("＠"));
   if (atIdx < 0) return undefined;
   if (atIdx > 0 && /[A-Za-z0-9_]/.test(before[atIdx - 1] ?? "")) {
     return undefined;

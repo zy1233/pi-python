@@ -740,7 +740,9 @@ describe.skipIf(!chrome || !built)("webview: slash commands and @ mentions", () 
       input.dispatchEvent(new Event("input", { bubbles: true }));
       const openState = {
         hidden: menu.hidden,
-        expanded: input.getAttribute("aria-expanded"),
+        controls: input.getAttribute("aria-controls"),
+        listbox: document.getElementById(input.getAttribute("aria-controls") ?? "")?.getAttribute("role"),
+        role: input.getAttribute("role"),
         activeDesc0: input.getAttribute("aria-activedescendant"),
         options: [...menu.querySelectorAll("[role='option']")].map((el) => el.querySelector(".popover-title").textContent),
       };
@@ -769,17 +771,17 @@ describe.skipIf(!chrome || !built)("webview: slash commands and @ mentions", () 
         afterAccept,
         openBeforeEsc,
         hiddenAfterEsc: menu.hidden,
-        expandedAfterEsc: input.getAttribute("aria-expanded"),
+        activeDescAfterEsc: input.getAttribute("aria-activedescendant"),
       };`);
     expect(out).toMatchObject({
       ok: true,
-      openState: { hidden: false, expanded: "true", activeDesc0: "composer-opt-0" },
+      openState: { hidden: false, controls: "composer-listbox", listbox: "listbox", role: null, activeDesc0: "composer-opt-0" },
       afterDown: { activeDesc: "composer-opt-1" },
       afterUp: "composer-opt-0",
       afterAccept: { value: "/goal ", menuHidden: true, sends: 0 },
       openBeforeEsc: true,
       hiddenAfterEsc: true,
-      expandedAfterEsc: "false",
+      activeDescAfterEsc: null,
     });
     const opts = (out.openState as { options: string[] }).options;
     expect(opts.slice(0, 3)).toEqual(["/goal", "/auto-log", "/new"]);
@@ -952,7 +954,7 @@ describe.skipIf(!chrome || !built)("webview: slash commands and @ mentions", () 
       ok: true,
       slashOpen: { value: "/", hidden: false, head: "Commands" },
       afterIme: { value: "/", hidden: false, postedSame: true },
-      mentionOpen: { value: "explain @", hidden: false, head: "Context · files, folders, selection", query: "" },
+      mentionOpen: { value: "explain @", hidden: false, head: "References · files, folders, selection", query: "" },
     });
   });
 
@@ -1230,6 +1232,219 @@ describe.skipIf(!chrome || !built)("webview: slash commands and @ mentions", () 
       statusBeforeTimeout: "Searching workspace…",
       statusAfterTimeout: "No matching files or folders",
       sends: [{ type: "send", text: "hello @unanswered" }],
+    });
+  });
+
+  it("replaces the whole CJK file name when the cursor is inside it, and still keeps the text of a sentence", () => {
+    const out = run(`${richState}
+      const input = document.querySelector("textarea");
+      const chips = document.querySelector(".composer-chips");
+      const lastQuery = () => [...window.__posted].filter((m) => m.type === "queryMentions").at(-1);
+      const pick = (text, cursor, path) => {
+        input.value = text;
+        input.setSelectionRange(cursor, cursor);
+        input.dispatchEvent(new Event("input", { bubbles: true }));
+        const q = lastQuery();
+        host({ type: "mentionResults", requestId: q.requestId, query: q.query, items: [{ kind: "file", path, label: path, detail: "" }] });
+        input.dispatchEvent(new KeyboardEvent("keydown", { key: "Enter", bubbles: true }));
+        const value = input.value;
+        chips.querySelector(".chip-remove")?.click();
+        return value;
+      };
+      window.__result = {
+        cjkName: pick("看@文件.md然后", 3, "文件.md"),
+        sentence: pick("解释@ma然后改一下这个文件", 5, "src/main.ts"),
+      };`);
+    expect(out).toMatchObject({
+      ok: true,
+      cjkName: "看@文件.md 然后",
+      sentence: "解释@src/main.ts 然后改一下这个文件",
+    });
+  });
+
+  it("keeps the textarea a textbox and the listbox free of non-option children, and announces the number of results", () => {
+    const out = run(`${richState}
+      const input = document.querySelector("textarea");
+      const menu = document.getElementById("composer-menu");
+      const live = () => [...document.querySelectorAll(".composer [role='status']")].map((n) => n.textContent).filter(Boolean);
+      const shape = () => {
+        const list = document.getElementById("composer-listbox");
+        return {
+          listChildRoles: list ? [...list.children].map((c) => c.getAttribute("role")) : null,
+          headHidden: menu.querySelector(".popover-head")?.getAttribute("aria-hidden"),
+          listLabel: list?.getAttribute("aria-label") ?? null,
+          emptyInsideList: Boolean(list?.querySelector(".popover-empty")),
+          live: live(),
+          controls: input.getAttribute("aria-controls"),
+          controlsResolves: input.hasAttribute("aria-controls") ? Boolean(document.getElementById(input.getAttribute("aria-controls"))) : null,
+        };
+      };
+      const closed = shape();
+      const typeText = (text) => {
+        input.value = text;
+        input.setSelectionRange(text.length, text.length);
+        input.dispatchEvent(new Event("input", { bubbles: true }));
+      };
+      input.focus();
+      typeText("/mode");
+      const slash = shape();
+      const focus = {
+        menuTabindexAttr: menu.getAttribute("tabindex"),
+        menuInTabOrder: [...document.querySelectorAll("*")].some((e) => e === menu && e.tabIndex >= 0),
+        focusInInput: document.activeElement === input,
+        scrollable: menu.scrollHeight >= menu.clientHeight,
+      };
+      typeText("/zzzzzz");
+      const empty = shape();
+      typeText("@a");
+      const q = [...window.__posted].filter((m) => m.type === "queryMentions").at(-1);
+      host({ type: "mentionResults", requestId: q.requestId, query: q.query, items: [{ kind: "file", path: "a.ts", label: "a.ts", detail: "" }] });
+      const mention = shape();
+      input.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", bubbles: true }));
+      const afterEsc = shape();
+      window.__result = { role: input.getAttribute("role"), closed, slash, focus, empty, mention, afterEsc, afterClose: live() };`);
+    expect(out).toMatchObject({
+      ok: true,
+      role: null,
+      closed: { controls: null, controlsResolves: null },
+      // A scroll region needs to be focusable (axe scrollable-region-focusable); tabindex -1 keeps it out of the Tab order and focus stays in the textarea.
+      focus: { menuTabindexAttr: "-1", menuInTabOrder: false, focusInInput: true },
+      slash: { listChildRoles: ["option", "option", "option"], headHidden: "true", listLabel: "Commands", emptyInsideList: false, live: ["3 suggestions"], controls: "composer-listbox", controlsResolves: true },
+      empty: { listChildRoles: null, emptyInsideList: false, live: ["No matching commands"], controls: null, controlsResolves: null },
+      mention: { listChildRoles: ["option"], listLabel: "References · files, folders, selection", live: ["1 suggestion"], controls: "composer-listbox", controlsResolves: true },
+      afterEsc: { controls: null, controlsResolves: null },
+      afterClose: [],
+    });
+  });
+
+  it("opens the menus for a full-width ＠ and ／, and the placeholder names the buttons for an input method", () => {
+    const out = run(`${richState}
+      const input = document.querySelector("textarea");
+      const menu = document.getElementById("composer-menu");
+      const type = (text) => {
+        input.value = text;
+        input.setSelectionRange(text.length, text.length);
+        input.dispatchEvent(new Event("input", { bubbles: true }));
+      };
+      type("看＠");
+      const at = { hidden: menu.hidden, head: menu.querySelector(".popover-head")?.textContent };
+      type("");
+      type("／");
+      const slash = { hidden: menu.hidden, head: menu.querySelector(".popover-head")?.textContent };
+      window.__result = { placeholder: input.placeholder, at, slash };`);
+    expect(out).toMatchObject({
+      ok: true,
+      at: { hidden: false, head: "References · files, folders, selection" },
+      slash: { hidden: false, head: "Commands" },
+    });
+    expect(out.placeholder).toMatch(/@ and \/ buttons/);
+  });
+
+  it("does not show or accept the answer of an old query that arrives inside the 40 ms debounce window", () => {
+    const out = run(`${richState}
+      const input = document.querySelector("textarea");
+      const menu = document.getElementById("composer-menu");
+      const chips = document.querySelector(".composer-chips");
+      const queries = () => [...window.__posted].filter((m) => m.type === "queryMentions");
+      const rows = () => [...menu.querySelectorAll("[role='option'] .popover-title")].map((n) => n.textContent);
+      const typeText = (text) => {
+        input.value = text;
+        input.setSelectionRange(text.length, text.length);
+        input.dispatchEvent(new Event("input", { bubbles: true }));
+      };
+      const file = (name) => ({ kind: "file", path: name, label: name, detail: "" });
+      typeText("see @a");
+      const qa = queries().at(-1);
+      typeText("see @al");
+      // The debounce for "@al" has not fired yet: mentionSeq is still the id of "@a".
+      host({ type: "mentionResults", requestId: qa.requestId, query: qa.query, items: [file("alpha.ts"), file("beta.ts")] });
+      const lateAnswer = { rows: rows(), stale: menu.classList.contains("stale"), queriesSent: queries().length };
+      input.dispatchEvent(new KeyboardEvent("keydown", { key: "Enter", bubbles: true }));
+      const afterEnter = { value: input.value, chipCount: chips.querySelectorAll(".chip").length, sends: window.__posted.filter((m) => m.type === "send").length };
+      setTimeout(() => {
+        const qal = queries().at(-1);
+        host({ type: "mentionResults", requestId: qal.requestId, query: qal.query, items: [file("alpha.ts")] });
+        input.dispatchEvent(new KeyboardEvent("keydown", { key: "Enter", bubbles: true }));
+        document.getElementById("result").textContent = JSON.stringify({
+          ok: true, lateAnswer, afterEnter, query: qal.query, accepted: { value: input.value, chipCount: chips.querySelectorAll(".chip").length },
+        });
+      }, 120);`);
+    expect(out).toMatchObject({
+      ok: true,
+      lateAnswer: { rows: [], queriesSent: 1 },
+      afterEnter: { value: "see @al", chipCount: 0, sends: 0 },
+      query: "al",
+      accepted: { value: "see @alpha.ts ", chipCount: 1 },
+    });
+  });
+
+  it("keeps the old @ rows (italic, with a searching header) while a new search is pending, and never accepts them with Enter, Tab or a click", () => {
+    const out = run(`${richState}
+      const input = document.querySelector("textarea");
+      const menu = document.getElementById("composer-menu");
+      const chips = document.querySelector(".composer-chips");
+      const lastQuery = () => [...window.__posted].filter((m) => m.type === "queryMentions").at(-1);
+      const rows = () => [...menu.querySelectorAll("[role='option'] .popover-title")].map((n) => n.textContent);
+      const typeText = (text) => {
+        input.value = text;
+        input.setSelectionRange(text.length, text.length);
+        input.dispatchEvent(new Event("input", { bubbles: true }));
+      };
+      const answer = (items) => {
+        const q = lastQuery();
+        host({ type: "mentionResults", requestId: q.requestId, query: q.query, items });
+      };
+      const file = (name) => ({ kind: "file", path: name, label: name, detail: "" });
+
+      typeText("see @a");
+      answer([file("alpha.ts"), file("beta.ts")]);
+      const busy = () => document.getElementById("composer-listbox")?.getAttribute("aria-busy") ?? null;
+      const look = () => {
+        const row = menu.querySelector(".popover-item");
+        const cs = row ? getComputedStyle(row) : undefined;
+        return { opacity: cs?.opacity, fontStyle: cs?.fontStyle, headSuffix: getComputedStyle(menu.querySelector(".popover-head"), "::after").content };
+      };
+      const settled = { rows: rows(), stale: menu.classList.contains("stale"), busy: busy(), look: look() };
+
+      typeText("see @al");
+      const pending = { rows: rows(), stale: menu.classList.contains("stale"), busy: busy(), look: look() };
+      const tab = new KeyboardEvent("keydown", { key: "Tab", cancelable: true, bubbles: true });
+      input.dispatchEvent(tab);
+      input.dispatchEvent(new KeyboardEvent("keydown", { key: "Enter", bubbles: true }));
+      menu.querySelectorAll("[role='option']")[0].click();
+      const afterKeys = {
+        value: input.value,
+        chipCount: chips.querySelectorAll(".chip").length,
+        tabPrevented: tab.defaultPrevented,
+        sends: window.__posted.filter((m) => m.type === "send").length,
+      };
+
+      // The debounce for "@al" fires after 40 ms; only then does an answer carry the query of the box.
+      setTimeout(() => {
+        answer([file("alpha.ts")]);
+        const fresh = { rows: rows(), stale: menu.classList.contains("stale"), busy: busy() };
+        input.dispatchEvent(new KeyboardEvent("keydown", { key: "Enter", bubbles: true }));
+        const accepted = { value: input.value, chipCount: chips.querySelectorAll(".chip").length };
+
+        typeText("see @alpha.ts @b");
+        answer([file("beta.ts")]);
+        typeText("see @alpha.ts @be");
+        setTimeout(() => {
+          const afterTimeout = { rows: rows(), empty: menu.querySelector(".popover-empty")?.textContent };
+          document.getElementById("result").textContent = JSON.stringify({
+            ok: true, settled, pending, afterKeys, fresh, accepted, afterTimeout,
+          });
+        }, 1100);
+      }, 100);`);
+    expect(out).toMatchObject({
+      ok: true,
+      // Stale rows keep full opacity (the text must pass 4.5:1) and differ from fresh rows by italics and a head suffix.
+      settled: { rows: ["alpha.ts", "beta.ts"], stale: false, busy: null, look: { opacity: "1", fontStyle: "normal", headSuffix: "none" } },
+      pending: { rows: ["alpha.ts", "beta.ts"], stale: true, busy: "true", look: { opacity: "1", fontStyle: "italic", headSuffix: '" · searching…"' } },
+      afterKeys: { value: "see @al", chipCount: 0, tabPrevented: true, sends: 0 },
+      fresh: { rows: ["alpha.ts"], stale: false, busy: null },
+      accepted: { value: "see @alpha.ts ", chipCount: 1 },
+      afterTimeout: { rows: [], empty: "No matching files or folders" },
     });
   });
 });
@@ -1808,7 +2023,7 @@ describe.skipIf(!chrome || !built)("webview: P1 images, insertMention, saveAll, 
       const afterMidDraftUp = input.value;
 
       // 3. Build a draft with an attached @ chip, recall at cursor 0, edit recalled text,
-      // verify ArrowUp does not clobber the edit, then ArrowDown restores draft + chip.
+      // verify ArrowUp and ArrowDown do not clobber the edit, then Escape restores draft + chip.
       input.value = "check";
       input.setSelectionRange(5, 5);
       host({ type: "insertMention", item: { kind: "file", path: "src/app.ts" } });
@@ -1825,8 +2040,15 @@ describe.skipIf(!chrome || !built)("webview: P1 images, insertMention, saveAll, 
       input.dispatchEvent(new KeyboardEvent("keydown", { key: "ArrowUp", bubbles: true }));
       const afterEditedUp = input.value;
       input.setSelectionRange(input.value.length, input.value.length);
-      input.dispatchEvent(new KeyboardEvent("keydown", { key: "ArrowDown", bubbles: true }));
+      const downEvent = new KeyboardEvent("keydown", { key: "ArrowDown", bubbles: true, cancelable: true });
+      input.dispatchEvent(downEvent);
       const afterEditedDown = {
+        value: input.value,
+        chipLabels: [...chips.querySelectorAll(".chip-label")].map((c) => c.textContent),
+        defaultPrevented: downEvent.defaultPrevented,
+      };
+      input.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", bubbles: true }));
+      const afterEditedEscape = {
         value: input.value,
         chipLabels: [...chips.querySelectorAll(".chip-label")].map((c) => c.textContent),
       };
@@ -1850,6 +2072,7 @@ describe.skipIf(!chrome || !built)("webview: P1 images, insertMention, saveAll, 
         afterRecall,
         afterEditedUp,
         afterEditedDown,
+        afterEditedEscape,
         afterEscape,
       };`);
     expect(out).toMatchObject({
@@ -1860,7 +2083,8 @@ describe.skipIf(!chrome || !built)("webview: P1 images, insertMention, saveAll, 
       originalDraft: "check @src/app.ts ",
       afterRecall: { value: "second prompt", chipCount: 0 },
       afterEditedUp: "second prompt edited",
-      afterEditedDown: { value: "check @src/app.ts ", chipLabels: ["app.ts"] },
+      afterEditedDown: { value: "second prompt edited", chipLabels: [], defaultPrevented: false },
+      afterEditedEscape: { value: "check @src/app.ts ", chipLabels: ["app.ts"] },
       afterEscape: { value: "check @src/app.ts ", chipLabels: ["app.ts"] },
     });
   });
@@ -1972,5 +2196,176 @@ describe.skipIf(!chrome || !built)("webview: P1 images, insertMention, saveAll, 
         },
       ],
     });
+  });
+
+  it("keeps large images out of the saved state, tells the user, and still sends them", () => {
+    const mockFileReader = `window.FileReader = class {
+      constructor() { this._listeners = []; this.result = ""; }
+      addEventListener(type, fn) { if (type === "load") this._listeners.push(fn); }
+      readAsDataURL(file) {
+        this.result = "data:" + file.type + ";base64," + file.__base64;
+        for (const fn of this._listeners) fn();
+      }
+    };`;
+    const out = run(
+      `${state}
+      state({});
+      const input = document.querySelector("textarea");
+      const paste = (name, chars) => {
+        const ev = new Event("paste", { bubbles: true, cancelable: true });
+        Object.defineProperty(ev, "clipboardData", { value: { items: [{ type: "image/png", getAsFile: () => ({ type: "image/png", name, __base64: "A".repeat(chars) }) }] } });
+        input.dispatchEvent(ev);
+      };
+      const notices = () => [...document.querySelectorAll(".notice")].map((n) => n.textContent);
+      paste("small.png", 1_200_000);
+      const afterSmall = { saved: window.__webviewState.images.map((i) => i.name), notices: notices().length };
+      paste("big.png", 1_200_000);
+      const afterBig = { saved: window.__webviewState.images.map((i) => i.name), notices: notices().length, size: JSON.stringify(window.__webviewState).length };
+      input.value = "typing goes on";
+      input.dispatchEvent(new Event("input", { bubbles: true }));
+      input.value = "typing goes on";
+      input.dispatchEvent(new KeyboardEvent("keydown", { key: "Enter", bubbles: true }));
+      const sent = window.__posted.filter((m) => m.type === "send");
+      window.__result = { afterSmall, afterBig, sentImages: sent[0].images.map((i) => i.name) };`,
+      mockFileReader,
+    );
+    expect(out).toMatchObject({
+      ok: true,
+      afterSmall: { saved: ["small.png"], notices: 0 },
+      afterBig: { saved: ["small.png"], notices: 1 },
+      sentImages: ["small.png", "big.png"],
+    });
+    expect((out.afterBig as { size: number }).size).toBeLessThan(2_100_000);
+  });
+
+  it("removes the large-image notice when the images are sent, or cleared with /new (menu and Escape paths)", () => {
+    const mockFileReader = `window.FileReader = class {
+      constructor() { this._listeners = []; this.result = ""; }
+      addEventListener(type, fn) { if (type === "load") this._listeners.push(fn); }
+      readAsDataURL(file) {
+        this.result = "data:" + file.type + ";base64," + file.__base64;
+        for (const fn of this._listeners) fn();
+      }
+    };`;
+    const out = run(
+      `${state}
+      state({ mode: { current: "ask", options: [{ id: "ask", name: "Ask" }, { id: "auto", name: "Auto" }] } });
+      const input = document.querySelector("textarea");
+      const paste = (name, chars) => {
+        const ev = new Event("paste", { bubbles: true, cancelable: true });
+        Object.defineProperty(ev, "clipboardData", { value: { items: [{ type: "image/png", getAsFile: () => ({ type: "image/png", name, __base64: "A".repeat(chars) }) }] } });
+        input.dispatchEvent(ev);
+      };
+      const notices = () => [...document.querySelectorAll(".notice")].filter((n) => n.textContent.includes("Large images")).length;
+      const pasteTwoLarge = () => { paste("a.png", 1_500_000); paste("b.png", 1_500_000); return notices(); };
+      const key = (k) => input.dispatchEvent(new KeyboardEvent("keydown", { key: k, bubbles: true }));
+      const typeText = (text) => {
+        input.value = text;
+        input.setSelectionRange(text.length, text.length);
+        input.dispatchEvent(new Event("input", { bubbles: true }));
+      };
+
+      const beforeSend = pasteTwoLarge();
+      input.value = "go"; key("Enter");
+      const afterSend = { notices: notices(), chips: document.querySelectorAll(".composer-chips .chip").length };
+
+      const beforeMenuNew = pasteTwoLarge();
+      typeText("/new"); key("Enter");
+      const afterMenuNew = { notices: notices(), chips: document.querySelectorAll(".composer-chips .chip").length };
+
+      const beforeEscapeNew = pasteTwoLarge();
+      typeText("/new"); key("Escape"); key("Enter");
+      const afterEscapeNew = { notices: notices(), chips: document.querySelectorAll(".composer-chips .chip").length };
+
+      window.__result = { beforeSend, afterSend, beforeMenuNew, afterMenuNew, beforeEscapeNew, afterEscapeNew, newChats: window.__posted.filter((m) => m.type === "newChat").length };`,
+      mockFileReader,
+    );
+    expect(out).toMatchObject({
+      ok: true,
+      beforeSend: 1,
+      afterSend: { notices: 0, chips: 0 },
+      beforeMenuNew: 1,
+      afterMenuNew: { notices: 0, chips: 0 },
+      beforeEscapeNew: 1,
+      afterEscapeNew: { notices: 0, chips: 0 },
+      newChats: 2,
+    });
+  });
+
+  it("saves three of four images (1.5M, 1.5M, 0.1M, 0.1M), shows one notice, and still sends all four", () => {
+    const mockFileReader = `window.FileReader = class {
+      constructor() { this._listeners = []; this.result = ""; }
+      addEventListener(type, fn) { if (type === "load") this._listeners.push(fn); }
+      readAsDataURL(file) {
+        this.result = "data:" + file.type + ";base64," + file.__base64;
+        for (const fn of this._listeners) fn();
+      }
+    };`;
+    const out = run(
+      `${state}
+      state({});
+      const input = document.querySelector("textarea");
+      for (const [name, chars] of [["a.png", 1_500_000], ["b.png", 1_500_000], ["c.png", 100_000], ["d.png", 100_000]]) {
+        const ev = new Event("paste", { bubbles: true, cancelable: true });
+        Object.defineProperty(ev, "clipboardData", { value: { items: [{ type: "image/png", getAsFile: () => ({ type: "image/png", name, __base64: "A".repeat(chars) }) }] } });
+        input.dispatchEvent(ev);
+      }
+      const saved = window.__webviewState.images.map((i) => i.name);
+      const notices = [...document.querySelectorAll(".notice")].filter((n) => n.textContent.includes("Large images")).length;
+      input.value = "go";
+      input.dispatchEvent(new KeyboardEvent("keydown", { key: "Enter", bubbles: true }));
+      window.__result = { saved, notices, sentImages: window.__posted.filter((m) => m.type === "send")[0].images.map((i) => i.name) };`,
+      mockFileReader,
+    );
+    expect(out).toMatchObject({
+      ok: true,
+      saved: ["a.png", "c.png", "d.png"],
+      notices: 1,
+      sentImages: ["a.png", "b.png", "c.png", "d.png"],
+    });
+  });
+
+  it("keeps the small images after a large one, in order, shows one notice, and drops the notice when all fit", () => {
+    const mockFileReader = `window.FileReader = class {
+      constructor() { this._listeners = []; this.result = ""; }
+      addEventListener(type, fn) { if (type === "load") this._listeners.push(fn); }
+      readAsDataURL(file) {
+        this.result = "data:" + file.type + ";base64," + file.__base64;
+        for (const fn of this._listeners) fn();
+      }
+    };`;
+    const out = run(
+      `${state}
+      state({});
+      const input = document.querySelector("textarea");
+      const paste = (name, chars) => {
+        const ev = new Event("paste", { bubbles: true, cancelable: true });
+        Object.defineProperty(ev, "clipboardData", { value: { items: [{ type: "image/png", getAsFile: () => ({ type: "image/png", name, __base64: "A".repeat(chars) }) }] } });
+        input.dispatchEvent(ev);
+      };
+      const notices = () => [...document.querySelectorAll(".notice")].filter((n) => n.textContent.includes("Large images")).length;
+      paste("a.png", 1_500_000);
+      paste("b.png", 1_500_000);
+      paste("c.png", 100_000);
+      paste("d.png", 100_000);
+      const afterPaste = { saved: window.__webviewState.images.map((i) => i.name), notices: notices(), size: JSON.stringify(window.__webviewState).length };
+      document.querySelectorAll(".composer-chips .image-chip .chip-remove")[1].click();
+      const afterRemove = { saved: window.__webviewState.images.map((i) => i.name), notices: notices() };
+      paste("b2.png", 1_500_000);
+      const afterBigAgain = { saved: window.__webviewState.images.map((i) => i.name), notices: notices() };
+      input.value = "go";
+      input.dispatchEvent(new KeyboardEvent("keydown", { key: "Enter", bubbles: true }));
+      const sent = window.__posted.filter((m) => m.type === "send");
+      window.__result = { afterPaste, afterRemove, afterBigAgain, sentImages: sent[0].images.map((i) => i.name) };`,
+      mockFileReader,
+    );
+    expect(out).toMatchObject({
+      ok: true,
+      afterPaste: { saved: ["a.png", "c.png", "d.png"], notices: 1 },
+      afterRemove: { saved: ["a.png", "c.png", "d.png"], notices: 0 },
+      afterBigAgain: { saved: ["a.png", "c.png", "d.png"], notices: 1 },
+      sentImages: ["a.png", "c.png", "d.png", "b2.png"],
+    });
+    expect((out.afterPaste as { size: number }).size).toBeLessThan(2_100_000);
   });
 });
