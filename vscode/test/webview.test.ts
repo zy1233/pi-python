@@ -1331,7 +1331,7 @@ describe.skipIf(!chrome || !built)("webview: slash commands and @ mentions", () 
     expect(out.placeholder).toMatch(/@ and \/ buttons/);
   });
 
-  it("keeps the old @ rows (dimmed) while a new search is pending, and never accepts them with Enter, Tab or a click", () => {
+  it("keeps the old @ rows (italic, with a searching header) while a new search is pending, and never accepts them with Enter, Tab or a click", () => {
     const out = run(`${richState}
       const input = document.querySelector("textarea");
       const menu = document.getElementById("composer-menu");
@@ -1352,10 +1352,15 @@ describe.skipIf(!chrome || !built)("webview: slash commands and @ mentions", () 
       typeText("see @a");
       answer([file("alpha.ts"), file("beta.ts")]);
       const busy = () => document.getElementById("composer-listbox")?.getAttribute("aria-busy") ?? null;
-      const settled = { rows: rows(), stale: menu.classList.contains("stale"), busy: busy() };
+      const look = () => {
+        const row = menu.querySelector(".popover-item");
+        const cs = row ? getComputedStyle(row) : undefined;
+        return { opacity: cs?.opacity, fontStyle: cs?.fontStyle, headSuffix: getComputedStyle(menu.querySelector(".popover-head"), "::after").content };
+      };
+      const settled = { rows: rows(), stale: menu.classList.contains("stale"), busy: busy(), look: look() };
 
       typeText("see @al");
-      const pending = { rows: rows(), stale: menu.classList.contains("stale"), busy: busy() };
+      const pending = { rows: rows(), stale: menu.classList.contains("stale"), busy: busy(), look: look() };
       const tab = new KeyboardEvent("keydown", { key: "Tab", cancelable: true, bubbles: true });
       input.dispatchEvent(tab);
       input.dispatchEvent(new KeyboardEvent("keydown", { key: "Enter", bubbles: true }));
@@ -1383,8 +1388,9 @@ describe.skipIf(!chrome || !built)("webview: slash commands and @ mentions", () 
       }, 1100);`);
     expect(out).toMatchObject({
       ok: true,
-      settled: { rows: ["alpha.ts", "beta.ts"], stale: false, busy: null },
-      pending: { rows: ["alpha.ts", "beta.ts"], stale: true, busy: "true" },
+      // Stale rows keep full opacity (the text must pass 4.5:1) and differ from fresh rows by italics and a head suffix.
+      settled: { rows: ["alpha.ts", "beta.ts"], stale: false, busy: null, look: { opacity: "1", fontStyle: "normal", headSuffix: "none" } },
+      pending: { rows: ["alpha.ts", "beta.ts"], stale: true, busy: "true", look: { opacity: "1", fontStyle: "italic", headSuffix: '" · searching…"' } },
       afterKeys: { value: "see @al", chipCount: 0, tabPrevented: true, sends: 0 },
       fresh: { rows: ["alpha.ts"], stale: false, busy: null },
       accepted: { value: "see @alpha.ts ", chipCount: 1 },

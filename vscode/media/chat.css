@@ -630,7 +630,12 @@ pre.code code {
   background: var(--vscode-list-hoverBackground, rgba(128, 128, 128, 0.14));
 }
 .composer-popover.stale .popover-item {
-  opacity: 0.55;
+  font-style: italic;
+}
+.composer-popover.stale .popover-head::after {
+  content: " · searching…";
+  text-transform: none;
+  font-weight: 400;
 }
 
 .popover-item.active {
