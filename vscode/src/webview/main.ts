@@ -1217,6 +1217,7 @@ function startMentionLoading(): void {
     mentionLoadingTimer = undefined;
     if (mentionLoading) {
       mentionLoading = false;
+      menuItems = [];
       renderPopover();
     }
   }, MENTION_LOADING_TIMEOUT_MS);
@@ -1265,6 +1266,10 @@ function renderPopover(): void {
   }
   menuOpen = true;
   popover.hidden = false;
+  const stale = activeTrigger.kind === "mention" && mentionLoading && menuItems.length > 0;
+  popover.classList.toggle("stale", stale);
+  if (stale) popover.setAttribute("aria-busy", "true");
+  else popover.removeAttribute("aria-busy");
   syncJumpBottom();
 
   const headerText =
@@ -1591,7 +1596,7 @@ function updateTrigger(force = false): void {
     return;
   }
 
-  menuItems = [];
+  if (!wasMentionOpen) menuItems = [];
   activeIndex = 0;
 
   if (!wasMentionOpen || trigger.query === "" || force) {
@@ -1622,6 +1627,7 @@ function replaceTriggerRange(trigger: ComposerTrigger, inserted: string): void {
 
 function acceptMenuItem(index: number, mode: "enter" | "tab"): void {
   if (!activeTrigger || index < 0 || index >= menuItems.length) return;
+  if (activeTrigger.kind === "mention" && mentionLoading) return;
   const selected = menuItems[index];
   if (!selected) return;
 

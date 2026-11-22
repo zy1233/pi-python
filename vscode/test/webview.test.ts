@@ -1232,6 +1232,66 @@ describe.skipIf(!chrome || !built)("webview: slash commands and @ mentions", () 
       sends: [{ type: "send", text: "hello @unanswered" }],
     });
   });
+
+  it("keeps the old @ rows (dimmed) while a new search is pending, and never accepts them with Enter, Tab or a click", () => {
+    const out = run(`${richState}
+      const input = document.querySelector("textarea");
+      const menu = document.getElementById("composer-menu");
+      const chips = document.querySelector(".composer-chips");
+      const lastQuery = () => [...window.__posted].filter((m) => m.type === "queryMentions").at(-1);
+      const rows = () => [...menu.querySelectorAll("[role='option'] .popover-title")].map((n) => n.textContent);
+      const typeText = (text) => {
+        input.value = text;
+        input.setSelectionRange(text.length, text.length);
+        input.dispatchEvent(new Event("input", { bubbles: true }));
+      };
+      const answer = (items) => {
+        const q = lastQuery();
+        host({ type: "mentionResults", requestId: q.requestId, query: q.query, items });
+      };
+      const file = (name) => ({ kind: "file", path: name, label: name, detail: "" });
+
+      typeText("see @a");
+      answer([file("alpha.ts"), file("beta.ts")]);
+      const settled = { rows: rows(), stale: menu.classList.contains("stale"), busy: menu.getAttribute("aria-busy") };
+
+      typeText("see @al");
+      const pending = { rows: rows(), stale: menu.classList.contains("stale"), busy: menu.getAttribute("aria-busy") };
+      const tab = new KeyboardEvent("keydown", { key: "Tab", cancelable: true, bubbles: true });
+      input.dispatchEvent(tab);
+      input.dispatchEvent(new KeyboardEvent("keydown", { key: "Enter", bubbles: true }));
+      menu.querySelectorAll("[role='option']")[0].click();
+      const afterKeys = {
+        value: input.value,
+        chipCount: chips.querySelectorAll(".chip").length,
+        tabPrevented: tab.defaultPrevented,
+        sends: window.__posted.filter((m) => m.type === "send").length,
+      };
+
+      answer([file("alpha.ts")]);
+      const fresh = { rows: rows(), stale: menu.classList.contains("stale"), busy: menu.getAttribute("aria-busy") };
+      input.dispatchEvent(new KeyboardEvent("keydown", { key: "Enter", bubbles: true }));
+      const accepted = { value: input.value, chipCount: chips.querySelectorAll(".chip").length };
+
+      typeText("see @alpha.ts @b");
+      answer([file("beta.ts")]);
+      typeText("see @alpha.ts @be");
+      setTimeout(() => {
+        const afterTimeout = { rows: rows(), empty: menu.querySelector(".popover-empty")?.textContent };
+        document.getElementById("result").textContent = JSON.stringify({
+          ok: true, settled, pending, afterKeys, fresh, accepted, afterTimeout,
+        });
+      }, 1100);`);
+    expect(out).toMatchObject({
+      ok: true,
+      settled: { rows: ["alpha.ts", "beta.ts"], stale: false, busy: null },
+      pending: { rows: ["alpha.ts", "beta.ts"], stale: true, busy: "true" },
+      afterKeys: { value: "see @al", chipCount: 0, tabPrevented: true, sends: 0 },
+      fresh: { rows: ["alpha.ts"], stale: false, busy: null },
+      accepted: { value: "see @alpha.ts ", chipCount: 1 },
+      afterTimeout: { rows: [], empty: "No matching files or folders" },
+    });
+  });
 });
 
 describe.skipIf(!chrome || !built)("webview: P0 state restore, streaming tools, model picker, chip sync & busy commands", () => {

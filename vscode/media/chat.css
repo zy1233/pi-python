@@ -629,6 +629,10 @@ pre.code code {
 .popover-item:hover:not(.active) {
   background: var(--vscode-list-hoverBackground, rgba(128, 128, 128, 0.14));
 }
+.composer-popover.stale .popover-item {
+  opacity: 0.55;
+}
+
 .popover-item.active {
   background: var(--vscode-editorSuggestWidget-selectedBackground, var(--vscode-list-activeSelectionBackground, var(--vscode-focusBorder)));
   color: var(--vscode-editorSuggestWidget-selectedForeground, var(--vscode-list-activeSelectionForeground, var(--vscode-foreground)));
