@@ -84,7 +84,6 @@ const input = el("textarea", {
   id: "chat-input",
   class: "input",
   ariaAutocomplete: "list",
-  ariaControls: "composer-listbox",
 });
 input.placeholder =
   "Ask zycode (@ to mention, / for commands, or use the @ and / buttons with an input method; Enter to send, Shift+Enter for a new line)";
@@ -1224,8 +1223,10 @@ function startMentionLoading(): void {
 
 function syncComboboxAria(): void {
   if (menuOpen && menuItems.length > 0 && activeIndex >= 0 && activeIndex < menuItems.length) {
+    input.setAttribute("aria-controls", "composer-listbox");
     input.setAttribute("aria-activedescendant", `composer-opt-${activeIndex}`);
   } else {
+    input.removeAttribute("aria-controls");
     input.removeAttribute("aria-activedescendant");
   }
 }

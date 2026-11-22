@@ -741,7 +741,7 @@ describe.skipIf(!chrome || !built)("webview: slash commands and @ mentions", () 
       const openState = {
         hidden: menu.hidden,
         controls: input.getAttribute("aria-controls"),
-        listbox: document.getElementById(input.getAttribute("aria-controls"))?.getAttribute("role"),
+        listbox: document.getElementById(input.getAttribute("aria-controls") ?? "")?.getAttribute("role"),
         role: input.getAttribute("role"),
         activeDesc0: input.getAttribute("aria-activedescendant"),
         options: [...menu.querySelectorAll("[role='option']")].map((el) => el.querySelector(".popover-title").textContent),
@@ -1275,8 +1275,11 @@ describe.skipIf(!chrome || !built)("webview: slash commands and @ mentions", () 
           listLabel: list?.getAttribute("aria-label") ?? null,
           emptyInsideList: Boolean(list?.querySelector(".popover-empty")),
           live: live(),
+          controls: input.getAttribute("aria-controls"),
+          controlsResolves: input.hasAttribute("aria-controls") ? Boolean(document.getElementById(input.getAttribute("aria-controls"))) : null,
         };
       };
+      const closed = shape();
       const typeText = (text) => {
         input.value = text;
         input.setSelectionRange(text.length, text.length);
@@ -1291,13 +1294,16 @@ describe.skipIf(!chrome || !built)("webview: slash commands and @ mentions", () 
       host({ type: "mentionResults", requestId: q.requestId, query: q.query, items: [{ kind: "file", path: "a.ts", label: "a.ts", detail: "" }] });
       const mention = shape();
       input.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", bubbles: true }));
-      window.__result = { role: input.getAttribute("role"), slash, empty, mention, afterClose: live() };`);
+      const afterEsc = shape();
+      window.__result = { role: input.getAttribute("role"), closed, slash, empty, mention, afterEsc, afterClose: live() };`);
     expect(out).toMatchObject({
       ok: true,
       role: null,
-      slash: { listChildRoles: ["option", "option", "option"], headHidden: "true", listLabel: "Commands", emptyInsideList: false, live: ["3 suggestions"] },
-      empty: { listChildRoles: null, emptyInsideList: false, live: ["No matching commands"] },
-      mention: { listChildRoles: ["option"], listLabel: "References · files, folders, selection", live: ["1 suggestion"] },
+      closed: { controls: null, controlsResolves: null },
+      slash: { listChildRoles: ["option", "option", "option"], headHidden: "true", listLabel: "Commands", emptyInsideList: false, live: ["3 suggestions"], controls: "composer-listbox", controlsResolves: true },
+      empty: { listChildRoles: null, emptyInsideList: false, live: ["No matching commands"], controls: null, controlsResolves: null },
+      mention: { listChildRoles: ["option"], listLabel: "References · files, folders, selection", live: ["1 suggestion"], controls: "composer-listbox", controlsResolves: true },
+      afterEsc: { controls: null, controlsResolves: null },
       afterClose: [],
     });
   });
