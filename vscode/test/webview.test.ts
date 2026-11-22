@@ -1808,7 +1808,7 @@ describe.skipIf(!chrome || !built)("webview: P1 images, insertMention, saveAll, 
       const afterMidDraftUp = input.value;
 
       // 3. Build a draft with an attached @ chip, recall at cursor 0, edit recalled text,
-      // verify ArrowUp does not clobber the edit, then ArrowDown restores draft + chip.
+      // verify ArrowUp and ArrowDown do not clobber the edit, then Escape restores draft + chip.
       input.value = "check";
       input.setSelectionRange(5, 5);
       host({ type: "insertMention", item: { kind: "file", path: "src/app.ts" } });
@@ -1825,8 +1825,15 @@ describe.skipIf(!chrome || !built)("webview: P1 images, insertMention, saveAll, 
       input.dispatchEvent(new KeyboardEvent("keydown", { key: "ArrowUp", bubbles: true }));
       const afterEditedUp = input.value;
       input.setSelectionRange(input.value.length, input.value.length);
-      input.dispatchEvent(new KeyboardEvent("keydown", { key: "ArrowDown", bubbles: true }));
+      const downEvent = new KeyboardEvent("keydown", { key: "ArrowDown", bubbles: true, cancelable: true });
+      input.dispatchEvent(downEvent);
       const afterEditedDown = {
+        value: input.value,
+        chipLabels: [...chips.querySelectorAll(".chip-label")].map((c) => c.textContent),
+        defaultPrevented: downEvent.defaultPrevented,
+      };
+      input.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", bubbles: true }));
+      const afterEditedEscape = {
         value: input.value,
         chipLabels: [...chips.querySelectorAll(".chip-label")].map((c) => c.textContent),
       };
@@ -1850,6 +1857,7 @@ describe.skipIf(!chrome || !built)("webview: P1 images, insertMention, saveAll, 
         afterRecall,
         afterEditedUp,
         afterEditedDown,
+        afterEditedEscape,
         afterEscape,
       };`);
     expect(out).toMatchObject({
@@ -1860,7 +1868,8 @@ describe.skipIf(!chrome || !built)("webview: P1 images, insertMention, saveAll, 
       originalDraft: "check @src/app.ts ",
       afterRecall: { value: "second prompt", chipCount: 0 },
       afterEditedUp: "second prompt edited",
-      afterEditedDown: { value: "check @src/app.ts ", chipLabels: ["app.ts"] },
+      afterEditedDown: { value: "second prompt edited", chipLabels: [], defaultPrevented: false },
+      afterEditedEscape: { value: "check @src/app.ts ", chipLabels: ["app.ts"] },
       afterEscape: { value: "check @src/app.ts ", chipLabels: ["app.ts"] },
     });
   });

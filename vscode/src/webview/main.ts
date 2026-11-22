@@ -2025,12 +2025,12 @@ input.addEventListener("keydown", (event) => {
     }
   }
 
-  if (event.key === "ArrowDown" && !menuOpen && noModifiers && historyIndex >= 0) {
+  if (event.key === "ArrowDown" && !menuOpen && noModifiers && historyIndex >= 0 && !historyEdited) {
     const cursor = input.selectionEnd ?? input.value.length;
     const onLastLine = !input.value.slice(cursor).includes("\n");
     if (onLastLine) {
       event.preventDefault();
-      if (!historyEdited && historyIndex < sentHistory.length - 1) {
+      if (historyIndex < sentHistory.length - 1) {
         historyIndex++;
         input.value = sentHistory[historyIndex]!;
         input.setSelectionRange(input.value.length, input.value.length);
