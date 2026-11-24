@@ -658,7 +658,10 @@ class AutoSession:
         origin = getattr(event, "origin", None)
         origin_cwd: str | None = None
         if origin:
-            if not isinstance(origin, Mapping) or origin.get("kind") != "subagent":
+            if not isinstance(origin, Mapping) or origin.get("kind") not in (
+                "subagent",
+                "codemode",
+            ):
                 return _ask(Reason.UNCLEAR, "session.unknown_origin", by="floor")
             cwd = origin.get("cwd")
             if not isinstance(cwd, str) or not cwd:

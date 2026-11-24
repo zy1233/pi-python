@@ -386,7 +386,13 @@ class AgentHarness:
 
     def get_extension_settings(self, name: str) -> dict[str, Any]:
         """Return a shallow copy of host-provided settings for extension *name*."""
-        return dict(self._extension_settings.get(name, {}))
+        key = str(name)
+        if key in self._extension_settings:
+            return dict(self._extension_settings[key])
+        for alt in (key.replace("_", "-"), key.replace("-", "_")):
+            if alt in self._extension_settings:
+                return dict(self._extension_settings[alt])
+        return {}
 
     @property
     def deferred_tool_names(self) -> list[str]:

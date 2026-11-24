@@ -34,6 +34,8 @@ _KIND: dict[str, str] = {
     "grep": "search",
     "find": "search",
     "ls": "search",
+    "codemode": "execute",
+    "tool_search": "search",
 }
 
 _terminal_stream_offsets: dict[str, int] = {}
@@ -62,6 +64,18 @@ def tool_title(name: str, args: Any = None) -> str:
         elif name == "ls":
             path = args.get("path", ".")
             return f"ls {path}"
+        elif name == "codemode":
+            code = args.get("code")
+            if isinstance(code, str) and code.strip():
+                line_count = len(code.strip().splitlines())
+                unit = "line" if line_count == 1 else "lines"
+                return f"codemode ({line_count} {unit})"
+            return "codemode"
+        elif name == "tool_search":
+            query = args.get("query")
+            if query:
+                return f"tool_search {query}"
+            return "tool_search"
     return name
 
 

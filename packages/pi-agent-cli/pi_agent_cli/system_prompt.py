@@ -48,6 +48,7 @@ class BuildSystemPromptOptions:
     context_files: list[ContextFile] | None = None
     skills: list[Skill] | None = field(default_factory=list)
     git_status: str | None = None
+    deferred_tool_names: list[str] | None = None
 
 
 def _docs_paths() -> tuple[str, str, str]:
@@ -73,6 +74,7 @@ def build_system_prompt(options: BuildSystemPromptOptions) -> str:
         custom_has_read = "read" in tools
         if custom_has_read and skills:
             prompt += format_skills_for_system_prompt(skills)
+        prompt = _append_deferred_tools(prompt, options.deferred_tool_names)
         prompt += f"\nCurrent working directory: {prompt_cwd}\n"
         return prompt
 
@@ -171,8 +173,50 @@ def build_system_prompt(options: BuildSystemPromptOptions) -> str:
     if has_read and skills:
         prompt += format_skills_for_system_prompt(skills)
 
+    prompt = _append_deferred_tools(prompt, options.deferred_tool_names)
     prompt += f"\nCurrent working directory: {prompt_cwd}"
     return prompt
+
+
+def _append_deferred_tools(prompt: str, deferred_tool_names: list[str] | None) -> str:
+    names = sorted(
+        {n.strip() for n in (deferred_tool_names or []) if isinstance(n, str) and n.strip()}
+    )
+    if not names:
+        return prompt
+    grouped: dict[str, list[str]] = {}
+    for name in names:
+        if name.startswith("mcp__") and "__" in name[5:]:
+            server = name[5:].split("__", 1)[0]
+            group_key = f"mcp__{server}"
+        else:
+            group_key = "other"
+        grouped.setdefault(group_key, []).append(name)
+
+    lines: list[str] = []
+    ordered_keys = sorted(k for k in grouped if k != "other")
+    if "other" in grouped:
+        ordered_keys.append("other")
+    for key in ordered_keys:
+        items = grouped[key]
+        preview = ", ".join(items[:5])
+        if len(items) > 5:
+            preview += ", ..."
+        noun = "tool" if len(items) == 1 else "tools"
+        lines.append(f"- {key} ({len(items)} {noun}: {preview})")
+
+    return "\n".join(
+        [
+            prompt,
+            "",
+            "<deferred_tools>",
+            "Additional tools are available in the catalog (hidden from top-level schemas to save "
+            "context; inspect with `tool_search` or call directly in `codemode` via "
+            "`tools.<name>(...)`):",
+            *lines,
+            "</deferred_tools>",
+        ]
+    )
 
 
 def _append_git_status(prompt: str, git_status: str | None) -> str:

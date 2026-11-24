@@ -1918,9 +1918,16 @@ WIRING_MUTATIONS: list[Mutation] = [
     w(
         "fail closed: an origin that is not a sub-agent is judged",
         _AUTO_MODE,
-        '            if not isinstance(origin, Mapping) or origin.get("kind") != "subagent":',
+        '            if not isinstance(origin, Mapping) or origin.get("kind") not in (\n                "subagent",\n                "codemode",\n            ):',
         "            if False:",
         tests=_WIRING,
+    ),
+    w(
+        "fail closed: a codemode origin is refused",
+        _AUTO_MODE,
+        '                "subagent",\n                "codemode",\n',
+        '                "subagent",\n',
+        tests=(_CLI_TESTS + "test_codemode_auto_and_acp.py",),
     ),
     w(
         "fail closed: a sub-agent without a folder is judged",

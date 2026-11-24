@@ -31,7 +31,9 @@ class ExtensionRegistry:
     # -- tools ---------------------------------------------------------------
 
     def add_tool(self, definition: ToolDefinition, extension_name: str | None = None) -> None:
-        if definition.name in self._tools:
+        if definition.name in self._tools and (
+            not extension_name or self._tool_owners.get(definition.name) != extension_name
+        ):
             logger.warning(
                 "Extension tool %r already registered — overwriting (last-write-wins)",
                 definition.name,
