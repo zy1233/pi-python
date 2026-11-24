@@ -10,6 +10,8 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Literal
 
+from pydantic import BaseModel
+
 from pi_agent_core.agent_loop import run_agent_loop
 from pi_agent_core.extensions._harness_bridge import HarnessBridge
 from pi_agent_core.extensions.loader import (
@@ -32,6 +34,7 @@ from pi_agent_core.types import (
     AgentMessage,
     AgentStartEvent,
     AgentTool,
+    AgentToolResult,
     BeforeToolCallContext,
     BeforeToolCallResult,
     MessageEndEvent,
@@ -48,6 +51,7 @@ from pi_agent_core.types import (
     TurnEndEvent,
     TurnStartEvent,
 )
+from pi_agent_core.validation import validate_tool_arguments
 from pi_agent_harness.compaction import (
     CompactionSettings,
     collect_entries_for_branch_summary,
@@ -329,6 +333,10 @@ class AgentHarness:
         # The tools that extensions put into ``_tools``. A name that is in ``_tools`` and not
         # here belongs to a built-in tool (audit F7-06).
         self._extension_tool_names: set[str] = set()
+        # Tools registered with ``deferred=True`` remain in ``_tools`` for ``invoke_tool`` /
+        # ``codemode`` discovery, but are omitted from initial ``active_tool_names``.
+        self._deferred_tool_names: set[str] = set()
+        self._extension_settings: dict[str, dict[str, Any]] = {}
         # What the client passed (``set_client_mcp_servers``) and which of it extensions took
         # over (``claim_client_mcp_servers``). Data only: the harness connects to nothing.
         self._client_mcp_servers: tuple[ClientMcpServer, ...] = ()
@@ -371,6 +379,20 @@ class AgentHarness:
                 "Extensions are already loaded; project trust can no longer change",
             )
         self._extension_config["trust_project_extensions"] = trusted
+
+    def set_extension_settings(self, name: str, settings: Mapping[str, Any]) -> None:
+        """Store host-provided settings for extension *name* (``ExtensionAPI.get_settings``)."""
+        self._extension_settings[str(name)] = dict(settings)
+
+    def get_extension_settings(self, name: str) -> dict[str, Any]:
+        """Return a shallow copy of host-provided settings for extension *name*."""
+        return dict(self._extension_settings.get(name, {}))
+
+    @property
+    def deferred_tool_names(self) -> list[str]:
+        """Names of registered tools currently marked deferred and not active."""
+        active = set(self.active_tool_names)
+        return [n for n in self._tools if n in self._deferred_tool_names and n not in active]
 
     def set_client_mcp_servers(self, servers: Sequence[ClientMcpServer]) -> None:
         """Record the MCP servers that the client passed for this session.
@@ -509,8 +531,123 @@ class AgentHarness:
             )
         self._extension_tool_names.add(tool.name)
         self._tools[tool.name] = tool
-        if tool.name not in self.active_tool_names:
-            self.active_tool_names.append(tool.name)
+        if definition.deferred:
+            self._deferred_tool_names.add(tool.name)
+        else:
+            self._deferred_tool_names.discard(tool.name)
+            if tool.name not in self.active_tool_names:
+                self.active_tool_names.append(tool.name)
+
+    def _set_active_tools_sync(self, names: list[str]) -> None:
+        unknown = [n for n in names if n not in self._tools]
+        if unknown:
+            raise ValueError(f"Unknown tool(s): {unknown}")
+        previous_active = list(self.active_tool_names)
+        self.active_tool_names = list(names)
+        self.invalidate_system_prompt_cache()
+        self.pending_session_writes.append(
+            {"type": "active_tools_change", "active_tool_names": list(names)}
+        )
+
+        async def _emit_tools_update() -> None:
+            await self._emit_any(
+                ToolsUpdateEvent(
+                    toolNames=list(self._tools),
+                    previousToolNames=list(self._tools),
+                    activeToolNames=list(names),
+                    previousActiveToolNames=previous_active,
+                )
+            )
+
+        try:
+            loop = asyncio.get_running_loop()
+            task = loop.create_task(_emit_tools_update())
+            self._bg_tasks.add(task)
+            task.add_done_callback(self._bg_tasks.discard)
+        except RuntimeError:
+            pass
+
+    def activate_tools(self, names: Iterable[str]) -> list[str]:
+        """Add registered tools to ``active_tool_names`` (returning newly activated names)."""
+        requested = list(names)
+        unknown = [n for n in requested if n not in self._tools]
+        if unknown:
+            raise ValueError(f"Unknown tool(s): {unknown}")
+        current = set(self.active_tool_names)
+        added: list[str] = []
+        for n in requested:
+            if n not in current:
+                current.add(n)
+                added.append(n)
+        if added:
+            self._set_active_tools_sync([*self.active_tool_names, *added])
+        return added
+
+    def deactivate_tools(self, names: Iterable[str]) -> list[str]:
+        """Remove tools from ``active_tool_names`` while keeping them in ``_tools``."""
+        to_remove = set(names)
+        removed = [n for n in self.active_tool_names if n in to_remove]
+        if removed:
+            self._set_active_tools_sync([n for n in self.active_tool_names if n not in to_remove])
+        return removed
+
+    @staticmethod
+    def _tool_parameters_schema(tool: AgentTool) -> dict[str, Any]:
+        params = getattr(tool, "parameters", None)
+        if isinstance(params, type) and issubclass(params, BaseModel):
+            return params.model_json_schema()
+        if isinstance(params, Mapping):
+            return dict(params)
+        return {}
+
+    async def invoke_tool(
+        self,
+        tool_call_id: str,
+        tool_name: str,
+        args: dict[str, Any],
+        *,
+        origin: dict[str, Any] | None = None,
+        signal: Any | None = None,
+        on_update: Any | None = None,
+    ) -> AgentToolResult:
+        """Invoke a registered tool (active or deferred) through validation and policy gates."""
+        tool = self._tools.get(tool_name)
+        if tool is None:
+            raise KeyError(f"Tool {tool_name!r} not found")
+        if not isinstance(args, dict):
+            raise TypeError("Tool arguments must be a dict")
+
+        prepared_args: Any = dict(args)
+        prepare_fn = getattr(tool, "prepare_arguments", None)
+        if callable(prepare_fn):
+            prepared_args = prepare_fn(prepared_args)
+
+        validated_args = validate_tool_arguments(
+            tool,
+            {"id": tool_call_id, "name": tool_name, "arguments": prepared_args},
+        )
+        validated_dict = (
+            validated_args.model_dump()
+            if isinstance(validated_args, BaseModel)
+            else dict(validated_args)
+        )
+
+        if signal and getattr(signal, "aborted", False):
+            raise RuntimeError("Operation aborted")
+
+        verdict = await self.check_tool_call(
+            tool_call_id,
+            tool_name,
+            validated_dict,
+            origin=origin,
+        )
+        if verdict is not None and verdict.get("block"):
+            raise PermissionError(verdict.get("reason") or "Tool execution was blocked")
+
+        if signal and getattr(signal, "aborted", False):
+            raise RuntimeError("Operation aborted")
+
+        return await tool.execute(tool_call_id, validated_args, signal, on_update)
 
     def _create_bridge(self) -> HarnessBridge:
         """Build the ``HarnessBridge`` implementation backed by this harness."""
@@ -524,6 +661,7 @@ class AgentHarness:
             def remove_tool(self, name: str) -> None:
                 harness._tools.pop(name, None)
                 harness._extension_tool_names.discard(name)
+                harness._deferred_tool_names.discard(name)
                 if name in harness.active_tool_names:
                     harness.active_tool_names.remove(name)
                 harness.invalidate_system_prompt_cache()
@@ -532,37 +670,19 @@ class AgentHarness:
                 return list(harness.active_tool_names)
 
             def set_active_tool_names(self, names: list[str]) -> None:
-                unknown = [n for n in names if n not in harness._tools]
-                if unknown:
-                    raise ValueError(f"Unknown tool(s): {unknown}")
-                previous_active = list(harness.active_tool_names)
-                harness.active_tool_names = list(names)
-                harness.invalidate_system_prompt_cache()
-                harness.pending_session_writes.append(
-                    {"type": "active_tools_change", "active_tool_names": list(names)}
-                )
+                harness._set_active_tools_sync(names)
 
-                async def _emit_tools_update() -> None:
-                    await harness._emit_any(
-                        ToolsUpdateEvent(
-                            toolNames=list(harness._tools),
-                            previousToolNames=list(harness._tools),
-                            activeToolNames=list(names),
-                            previousActiveToolNames=previous_active,
-                        )
-                    )
+            def activate_tools(self, names: Iterable[str]) -> list[str]:
+                return harness.activate_tools(names)
 
-                try:
-                    loop = asyncio.get_running_loop()
-                    task = loop.create_task(_emit_tools_update())
-                    harness._bg_tasks.add(task)
-                    task.add_done_callback(harness._bg_tasks.discard)
-                except RuntimeError:
-                    pass
+            def deactivate_tools(self, names: Iterable[str]) -> list[str]:
+                return harness.deactivate_tools(names)
 
             def get_all_tool_info(self) -> list[ToolInfo]:
+                active_set = set(harness.active_tool_names)
                 infos: list[ToolInfo] = []
                 for name, tool in harness._tools.items():
+                    annotations = getattr(tool, "annotations", None)
                     infos.append(
                         ToolInfo(
                             name=name,
@@ -574,9 +694,41 @@ class AgentHarness:
                             ),
                             prompt_snippet=getattr(tool, "prompt_snippet", None),
                             prompt_guidelines=getattr(tool, "prompt_guidelines", []),
+                            parameters=harness._tool_parameters_schema(tool),
+                            annotations=dict(annotations)
+                            if isinstance(annotations, Mapping)
+                            else None,
+                            deferred=name in harness._deferred_tool_names,
+                            active=name in active_set,
                         )
                     )
                 return infos
+
+            async def invoke_tool(
+                self,
+                tool_call_id: str,
+                tool_name: str,
+                args: dict[str, Any],
+                *,
+                origin: dict[str, Any] | None = None,
+                signal: Any | None = None,
+                on_update: Any | None = None,
+            ) -> AgentToolResult:
+                return await harness.invoke_tool(
+                    tool_call_id,
+                    tool_name,
+                    args,
+                    origin=origin,
+                    signal=signal,
+                    on_update=on_update,
+                )
+
+            def get_extension_settings(self, name: str) -> dict[str, Any]:
+                return harness.get_extension_settings(name)
+
+            @property
+            def is_sequential_tool_policy(self) -> bool:
+                return harness.tool_execution == "sequential"
 
             def send_message(self, text: str) -> None:
                 msg = _create_user_message(text)
@@ -1110,7 +1262,9 @@ class AgentHarness:
                             "session": self.session,
                             "model": self.model,
                             "thinking_level": self.thinking_level,
+                            "tools": list(self._tools.values()),
                             "active_tools": active_tools,
+                            "deferred_tool_names": self.deferred_tool_names,
                             "resources": self.resources,
                         }
                     )
