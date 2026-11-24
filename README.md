@@ -37,7 +37,7 @@ Website: [zycode.dev](https://zycode.dev) ([中文](https://zycode.dev/zh/))
   - `zycode.zycode` ([`vscode/`](vscode/README.md)): VS Code / Open VSX extension with a chat view and the `zycode-agent` binary bundled inside.
   - Any ACP editor or client (such as [Zed](#in-zed-custom-agent) or [DeepSeek Harness](docs/DEEPSEEK-HARNESS.md)).
 - **Coding Agent (`pi-agent-cli-lc`)** ([`packages/pi-agent-cli/`](packages/pi-agent-cli/README.md)): standard ACP stdio agent and headless `-p` CLI, also packaged as the standalone `zycode-agent` executable.
-- **Extensions**: optional Python packages for web search/fetch ([`pi-web-access-py`](packages/pi-web-access/README.md)), goal planning ([`pi-goal-x-py`](packages/pi-goal-x/README.md)), subagent workflows ([`pi-dynamic-workflows-py`](packages/pi-dynamic-workflows/README.md)), and client-passed MCP servers ([`pi-mcp-py`](packages/pi-mcp/README.md)).
+- **Extensions**: optional Python packages for web search/fetch ([`pi-web-access-py`](packages/pi-web-access/README.md)), goal planning ([`pi-goal-x-py`](packages/pi-goal-x/README.md)), subagent workflows ([`pi-dynamic-workflows-py`](packages/pi-dynamic-workflows/README.md)), code mode ([`pi-codemode-py`](packages/pi-codemode/README.md)), and client-passed MCP servers ([`pi-mcp-py`](packages/pi-mcp/README.md)).
 - **Underlying Python SDK**: built on a faithful Python port of `pi-agent-core` with LangChain used strictly as a `StreamFn` boundary adapter. Full SDK documentation lives in [`pi_agent_core/README.md`](pi_agent_core/README.md) (agent loop, events, built-in coding tools, LangChain/MCP tool adapter, structured output, guardrails) and [`packages/pi-agent-harness/README.md`](packages/pi-agent-harness/README.md) (`AgentHarness`, session tree storage, compaction, custom messages, skills, `LocalExecutionEnv`).
 
 ## Status
@@ -53,6 +53,7 @@ Website: [zycode.dev](https://zycode.dev) ([中文](https://zycode.dev/zh/))
 | `pi-goal-x-py` | **Stable** | [PyPI](https://pypi.org/project/pi-goal-x-py/) |
 | `pi-dynamic-workflows-py` | **Stable** | [PyPI](https://pypi.org/project/pi-dynamic-workflows-py/) |
 | `pi-mcp-py` | **Stable** | [PyPI](https://pypi.org/project/pi-mcp-py/) (from 0.6.0) |
+| `pi-codemode-py` | **Stable** | [PyPI](https://pypi.org/project/pi-codemode-py/) (from 1.1.0) |
 
 ## Features
 
@@ -71,7 +72,7 @@ Website: [zycode.dev](https://zycode.dev) ([中文](https://zycode.dev/zh/))
   - Bundles `zycode-agent` for five platforms; see [`vscode/README.md`](vscode/README.md).
 - **Built-in coding tools & Python extensions**
   - Seven built-in coding tools: `read`, `edit`, `write`, `bash`, `grep`, `find`, and `ls`, with pi-faithful truncation limits and paging notices (see [`pi_agent_core/README.md`](pi_agent_core/README.md#built-in-coding-tools)).
-  - Optional extensions: web search/fetch (`pi-web-access-py`), goal planning (`pi-goal-x-py`), sandboxed subagent workflows (`pi-dynamic-workflows-py`), and MCP server bridge (`pi-mcp-py`, connects `stdio`/`http`/`sse` servers passed by an ACP client as `mcp__<server>__<tool>`).
+  - Optional extensions: web search/fetch (`pi-web-access-py`), goal planning (`pi-goal-x-py`), sandboxed subagent workflows (`pi-dynamic-workflows-py`), code mode & deferred tool discovery (`pi-codemode-py`), and MCP server bridge (`pi-mcp-py`, connects `stdio`/`http`/`sse` servers passed by an ACP client as `mcp__<server>__<tool>`).
   - Extensions that fail to load are skipped and reported at session start rather than failing silently.
   - **`workflow` on macOS:** the script process has no kernel limit on memory or process count (measured in CI on `macos-15` and `macos-15-intel`), so only the audit hook stands in the way; Linux and Windows enforce kernel limits. Keep `ask` (or `auto`, which also asks before every `workflow` call) on macOS. Details: [`packages/pi-dynamic-workflows/README.md#macos-weaker-limits`](packages/pi-dynamic-workflows/README.md#macos-weaker-limits).
 - **Three permission modes (`ask`, `auto`, `always-approve`)**
@@ -91,8 +92,8 @@ Download the standalone bundle (contains both `zypi` and `zycode-agent`; no Pyth
 
 ```bash
 # Option 1: Standalone bundle (zypi + zycode-agent; no Python required)
-# Linux x86_64 shown. Other targets: zycode-linux-aarch64-1.0.1.tar.gz, zycode-darwin-aarch64-1.0.1.tar.gz.
-curl -L -o zycode.tar.gz https://github.com/zy1233/pi-python/releases/download/v1.0.1/zycode-linux-x86_64-1.0.1.tar.gz
+# Linux x86_64 shown. Other targets: zycode-linux-aarch64-1.1.0.tar.gz, zycode-darwin-aarch64-1.1.0.tar.gz.
+curl -L -o zycode.tar.gz https://github.com/zy1233/pi-python/releases/download/v1.1.0/zycode-linux-x86_64-1.1.0.tar.gz
 tar -xzf zycode.tar.gz
 sudo mv zypi zycode-agent /usr/local/bin/
 
@@ -101,7 +102,7 @@ zypi --setup
 zypi
 ```
 
-The bundle file name holds the version, so the URL names the tag (`v1.0.1`), not `latest`.
+The bundle file name holds the version, so the URL names the tag (`v1.1.0`), not `latest`.
 
 ```bash
 # Option 2: zypi binary alone with the Python pip package
@@ -238,7 +239,7 @@ For real-LLM regression tests, the weekly provider matrix, and smoke scripts, se
 
 ## Roadmap
 
-Core runtime, `AgentHarness`, coding tools, ACP CLI, `zypi` TUI, and extension packages are released at `1.0.1`, and the VS Code extension is stable on VS Code Marketplace and Open VSX (see [`CHANGELOG.md`](CHANGELOG.md) and [`vscode/CHANGELOG.md`](vscode/CHANGELOG.md) for the full history).
+Core runtime, `AgentHarness`, coding tools, ACP CLI, `zypi` TUI, and extension packages are released at `1.1.0`, and the VS Code extension is stable on VS Code Marketplace and Open VSX (see [`CHANGELOG.md`](CHANGELOG.md) and [`vscode/CHANGELOG.md`](vscode/CHANGELOG.md) for the full history).
 
 **Next:**
 

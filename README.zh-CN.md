@@ -37,7 +37,7 @@
   - `zycode.zycode`（[`vscode/`](vscode/README.md)）：VS Code / Open VSX 扩展，提供侧边聊天视图，并已内置 `zycode-agent` 可执行文件。
   - 任意支持 ACP 的编辑器或客户端（例如 [Zed](#在-zed-中使用自定义智能体) 或 [DeepSeek Harness](docs/DEEPSEEK-HARNESS.md)）。
 - **编程智能体（`pi-agent-cli-lc`）**（[`packages/pi-agent-cli/`](packages/pi-agent-cli/README.md)）：标准 ACP stdio 智能体与无界面 `-p` 命令行工具，同时打包为独立二进制 `zycode-agent`。
-- **扩展包**：按需安装的 Python 扩展，包括联网搜索与抓取（[`pi-web-access-py`](packages/pi-web-access/README.md)）、目标规划（[`pi-goal-x-py`](packages/pi-goal-x/README.md)）、子智能体工作流编排（[`pi-dynamic-workflows-py`](packages/pi-dynamic-workflows/README.md)）和编辑器 MCP 桥接（[`pi-mcp-py`](packages/pi-mcp/README.md)）。
+- **扩展包**：按需安装的 Python 扩展，包括联网搜索与抓取（[`pi-web-access-py`](packages/pi-web-access/README.md)）、目标规划（[`pi-goal-x-py`](packages/pi-goal-x/README.md)）、子智能体工作流编排（[`pi-dynamic-workflows-py`](packages/pi-dynamic-workflows/README.md)）、代码模式（[`pi-codemode-py`](packages/pi-codemode/README.md)）和编辑器 MCP 桥接（[`pi-mcp-py`](packages/pi-mcp/README.md)）。
 - **底层 Python SDK**：忠实移植自 `pi-agent-core` 的轻量核心，LangChain 仅作为 `StreamFn` 边界适配层使用。完整底层文档已拆分至对应目录：
   - [`pi_agent_core/README.md`](pi_agent_core/README.md)：核心 Agent Loop、事件协议、LangChain / MCP 工具适配、结构化输出、护栏钩子、内置编程工具与 pi 概念映射。
   - [`packages/pi-agent-harness/README.md`](packages/pi-agent-harness/README.md)：`AgentHarness`、树状会话存储、上下文压缩、自定义消息、技能模板与 `LocalExecutionEnv`。
@@ -55,6 +55,7 @@
 | `pi-goal-x-py` | **稳定** | [PyPI](https://pypi.org/project/pi-goal-x-py/) |
 | `pi-dynamic-workflows-py` | **稳定** | [PyPI](https://pypi.org/project/pi-dynamic-workflows-py/) |
 | `pi-mcp-py` | **稳定** | [PyPI](https://pypi.org/project/pi-mcp-py/)（自 0.6.0 起） |
+| `pi-codemode-py` | **稳定** | [PyPI](https://pypi.org/project/pi-codemode-py/)（自 1.1.0 起） |
 
 ## 核心特性
 
@@ -73,7 +74,7 @@
   - 覆盖五个平台并内置 `zycode-agent`，详见 [`vscode/README.md`](vscode/README.md)。
 - **内置编程工具与 Python 扩展**
   - 内置七个编程工具：`read`、`edit`、`write`、`bash`、`grep`、`find`、`ls`，具备与 pi 一致的截断策略与分页提示（详见 [`pi_agent_core/README.md`](pi_agent_core/README.md#built-in-coding-tools)）。
-  - 可选扩展：联网搜索与抓取（`pi-web-access-py`）、目标规划（`pi-goal-x-py`）、子进程隔离工作流（`pi-dynamic-workflows-py`），以及 MCP 桥接（`pi-mcp-py`，连接 ACP 客户端传入的 `stdio`/`http`/`sse` 服务器，工具名统一为 `mcp__<server>__<tool>`）。
+  - 可选扩展：联网搜索与抓取（`pi-web-access-py`）、目标规划（`pi-goal-x-py`）、子进程隔离工作流（`pi-dynamic-workflows-py`）、代码模式与延迟工具发现（`pi-codemode-py`），以及 MCP 桥接（`pi-mcp-py`，连接 ACP 客户端传入的 `stdio`/`http`/`sse` 服务器，工具名统一为 `mcp__<server>__<tool>`）。
   - 加载失败的扩展会被跳过并在会话启动时向用户报告，不会静默消失。
   - **macOS 上的 `workflow` 限制：** 脚本子进程在 macOS 上没有内核级内存与进程数上限（CI 在 `macos-15` 与 `macos-15-intel` 上实测确认），仅依赖进程内审计钩子；Linux 与 Windows 具备内核限制。在 macOS 上请保持 `ask` 模式（`auto` 同样会在每次 `workflow` 调用前询问）。详见 [`packages/pi-dynamic-workflows/README.md#macos-weaker-limits`](packages/pi-dynamic-workflows/README.md#macos-weaker-limits)。
 - **三种权限模式（`ask`、`auto`、`always-approve`）**
@@ -93,8 +94,8 @@
 
 ```bash
 # 方式一：完整独立包（内置 zypi 与 zycode-agent，无需安装 Python）
-# 以下为 Linux x86_64 示例；其他平台为 zycode-linux-aarch64-1.0.1.tar.gz 与 zycode-darwin-aarch64-1.0.1.tar.gz。
-curl -L -o zycode.tar.gz https://github.com/zy1233/pi-python/releases/download/v1.0.1/zycode-linux-x86_64-1.0.1.tar.gz
+# 以下为 Linux x86_64 示例；其他平台为 zycode-linux-aarch64-1.1.0.tar.gz 与 zycode-darwin-aarch64-1.1.0.tar.gz。
+curl -L -o zycode.tar.gz https://github.com/zy1233/pi-python/releases/download/v1.1.0/zycode-linux-x86_64-1.1.0.tar.gz
 tar -xzf zycode.tar.gz
 sudo mv zypi zycode-agent /usr/local/bin/
 
@@ -103,7 +104,7 @@ zypi --setup
 zypi
 ```
 
-独立包文件名带有版本号，因此下载链接需使用具体 tag（`v1.0.1`），而非 `latest`。
+独立包文件名带有版本号，因此下载链接需使用具体 tag（`v1.1.0`），而非 `latest`。
 
 ```bash
 # 方式二：单独使用 zypi 二进制 + pip 安装的 Python 智能体
@@ -240,7 +241,7 @@ cd vscode && npm run check
 
 ## 路线图
 
-核心运行时、`AgentHarness`、编程工具、ACP CLI、`zypi` TUI 及扩展包均已发布 `1.0.1` 稳定版，VS Code 扩展已在 VS Code Marketplace 与 Open VSX 发布稳定版（完整演进记录见 [`CHANGELOG.md`](CHANGELOG.md) 与 [`vscode/CHANGELOG.md`](vscode/CHANGELOG.md)）。
+核心运行时、`AgentHarness`、编程工具、ACP CLI、`zypi` TUI 及扩展包均已发布 `1.1.0` 稳定版，VS Code 扩展已在 VS Code Marketplace 与 Open VSX 发布稳定版（完整演进记录见 [`CHANGELOG.md`](CHANGELOG.md) 与 [`vscode/CHANGELOG.md`](vscode/CHANGELOG.md)）。
 
 **下一步：**
 

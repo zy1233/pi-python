@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "pi-codemode-py"
-version = "1.0.1"
+version = "1.1.0"
 description = "Programmatic tool orchestration and deferred tool discovery extension for pi-python"
 readme = "README.md"
 requires-python = ">=3.11"
@@ -14,7 +14,7 @@ authors = [
 ]
 keywords = ["agent", "codemode", "tool-search", "mcp", "pi", "extension"]
 dependencies = [
-    "pi-agent-core-lc>=1.0.1",
+    "pi-agent-core-lc>=1.1.0",
     "pydantic>=2.0",
 ]
 

@@ -1,6 +1,6 @@
 export type Level = 'stable' | 'beta' | 'alpha';
 
-export type PackageId = 'core' | 'harness' | 'cli' | 'zypi' | 'vscode' | 'webAccess' | 'goalX' | 'workflows' | 'mcp';
+export type PackageId = 'core' | 'harness' | 'cli' | 'zypi' | 'vscode' | 'webAccess' | 'goalX' | 'workflows' | 'mcp' | 'codemode';
 export type PrincipleId = 'contract' | 'protocol' | 'noClient' | 'permission' | 'trust' | 'models';
 export type EventId =
   | 'agentStart'
