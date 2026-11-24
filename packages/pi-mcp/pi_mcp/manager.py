@@ -9,14 +9,14 @@ from __future__ import annotations
 
 import asyncio
 import logging
-from collections.abc import Sequence
+from collections.abc import Mapping, Sequence
 from typing import TYPE_CHECKING, Any
 
 from pi_agent_core.extensions import ToolDefinition
 from pi_agent_core.types import AgentTool, AgentToolResult
 from pi_mcp.connection import ServerConnection
 from pi_mcp.errors import ConnectionUnavailable
-from pi_mcp.settings import BARRIER_WAIT, Settings
+from pi_mcp.settings import BARRIER_WAIT, EXPOSURE_ENV, Settings
 from pi_mcp.tools import public_name, shape_result
 from pi_mcp.transport import describe_transport
 
@@ -36,6 +36,7 @@ class Manager:
         self, pi: ExtensionAPI, servers: Sequence[ClientMcpServer], *, settings: Settings
     ) -> None:
         self._pi = pi
+        self._settings = settings
         self._taken: set[str] = set()
         self._public: dict[tuple[str, str], str] = {}
         """(server, tool of the server) -> the name the model sees. A tool is registered once;
@@ -139,7 +140,11 @@ class Manager:
                 continue
             name = public_name(connection.name, tool_name, self._taken)
             try:
-                self._pi.register_tool(self._definition(connection, tool_name, name, tool))
+                self._pi.register_tool(
+                    self._definition(
+                        connection, tool_name, name, tool, deferred=self._should_defer()
+                    )
+                )
             except Exception:
                 self._taken.discard(name)
                 logger.warning(
@@ -148,9 +153,47 @@ class Manager:
                 continue
             self._public[key] = name
 
+    def _has_discovery_tool(self) -> bool:
+        get_active = getattr(self._pi, "get_active_tools", None)
+        if not callable(get_active):
+            return False
+        try:
+            active = set(get_active())
+        except Exception:
+            return False
+        return bool(active & {"codemode", "tool_search"})
+
+    def _should_defer(self) -> bool:
+        if self._settings.exposure == "direct":
+            return False
+        if not self._has_discovery_tool():
+            if self._settings.exposure == "deferred":
+                logger.warning(
+                    "%s=deferred ignored: neither codemode nor tool_search is active; "
+                    "exposing MCP tools directly so they remain reachable",
+                    EXPOSURE_ENV,
+                )
+            return False
+        if self._settings.exposure == "deferred":
+            return True
+        get_settings = getattr(self._pi, "get_settings", None)
+        if callable(get_settings):
+            try:
+                host_settings = get_settings()
+                if isinstance(host_settings, Mapping) and host_settings.get("defer_mcp") is False:
+                    return False
+            except Exception:
+                pass
+        return True
+
     @staticmethod
     def _definition(
-        connection: ServerConnection, tool_name: str, name: str, tool: AgentTool
+        connection: ServerConnection,
+        tool_name: str,
+        name: str,
+        tool: AgentTool,
+        *,
+        deferred: bool = False,
     ) -> ToolDefinition:
         async def execute(
             tool_call_id: str, params: Any, signal: Any | None = None, on_update: Any | None = None
@@ -167,6 +210,7 @@ class Manager:
             execute=execute,
             label=f"{connection.name}: {tool_name}",
             annotations=getattr(tool, "annotations", None),
+            deferred=deferred,
         )
 
     # -- /mcp ------------------------------------------------------------------------------

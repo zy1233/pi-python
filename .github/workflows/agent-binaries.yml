@@ -18,6 +18,7 @@ on:
       - ".github/workflows/agent-binaries.yml"
       - "packaging/agent/**"
       - "packages/pi-dynamic-workflows/**"
+      - "packages/pi-codemode/**"
       - "packages/pi-agent-cli/**"
       - "pi_agent_core/**"
   # By hand: with a tag it builds that tag and attaches the archives to its release (also the
@@ -105,7 +106,7 @@ jobs:
           cache: pip
       - name: Install packages (dev)
         shell: bash
-        run: pip install -e ".[dev]" -e "./packages/pi-agent-harness" -e "./packages/pi-agent-cli" -e "./packages/pi-web-access" -e "./packages/pi-goal-x" -e "./packages/pi-dynamic-workflows" -e "./packages/pi-mcp"
+        run: pip install -e ".[dev]" -e "./packages/pi-agent-harness" -e "./packages/pi-agent-cli" -e "./packages/pi-web-access" -e "./packages/pi-goal-x" -e "./packages/pi-dynamic-workflows" -e "./packages/pi-mcp" -e "./packages/pi-codemode"
       - name: Tests of the sandbox, the terminal login, the providers
         shell: bash
         run: >-
@@ -142,7 +143,7 @@ jobs:
         run: >-
           pip install "pyinstaller~=6.22" pytest pytest-asyncio
           . ./packages/pi-agent-harness ./packages/pi-agent-cli ./packages/pi-web-access
-          ./packages/pi-goal-x ./packages/pi-dynamic-workflows ./packages/pi-mcp
+          ./packages/pi-goal-x ./packages/pi-dynamic-workflows ./packages/pi-mcp ./packages/pi-codemode
       - name: Build
         shell: bash
         run: python packaging/agent/build.py
@@ -167,6 +168,7 @@ jobs:
         shell: bash
         run: >-
           PI_SANDBOX_FROZEN_CHILD="$CHILD_PROGRAM" python -m pytest -v -p no:cacheprovider
+          pi_agent_core/tests/test_sandbox_v2.py
           packages/pi-dynamic-workflows/tests/test_sandbox_isolation.py
           packages/pi-dynamic-workflows/tests/test_sandbox_protocol.py
           packages/pi-dynamic-workflows/tests/test_sandbox_frozen.py

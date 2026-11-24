@@ -380,6 +380,31 @@ class _ClientStubs:
     def add_turn_barrier(self, wait: Any) -> None:
         pass
 
+    def activate_tools(self, names: Any, *, undefer: bool = False) -> list[str]:
+        return []
+
+    def deactivate_tools(self, names: Any, *, defer: bool = False) -> list[str]:
+        return []
+
+    async def invoke_tool(
+        self,
+        tool_call_id: str,
+        tool_name: str,
+        args: dict[str, Any],
+        *,
+        origin: dict[str, Any] | None = None,
+        signal: Any | None = None,
+        on_update: Any | None = None,
+    ) -> Any:
+        return None
+
+    def get_extension_settings(self, name: str) -> dict[str, Any]:
+        return {}
+
+    @property
+    def is_sequential_tool_policy(self) -> bool:
+        return False
+
 
 class TestBridgeDuringActivate:
     def test_bridge_injected_before_activate(self) -> None:

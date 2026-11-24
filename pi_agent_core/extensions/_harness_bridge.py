@@ -10,6 +10,7 @@ from collections.abc import Iterable
 from typing import Any, Protocol, runtime_checkable
 
 from pi_agent_core.extensions.types import ClientMcpServer, ToolDefinition, ToolInfo
+from pi_agent_core.types import AgentToolResult
 
 
 @runtime_checkable
@@ -28,7 +29,27 @@ class HarnessBridge(Protocol):
 
     def set_active_tool_names(self, names: list[str]) -> None: ...
 
+    def activate_tools(self, names: Iterable[str], *, undefer: bool = False) -> list[str]: ...
+
+    def deactivate_tools(self, names: Iterable[str], *, defer: bool = False) -> list[str]: ...
+
     def get_all_tool_info(self) -> list[ToolInfo]: ...
+
+    async def invoke_tool(
+        self,
+        tool_call_id: str,
+        tool_name: str,
+        args: dict[str, Any],
+        *,
+        origin: dict[str, Any] | None = None,
+        signal: Any | None = None,
+        on_update: Any | None = None,
+    ) -> AgentToolResult: ...
+
+    def get_extension_settings(self, name: str) -> dict[str, Any]: ...
+
+    @property
+    def is_sequential_tool_policy(self) -> bool: ...
 
     def send_message(self, text: str) -> None: ...
 

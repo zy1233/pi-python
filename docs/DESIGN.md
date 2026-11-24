@@ -384,3 +384,4 @@ TUI 与 agent 之间的线上协议是标准 ACP，加上登记在册的 `pi/` �
 | `docs/specs/2026-09-02-phase5-prompt-engine-design.md` | Phase 5：system prompt 装配 |
 | `docs/specs/2026-09-24-phase6-extended-integrations-design.md` | Phase 6：Git 上下文与多提供商测试矩阵 |
 | `docs/specs/2026-09-22-phase7-extension-api-design.md` | Phase 7：ExtensionAPI 与扩展包 |
+| `docs/specs/2026-11-24-code-mode-design.md` | Code Mode：程序化编排（`codemode`）、延迟工具发现（`tool_search`）、共享沙箱 v2 与运行时权限门控 |

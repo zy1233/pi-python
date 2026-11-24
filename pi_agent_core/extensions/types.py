@@ -95,6 +95,10 @@ class ToolDefinition:
     """MCP-style hints about the tool (``readOnlyHint`` ...). In the CLI's ``ask`` mode a
     call is asked about unless the tool declares ``readOnlyHint: true`` (or
     ``destructiveHint: false`` with ``openWorldHint: false``); no annotations, no exemption."""
+    deferred: bool = False
+    """When True, the tool is registered into the session and callable via ``invoke_tool`` /
+    ``codemode``, but omitted from initial ``active_tool_names`` until promoted via
+    ``activate_tools`` / ``tool_search``."""
 
 
 # ---------------------------------------------------------------------------
@@ -193,3 +197,7 @@ class ToolInfo:
     source: str  # "builtin" | "extension"
     prompt_snippet: str | None = None
     prompt_guidelines: list[str] = field(default_factory=list)
+    parameters: dict[str, Any] = field(default_factory=dict)
+    annotations: dict[str, Any] | None = None
+    deferred: bool = False
+    active: bool = True

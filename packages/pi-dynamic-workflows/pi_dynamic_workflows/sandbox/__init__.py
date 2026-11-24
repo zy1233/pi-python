@@ -1,6 +1,6 @@
-"""Process isolation for workflow scripts (see ``host.py`` and ``child.py``)."""
+"""Process isolation for workflow scripts (re-exported from ``pi_agent_core.sandbox``)."""
 
-from pi_dynamic_workflows.sandbox.host import (
+from pi_agent_core.sandbox.host import (
     SandboxCrashed,
     SandboxError,
     SandboxLimitExceeded,

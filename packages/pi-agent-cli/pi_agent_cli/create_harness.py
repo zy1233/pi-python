@@ -33,6 +33,7 @@ def build_coding_agent_harness_system_prompt(
     cwd: str,
     tools: Sequence[AgentTool],
     active_tool_names: Sequence[str],
+    deferred_tool_names: Sequence[str] | None = None,
     system_prompt_options: BuildSystemPromptOptions | None = None,
 ) -> str:
     """Collect tool contributions and build the coding-agent system prompt."""
@@ -61,5 +62,8 @@ def build_coding_agent_harness_system_prompt(
             context_files=base.context_files,
             skills=base.skills,
             git_status=base.git_status,
+            deferred_tool_names=(
+                list(deferred_tool_names) if deferred_tool_names else base.deferred_tool_names
+            ),
         )
     )

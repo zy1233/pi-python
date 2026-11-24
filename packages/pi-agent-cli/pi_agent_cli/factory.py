@@ -334,6 +334,7 @@ async def create_session_harness(
             cwd=cwd_s,
             tools=all_tools,
             active_tool_names=active_names,
+            deferred_tool_names=ctx.get("deferred_tool_names") or (),
             system_prompt_options=options,
         )
 
@@ -359,6 +360,11 @@ async def create_session_harness(
     )
     harness_holder["harness"] = harness
     harness.bash_limits_for_call = bash_limits
+    harness.set_extension_settings("pi-codemode", config.codemode.to_dict())
+    harness.set_extension_settings(
+        "pi-mcp",
+        {"defer_mcp": config.codemode.enabled and config.codemode.defer_mcp},
+    )
     if on_tool_call is not None:
         harness.on("tool_call", on_tool_call)
     return harness

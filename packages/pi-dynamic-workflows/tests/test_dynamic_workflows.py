@@ -485,8 +485,24 @@ class _BridgeStub:
     def set_active_tool_names(self, names):
         pass
 
+    def activate_tools(self, names, *, undefer: bool = False):
+        return []
+
+    def deactivate_tools(self, names, *, defer: bool = False):
+        return []
+
     def get_all_tool_info(self):
         return []
+
+    async def invoke_tool(self, tool_call_id, tool_name, args, **kw):
+        return None
+
+    def get_extension_settings(self, name):
+        return {}
+
+    @property
+    def is_sequential_tool_policy(self):
+        return False
 
     def send_message(self, text):
         pass

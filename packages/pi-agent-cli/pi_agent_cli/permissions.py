@@ -14,6 +14,13 @@ allow are put to the user in the same way, with the reason in the title of the q
 sub-agents that can run ``bash`` / ``edit`` / ``write`` themselves. Their tool calls are
 asked about individually (the harness bridge's ``tool_call_gate``), not covered by allowing
 the workflow.
+
+``codemode`` declares no annotations by default (``[codemode] require_approval = true``),
+matching ``workflow`` and invariant 8: ``ask`` and ``auto`` confirm before running an outer
+script. When a user opts into ``require_approval = false``, the outer call declares
+``destructiveHint: false, openWorldHint: false`` and every inner ``tools.*`` call still passes
+individually through ``AgentHarness.invoke_tool`` → ``check_tool_call`` with concrete runtime
+arguments (``origin = {"kind": "codemode", "cwd": ...}``).
 """
 
 from __future__ import annotations
@@ -85,6 +92,8 @@ def _prompt_title(
     if origin and origin.get("kind") == "subagent":
         cwd = origin.get("cwd")
         notes.append(f"workflow sub-agent{f' in {cwd}' if cwd else ''}")
+    elif origin and origin.get("kind") == "codemode":
+        notes.append("codemode")
     if not notes:
         return tool_name
     return f"{tool_name} ({'; '.join(notes)})"

@@ -198,6 +198,48 @@ class AutoConfig:
     problems: tuple[str, ...] = ()
 
 
+CodemodeMode = Literal["hybrid", "only"]
+_VALID_CODEMODE_MODES: set[str] = {"hybrid", "only"}
+
+DEFAULT_CODEMODE_TIMEOUT_SECONDS = 120.0
+MIN_CODEMODE_TIMEOUT_SECONDS = 1.0
+MAX_CODEMODE_TIMEOUT_SECONDS = 600.0
+DEFAULT_CODEMODE_MAX_TOOL_CALLS = 100
+MIN_CODEMODE_MAX_TOOL_CALLS = 1
+MAX_CODEMODE_MAX_TOOL_CALLS = 500
+DEFAULT_CODEMODE_MAX_OUTPUT_KB = 64
+MIN_CODEMODE_MAX_OUTPUT_KB = 4
+MAX_CODEMODE_MAX_OUTPUT_KB = 512
+
+
+@dataclass(frozen=True)
+class CodemodeConfig:
+    """The ``[codemode]`` table of ``agent.toml``: code-execution tool & deferred tools.
+
+    Read from the home file only, never from a project config (invariant 9).
+    """
+
+    enabled: bool = True
+    mode: CodemodeMode = "hybrid"
+    defer_mcp: bool = True
+    require_approval: bool = True
+    timeout_seconds: float = DEFAULT_CODEMODE_TIMEOUT_SECONDS
+    max_tool_calls: int = DEFAULT_CODEMODE_MAX_TOOL_CALLS
+    max_output_kb: int = DEFAULT_CODEMODE_MAX_OUTPUT_KB
+    notes: tuple[str, ...] = ()
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "enabled": self.enabled,
+            "mode": self.mode,
+            "defer_mcp": self.defer_mcp,
+            "require_approval": self.require_approval,
+            "timeout_seconds": self.timeout_seconds,
+            "max_tool_calls": self.max_tool_calls,
+            "max_output_kb": self.max_output_kb,
+        }
+
+
 @dataclass(frozen=True)
 class CliConfig:
     permission: PermissionMode = "ask"
@@ -241,6 +283,7 @@ class CliConfig:
     default_project_trust: DefaultProjectTrust | None = None
     models: tuple[ModelChoice, ...] = ()
     auto: AutoConfig = field(default_factory=AutoConfig)
+    codemode: CodemodeConfig = field(default_factory=CodemodeConfig)
 
     @property
     def model_reasoning(self) -> bool:
@@ -502,6 +545,9 @@ def _from_toml(data: dict[str, Any]) -> CliConfig:
     ]
     if leading_notes:
         auto = replace(auto, notes=(*leading_notes, *auto.notes))
+    codemode = _codemode_config(data.get("codemode"))
+    if codemode.notes:
+        auto = replace(auto, notes=(*auto.notes, *codemode.notes))
 
     config = CliConfig(
         permission=permission,  # type: ignore[arg-type]
@@ -531,6 +577,7 @@ def _from_toml(data: dict[str, Any]) -> CliConfig:
         default_project_trust=_default_project_trust(extensions.get("default_project_trust")),
         models=tuple(models),
         auto=auto,
+        codemode=codemode,
     )
     if config.auto_model_is_unknown():
         note = (
@@ -674,6 +721,115 @@ def _auto_config(value: object) -> AutoConfig:
         bash_max_output_mb=max_output_mb,
         notes=tuple(notes),
         problems=tuple(problems),
+    )
+
+
+_CODEMODE_KEYS = frozenset(
+    {
+        "enabled",
+        "mode",
+        "defer_mcp",
+        "require_approval",
+        "timeout_seconds",
+        "max_tool_calls",
+        "max_output_kb",
+    }
+)
+
+
+def _codemode_config(value: object) -> CodemodeConfig:
+    """The ``[codemode]`` table. Invalid entries fall back to defaults and record ``notes``."""
+    if value is None:
+        return CodemodeConfig()
+    if not isinstance(value, dict):
+        return CodemodeConfig(notes=("codemode in agent.toml is not a table, and it is ignored.",))
+    notes: list[str] = []
+    for key in value:
+        if key not in _CODEMODE_KEYS:
+            notes.append(f'The key "{key}" in [codemode] is not known, and it is ignored.')
+
+    def _bool_opt(name: str, default: bool) -> bool:
+        raw = value.get(name)
+        if raw is None:
+            return default
+        if isinstance(raw, bool):
+            return raw
+        notes.append(
+            f"{name} in [codemode] must be true or false. The agent uses "
+            f"{'true' if default else 'false'}."
+        )
+        return default
+
+    enabled = _bool_opt("enabled", True)
+    defer_mcp = _bool_opt("defer_mcp", True)
+    require_approval = _bool_opt("require_approval", True)
+
+    mode: CodemodeMode = "hybrid"
+    raw_mode = value.get("mode")
+    if raw_mode is not None:
+        normalized = raw_mode.strip().lower() if isinstance(raw_mode, str) else ""
+        if normalized in _VALID_CODEMODE_MODES:
+            mode = normalized  # type: ignore[assignment]
+        else:
+            notes.append('mode in [codemode] must be "hybrid" or "only". The agent uses "hybrid".')
+
+    timeout_seconds = DEFAULT_CODEMODE_TIMEOUT_SECONDS
+    raw_timeout = value.get("timeout_seconds")
+    if raw_timeout is not None:
+        if (
+            isinstance(raw_timeout, (int, float))
+            and not isinstance(raw_timeout, bool)
+            and MIN_CODEMODE_TIMEOUT_SECONDS <= float(raw_timeout) <= MAX_CODEMODE_TIMEOUT_SECONDS
+        ):
+            timeout_seconds = float(raw_timeout)
+        else:
+            notes.append(
+                f"timeout_seconds in [codemode] must be a number from "
+                f"{int(MIN_CODEMODE_TIMEOUT_SECONDS)} to {int(MAX_CODEMODE_TIMEOUT_SECONDS)}. "
+                f"The agent uses {DEFAULT_CODEMODE_TIMEOUT_SECONDS:g} seconds."
+            )
+
+    max_tool_calls = DEFAULT_CODEMODE_MAX_TOOL_CALLS
+    raw_calls = value.get("max_tool_calls")
+    if raw_calls is not None:
+        if (
+            isinstance(raw_calls, int)
+            and not isinstance(raw_calls, bool)
+            and MIN_CODEMODE_MAX_TOOL_CALLS <= raw_calls <= MAX_CODEMODE_MAX_TOOL_CALLS
+        ):
+            max_tool_calls = raw_calls
+        else:
+            notes.append(
+                f"max_tool_calls in [codemode] must be a whole number from "
+                f"{MIN_CODEMODE_MAX_TOOL_CALLS} to {MAX_CODEMODE_MAX_TOOL_CALLS}. "
+                f"The agent uses {DEFAULT_CODEMODE_MAX_TOOL_CALLS}."
+            )
+
+    max_output_kb = DEFAULT_CODEMODE_MAX_OUTPUT_KB
+    raw_output_kb = value.get("max_output_kb")
+    if raw_output_kb is not None:
+        if (
+            isinstance(raw_output_kb, int)
+            and not isinstance(raw_output_kb, bool)
+            and MIN_CODEMODE_MAX_OUTPUT_KB <= raw_output_kb <= MAX_CODEMODE_MAX_OUTPUT_KB
+        ):
+            max_output_kb = raw_output_kb
+        else:
+            notes.append(
+                f"max_output_kb in [codemode] must be a whole number from "
+                f"{MIN_CODEMODE_MAX_OUTPUT_KB} to {MAX_CODEMODE_MAX_OUTPUT_KB}. "
+                f"The agent uses {DEFAULT_CODEMODE_MAX_OUTPUT_KB} KB."
+            )
+
+    return CodemodeConfig(
+        enabled=enabled,
+        mode=mode,
+        defer_mcp=defer_mcp,
+        require_approval=require_approval,
+        timeout_seconds=timeout_seconds,
+        max_tool_calls=max_tool_calls,
+        max_output_kb=max_output_kb,
+        notes=tuple(notes),
     )
 
 

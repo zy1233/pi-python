@@ -58,6 +58,6 @@ jobs:
           python-version: ${{ matrix.python-version }}
           cache: pip
       - name: Install packages (dev)
-        run: pip install -e ".[dev]" -e "./packages/pi-agent-harness" -e "./packages/pi-agent-cli" -e "./packages/pi-web-access" -e "./packages/pi-goal-x" -e "./packages/pi-dynamic-workflows" -e "./packages/pi-mcp"
+        run: pip install -e ".[dev]" -e "./packages/pi-agent-harness" -e "./packages/pi-agent-cli" -e "./packages/pi-web-access" -e "./packages/pi-goal-x" -e "./packages/pi-dynamic-workflows" -e "./packages/pi-mcp" -e "./packages/pi-codemode"
       - name: Run tests
         run: pytest -v

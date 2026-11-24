@@ -25,6 +25,7 @@ from pi_agent_core.extensions.types import (
     validate_tool_name,
 )
 from pi_agent_core.home import pi_home
+from pi_agent_core.types import AgentToolResult
 
 if TYPE_CHECKING:
     from pi_agent_core.extensions._harness_bridge import HarnessBridge
@@ -154,9 +155,66 @@ class ExtensionAPI:
         """Change the active tool set."""
         self._require_bridge().set_active_tool_names(names)
 
+    def activate_tools(self, names: Iterable[str], *, undefer: bool = False) -> list[str]:
+        """Enable registered (including deferred) tools in ``active_tool_names``.
+
+        When *undefer* is True, also clears the deferred mark on the activated names.
+        """
+        bridge = self._require_bridge()
+        if undefer:
+            return bridge.activate_tools(list(names), undefer=True)
+        return bridge.activate_tools(list(names))
+
+    def deactivate_tools(self, names: Iterable[str], *, defer: bool = False) -> list[str]:
+        """Remove tools from ``active_tool_names`` while keeping them registered.
+
+        When *defer* is True, marks those tools as deferred so they remain callable via
+        ``invoke_tool`` / ``codemode``.
+        """
+        bridge = self._require_bridge()
+        if defer:
+            return bridge.deactivate_tools(list(names), defer=True)
+        return bridge.deactivate_tools(list(names))
+
     def get_all_tools(self) -> list[ToolInfo]:
         """All registered tools (built-in + extension) with metadata."""
         return self._require_bridge().get_all_tool_info()
+
+    async def invoke_tool(
+        self,
+        tool_call_id: str,
+        tool_name: str,
+        args: dict[str, Any],
+        *,
+        origin: dict[str, Any] | None = None,
+        signal: Any | None = None,
+        on_update: Any | None = None,
+    ) -> AgentToolResult:
+        """Invoke a registered tool (active or deferred) through validation & policy gates."""
+        return await self._require_bridge().invoke_tool(
+            tool_call_id,
+            tool_name,
+            args,
+            origin=origin,
+            signal=signal,
+            on_update=on_update,
+        )
+
+    def get_settings(self) -> dict[str, Any]:
+        """Host-provided settings dict for this extension (``{}`` when none)."""
+        if self._bridge is None:
+            return {}
+        getter = getattr(self._bridge, "get_extension_settings", None)
+        if getter is None:
+            return {}
+        return dict(getter(self._meta.name) or {})
+
+    @property
+    def is_sequential_tool_policy(self) -> bool:
+        """True when the host enforces sequential decide-then-execute tool ordering."""
+        if self._bridge is None:
+            return False
+        return bool(getattr(self._bridge, "is_sequential_tool_policy", False))
 
     # -- message injection ---------------------------------------------------
 

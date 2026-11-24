@@ -5,9 +5,9 @@
 Starts a small OpenAI-format server on 127.0.0.1 and the agent with ``provider = "openai"``
 pointing at it, then plays one turn over ACP stdio:
 
-1. The model asks for the ``workflow`` tool with a script that calls ``agent()`` once. That
-   runs the script in the sandbox's script process (the frozen one, in a frozen build), and a
-   sub-agent that asks the model again.
+1. The model asks for the ``workflow`` tool with a script that calls ``agent()`` once (protocol
+   v2 in the shared sandbox's script process, or the frozen one) and asks for ``codemode`` to run
+   ``await tools.ls(path=".")`` inside the same sandbox.
 2. On Linux the model also asks for ``bash``, to show that a tool the agent starts does not
    load the bundle's libraries (``LD_LIBRARY_PATH``).
 3. The model answers in text, and the turn ends.
@@ -42,6 +42,7 @@ async def main():
     answer = await agent("SUB-PROMPT")
     result({"answer": answer})
 """
+CODEMODE_CODE = 'listing = await tools.ls(path=".")\nreturn f"CM-OK:{len(listing) > 0}"'
 TURN_TIMEOUT = 180
 
 
@@ -94,7 +95,10 @@ class FakeModel(BaseHTTPRequestHandler):
             parts.append(_chunk({}, "stop"))
         elif users and "RUN-SMOKE" in users[-1]:
             kind = "tools"
-            calls = [("call_workflow", "workflow", {"script": SCRIPT})]
+            calls = [
+                ("call_workflow", "workflow", {"script": SCRIPT}),
+                ("call_codemode", "codemode", {"code": CODEMODE_CODE}),
+            ]
             if sys.platform.startswith("linux"):
                 command = 'echo "ld=[$LD_LIBRARY_PATH]"; git --version'
                 calls.append(("call_bash", "bash", {"command": command}))
@@ -210,6 +214,8 @@ def main() -> int:
     failures: list[str] = []
     if "SUB-ANSWER" not in said:
         failures.append("the workflow script did not run, or its sub-agent got no answer")
+    if "CM-OK:True" not in said:
+        failures.append("the codemode tool did not run or did not return its inner ls result")
     if "FINAL" not in said:
         failures.append("the turn did not end with the model's last answer")
     if FakeModel.requests.count("sub-agent") < 1:

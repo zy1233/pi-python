@@ -18,6 +18,7 @@ OUR_PACKAGES = [
     "pi_goal_x",
     "pi_dynamic_workflows",
     "pi_mcp",
+    "pi_codemode",
 ]
 # Distributions whose entry points (group ``pi_agent.extensions``) and versions are read at run
 # time through ``importlib.metadata``: the metadata has to be in the bundle.
@@ -29,6 +30,7 @@ OUR_DISTRIBUTIONS = [
     "pi-goal-x-py",
     "pi-dynamic-workflows-py",
     "pi-mcp-py",
+    "pi-codemode-py",
 ]
 # Packages that load part of themselves by name, so the analysis does not see it.
 BY_NAME = ["langchain_openai", "langchain_core", "tiktoken_ext", "acp"]
@@ -39,7 +41,7 @@ for package in [*OUR_PACKAGES, *BY_NAME]:
         package, filter=lambda name: ".tests.test_" not in name and not name.endswith(".conftest")
     )
 
-datas = [(CHILD_DIR, "pi_dynamic_workflows/sandbox/frozen-child")]
+datas = [(CHILD_DIR, "pi_agent_core/sandbox/frozen-child")]
 for package in ("pi_dynamic_workflows", "pi_agent_cli", "pi_agent_core", "pi_web_access", "pi_goal_x"):
     datas += collect_data_files(package)
 for distribution in OUR_DISTRIBUTIONS:
