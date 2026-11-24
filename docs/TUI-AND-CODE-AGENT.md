@@ -149,6 +149,8 @@ base_url = "https://api.siliconflow.cn/v1"         # for OpenAI-compatible gatew
 context_window = 128000                            # tokens; the agent then tells a client how full the context is (ACP `usage_update`)
 
 [skills]
+# Built-in skills (e.g. `skill-creator`) load by default; configured `paths` override by name.
+# include_builtin = true
 # ".pi/skills" is relative to the project, so it loads only for a trusted project (see [extensions]).
 paths = ["~/.pi-python/skills", ".pi/skills"]
 
@@ -274,7 +276,7 @@ The coding agent assembles its system prompt from multiple sources:
 1. **Base prompt** — `build_system_prompt()` with available tools, guidelines, project context
 2. **Tool contributions** — each tool's `prompt_snippet` / `prompt_guidelines`
 3. **Context files** — `AGENTS.md`, `CLAUDE.md`, `SYSTEM.md`, `APPEND_SYSTEM.md` from the working directory
-4. **Skills** — `<available_skills>` XML format, discovered from config
+4. **Skills** — `<available_skills>` XML format, discovered from built-in skills (`skill-creator`, toggleable via `[skills].include_builtin`) and `[skills].paths` in `agent.toml`
 
 This matches the pi upstream `packages/coding-agent/src/core/system-prompt.ts` assembly.
 

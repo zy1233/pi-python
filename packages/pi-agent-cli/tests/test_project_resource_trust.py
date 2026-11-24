@@ -138,7 +138,7 @@ async def test_skills_from_an_untrusted_project_are_not_loaded(world: Any):
 
     resources = await load_session_resources(cwd=world.project, config=config)
 
-    assert _skill_names(resources) == []
+    assert _skill_names(resources) == ["skill-creator"]
 
 
 @pytest.mark.asyncio
@@ -147,7 +147,7 @@ async def test_skills_from_a_trusted_project_are_loaded(world: Any):
 
     resources = await load_session_resources(cwd=world.project, config=config)
 
-    assert _skill_names(resources) == ["shipped"]
+    assert _skill_names(resources) == ["shipped", "skill-creator"]
 
 
 @pytest.mark.asyncio
@@ -165,7 +165,11 @@ async def test_the_users_own_skill_directories_load_whatever_the_trust(
 
     resources = await load_session_resources(cwd=world.project, config=config)
 
-    assert sorted(_skill_names(resources)) == ["own", "viahome"]  # not "shipped"
+    assert sorted(_skill_names(resources)) == [
+        "own",
+        "skill-creator",
+        "viahome",
+    ]  # not "shipped"
 
 
 # ---------------------------------------------------------------------------
@@ -262,8 +266,8 @@ async def test_skills_follow_the_sessions_trust_when_it_is_given(world: Any):
         cwd=world.project, config=_trusting(world, skills_dirs=skills), trusted=False
     )
 
-    assert _skill_names(yes) == ["shipped"]
-    assert _skill_names(no) == []
+    assert _skill_names(yes) == ["shipped", "skill-creator"]
+    assert _skill_names(no) == ["skill-creator"]
 
 
 @pytest.mark.asyncio

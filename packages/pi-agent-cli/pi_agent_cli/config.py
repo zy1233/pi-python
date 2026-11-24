@@ -264,6 +264,7 @@ class CliConfig:
     reasoning: bool | None = None
     thinking_format: ThinkingFormat | None = None
     skills_dirs: tuple[str, ...] = ()
+    include_builtin_skills: bool = True
     agent_command: str | None = None
     no_context_files: bool = False
     custom_system_prompt: str | None = None
@@ -458,6 +459,16 @@ def _from_toml(data: dict[str, Any]) -> CliConfig:
     if isinstance(raw_paths, list):
         skills_dirs = tuple(str(item) for item in raw_paths if str(item).strip())
 
+    include_builtin_raw = skills.get("include_builtin")
+    include_builtin_skills = True
+    include_builtin_note: str | None = None
+    if isinstance(include_builtin_raw, bool):
+        include_builtin_skills = include_builtin_raw
+    elif include_builtin_raw is not None:
+        include_builtin_note = (
+            "include_builtin in [skills] must be true or false, and it is ignored."
+        )
+
     supports_images_raw = model.get("supports_images")
     if supports_images_raw is None:
         supports_images_raw = data.get("supports_images")
@@ -540,7 +551,14 @@ def _from_toml(data: dict[str, Any]) -> CliConfig:
     auto = _auto_config(data.get("auto"))
     leading_notes = [
         note
-        for note in (permission_note, thinking_note, *window_notes, *format_notes, compact_note)
+        for note in (
+            permission_note,
+            thinking_note,
+            *window_notes,
+            *format_notes,
+            compact_note,
+            include_builtin_note,
+        )
         if note is not None
     ]
     if leading_notes:
@@ -563,6 +581,7 @@ def _from_toml(data: dict[str, Any]) -> CliConfig:
         reasoning=reasoning,
         thinking_format=thinking_format,
         skills_dirs=skills_dirs,
+        include_builtin_skills=include_builtin_skills,
         agent_command=agent_command,
         no_context_files=bool(prompt.get("no_context_files", False)),
         custom_system_prompt=_optional_str(prompt.get("custom_system_prompt")),

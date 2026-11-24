@@ -44,7 +44,7 @@ async def test_create_session_harness_loads_skills(tmp_path: Path, monkeypatch):
         home=tmp_path,
     )
     loaded = harness.get_resources().skills or []
-    assert [skill.name for skill in loaded] == ["writer"]
+    assert [skill.name for skill in loaded] == ["skill-creator", "writer"]
     tools = list(create_all_tools(str(tmp_path)).values())
     prompt = build_coding_agent_harness_system_prompt(
         cwd=str(tmp_path),
@@ -53,6 +53,7 @@ async def test_create_session_harness_loads_skills(tmp_path: Path, monkeypatch):
         system_prompt_options=BuildSystemPromptOptions(cwd=str(tmp_path), skills=loaded),
     )
     assert "<available_skills>" in prompt
+    assert "<name>skill-creator</name>" in prompt
     assert "<name>writer</name>" in prompt
 
 

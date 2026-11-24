@@ -74,6 +74,9 @@ api_key_env = "REAL_LLM_API_KEY" # key for `provider` only; other providers use 
 # api_key_env = "OPENAI_API_KEY"
 
 [skills]
+# Built-in skills bundled with the agent (e.g. `skill-creator`) load by default; configured
+# `paths` override a built-in skill of the same name. Set `false` to disable built-in skills.
+# include_builtin = true
 # ".pi/skills" is relative to the project, so it loads only for a trusted project (see [extensions]).
 paths = ["~/.pi-python/skills", ".pi/skills"]
 

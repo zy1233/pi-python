@@ -80,6 +80,7 @@ class FakeModel(BaseHTTPRequestHandler):
 
     protocol_version = "HTTP/1.0"
     requests: ClassVar[list[str]] = []
+    system_prompts: ClassVar[list[str]] = []
 
     def log_message(self, format: str, *args: object) -> None:
         return
@@ -95,6 +96,9 @@ class FakeModel(BaseHTTPRequestHandler):
             parts.append(_chunk({}, "stop"))
         elif users and "RUN-SMOKE" in users[-1]:
             kind = "tools"
+            for message in messages:
+                if message.get("role") == "system":
+                    type(self).system_prompts.append(_text(message.get("content")))
             calls = [
                 ("call_workflow", "workflow", {"script": SCRIPT}),
                 ("call_codemode", "codemode", {"code": CODEMODE_CODE}),
@@ -220,6 +224,8 @@ def main() -> int:
         failures.append("the turn did not end with the model's last answer")
     if FakeModel.requests.count("sub-agent") < 1:
         failures.append("no request came from the sub-agent")
+    if not any("<name>skill-creator</name>" in prompt for prompt in FakeModel.system_prompts):
+        failures.append("the built-in skill-creator skill was missing from the system prompt")
     if sys.platform.startswith("linux"):
         if "git version" not in said:
             failures.append("the bash tool did not run git")

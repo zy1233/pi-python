@@ -197,7 +197,7 @@ The agent must reap the tools it is running when its client goes away: the TUI c
 2. `append_system_prompt` (config or CLI flag)
 3. Context files — `context_files.py` walks cwd → repo root collecting `AGENTS.md`, `CLAUDE.md`; a custom `.pi/SYSTEM.md` / `.pi/APPEND_SYSTEM.md` replaces or extends the base prompt only for a trusted project (see Project trust)
 4. Git status — `<git_status>` from `git_context.py` when cwd is a repo, `[git] enabled` is on (`--no-git-context` turns it off, headless only) **and the project is trusted** (see Project trust; untrusted or undecided: no block, no `git` process); the prompt inputs (files, git subprocesses) are built in a worker thread, and `timeout_seconds` is one budget for the whole snapshot. Trust is read each time the prompt is built, not once: the harness caches the prompt, and the cache is cleared when the model, the thinking level, the tools or the resources change (and then `git` runs again, for a trusted project). A "Trust and remember" answer calls `set_resources`, which clears it, so the block appears from the next turn, with a snapshot taken then; the first prompt waits for the answer, so normally nothing was cached before. A grant alone does not rebuild a prompt that is already cached
-5. Skills from `[skills].paths`, formatted as `<available_skills>`
+5. Skills from built-in skills (`builtin_skills/`, e.g. `skill-creator`, controlled by `[skills].include_builtin`) plus `[skills].paths` (configured paths override built-ins by name, later paths win), formatted as `<available_skills>`
 
 `build_coding_agent_harness_system_prompt` (`create_harness.py`) wraps this for harness use.
 
@@ -210,6 +210,7 @@ The agent must reap the tools it is running when its client goes away: the TUI c
 | `setup_command.py` | `--setup`: the dialog and the writers of `agent.toml` and `local.env` |
 | `auth_methods.py` | The terminal login for `initialize` (two forms), and the `auth_required` error |
 | `factory.py` | `create_session_harness` — wires tools, model, stream_fn, skills into harness |
+| `builtin_skills/` | Built-in skills bundled with the agent (`skill-creator`) and `load_builtin_skills` |
 | `extension_trust.py` | `decide_project_trust` / `ProjectTrust`: whether a project may load its own extensions, saved workflows, prompt files and skills; the "skipped" and "could not be saved" notices |
 | `trust_fingerprint.py` | The gated resources of a project and a content fingerprint of them |
 | `trust_store.py` | `<home>/agent/trust.json`: answers saved per directory with the fingerprint they were about |

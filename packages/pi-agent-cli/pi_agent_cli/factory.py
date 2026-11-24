@@ -9,6 +9,7 @@ from collections.abc import Awaitable, Callable, Iterable
 from pathlib import Path
 from typing import Any
 
+from pi_agent_cli.builtin_skills import load_builtin_skills
 from pi_agent_cli.config import (
     MOCK_PROVIDER,
     CliConfig,
@@ -38,6 +39,7 @@ from pi_agent_core.types import (
 from pi_agent_harness import AgentHarness, AgentHarnessResources, LocalExecutionEnv, Session
 from pi_agent_harness.compaction import CompactionSettings
 from pi_agent_harness.skills import load_skills
+from pi_agent_harness.types import Skill
 
 
 def _detect_vlm_support(provider: str, model_id: str, configured: bool | None = None) -> bool:
@@ -186,8 +188,6 @@ def _error_stream(model: Model, text: str) -> AssistantMessageEventStream:
 async def load_session_resources(
     *, cwd: str | Path, config: CliConfig, trusted: bool | None = None
 ) -> AgentHarnessResources:
-    if not config.skills_dirs:
-        return AgentHarnessResources()
     cwd_s = str(Path(normalize_host_path(str(cwd))).resolve())
     # An entry relative to the project (".pi/skills") finds the project's own skills, and a
     # skill's text goes into the system prompt: only for a trusted project. Absolute and
@@ -196,12 +196,23 @@ async def load_session_resources(
     if trusted is None:
         trusted = project_extensions_trusted(config, cwd_s)
     entries = [item for item in config.skills_dirs if trusted or not is_project_relative_path(item)]
-    if not entries:
+    if not config.include_builtin_skills and not entries:
         return AgentHarnessResources()
+
     env = LocalExecutionEnv(cwd_s)
-    paths = [expand_config_path(item, cwd=cwd_s) for item in entries]
-    result = await load_skills(env, paths)
-    return AgentHarnessResources(skills=result.skills)
+    by_name: dict[str, Skill] = {}
+    if config.include_builtin_skills:
+        builtin_result = await load_builtin_skills(env)
+        for skill in builtin_result.skills:
+            by_name[skill.name] = skill
+    if entries:
+        paths = [Path(expand_config_path(item, cwd=cwd_s)).as_posix() for item in entries]
+        result = await load_skills(env, paths)
+        for skill in result.skills:
+            by_name[skill.name] = skill
+    if not by_name:
+        return AgentHarnessResources()
+    return AgentHarnessResources(skills=sorted(by_name.values(), key=lambda skill: skill.name))
 
 
 def _build_tools(
