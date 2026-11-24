@@ -3,6 +3,8 @@
 from __future__ import annotations
 
 import asyncio
+from collections import Counter
+from collections.abc import Sequence
 from pathlib import Path
 from types import SimpleNamespace
 from typing import Any
@@ -51,8 +53,10 @@ def world(tmp_path: Path) -> _World:
 
 
 class _Client:
-    def __init__(self, *, allow: bool = True) -> None:
+    def __init__(self, *, allow: bool = True, responses: Sequence[bool] | None = None) -> None:
         self.allow = allow
+        self._responses = list(responses) if responses is not None else None
+        self._resp_idx = 0
         self.updates: list[Any] = []
         self.requests: list[Any] = []
 
@@ -63,7 +67,12 @@ class _Client:
         self, session_id: str, tool_call: Any, options: Any, **kwargs: Any
     ) -> RequestPermissionResponse:
         self.requests.append(tool_call)
-        option_id = "allow-once" if self.allow else "reject-once"
+        if self._responses is not None and self._resp_idx < len(self._responses):
+            decision = self._responses[self._resp_idx]
+            self._resp_idx += 1
+        else:
+            decision = self.allow
+        option_id = "allow-once" if decision else "reject-once"
         return RequestPermissionResponse(
             outcome=AllowedOutcome(outcome="selected", option_id=option_id)
         )
@@ -206,7 +215,7 @@ extra_flag = 123
     assert cfg.codemode.enabled is True
     assert cfg.codemode.mode == "hybrid"
     assert cfg.codemode.defer_mcp is True
-    assert cfg.codemode.require_approval is False
+    assert cfg.codemode.require_approval is True
     assert cfg.codemode.timeout_seconds == 120.0
     assert cfg.codemode.max_tool_calls == 100
     assert cfg.codemode.max_output_kb == 64
@@ -224,7 +233,12 @@ def test_codemode_non_table_and_project_local_ignored(tmp_path: Path) -> None:
     (project / ".pi-python" / "agent.toml").write_text(
         "[codemode]\nenabled = false\nrequire_approval = false\n", encoding="utf-8"
     )
-    assert load_config(home).codemode == CodemodeConfig()
+    default_cfg = load_config(home).codemode
+    assert default_cfg == CodemodeConfig()
+    assert default_cfg.require_approval is True
+
+    (home / "agent.toml").write_text("[codemode]\nrequire_approval = false\n", encoding="utf-8")
+    assert load_config(home).codemode.require_approval is False
 
     (home / "agent.toml").write_text('codemode = "nope"\n', encoding="utf-8")
     cfg = load_config(home)
@@ -338,6 +352,7 @@ async def test_auto_mode_allows_safe_in_project_calls_and_refuses_unknown_origin
         world,
         _codemode_stream(code, seen_results=seen),
         permission="auto",
+        codemode=CodemodeConfig(require_approval=False),
         client=_Client(allow=False),
     )
 
@@ -355,7 +370,11 @@ async def test_auto_mode_allows_safe_in_project_calls_and_refuses_unknown_origin
             toolCallId="cm-direct-1",
             input={"path": str(world.project / "direct.txt"), "content": "x"},
             annotations=None,
-            origin={"kind": "codemode", "cwd": str(world.project)},
+            origin={
+                "kind": "codemode",
+                "cwd": str(world.project),
+                "parent_call_id": "cm-parent-1",
+            },
         )
     )
     assert ok_verdict.outcome is Outcome.ALLOW
@@ -373,6 +392,135 @@ async def test_auto_mode_allows_safe_in_project_calls_and_refuses_unknown_origin
     assert bad_verdict.rule_id == "session.unknown_origin"
 
 
+async def test_auto_codemode_origin_validation_and_parallel_batch_guard(world: _World) -> None:
+    agent, _client, session_id = await _open_agent(
+        world,
+        permission="auto",
+        codemode=CodemodeConfig(require_approval=False),
+        client=_Client(allow=False),
+    )
+    auto = agent._autos[session_id]
+    safe_input = {"path": str(world.project / "direct.txt"), "content": "x"}
+
+    missing_cwd = await auto.decide(
+        SimpleNamespace(
+            toolName="write",
+            toolCallId="cm-o1",
+            input=safe_input,
+            annotations=None,
+            origin={"kind": "codemode", "parent_call_id": "cm-1"},
+        )
+    )
+    assert missing_cwd.outcome is Outcome.ASK
+    assert missing_cwd.rule_id == "session.codemode_without_cwd"
+
+    subdir = world.project / "subdir"
+    subdir.mkdir()
+    wrong_cwd = await auto.decide(
+        SimpleNamespace(
+            toolName="write",
+            toolCallId="cm-o2",
+            input=safe_input,
+            annotations=None,
+            origin={"kind": "codemode", "cwd": str(subdir), "parent_call_id": "cm-1"},
+        )
+    )
+    assert wrong_cwd.outcome is Outcome.ASK
+    assert wrong_cwd.rule_id == "session.codemode_cwd_mismatch"
+
+    missing_parent = await auto.decide(
+        SimpleNamespace(
+            toolName="write",
+            toolCallId="cm-o3",
+            input=safe_input,
+            annotations=None,
+            origin={"kind": "codemode", "cwd": str(world.project)},
+        )
+    )
+    assert missing_parent.outcome is Outcome.ASK
+    assert missing_parent.rule_id == "session.codemode_without_parent"
+
+    # When only the owning codemode call is open in the batch, inner call is allowed.
+    auto._open_calls = Counter({"cm-1": 1})
+    only_parent_open = await auto.decide(
+        SimpleNamespace(
+            toolName="write",
+            toolCallId="cm-o4",
+            input=safe_input,
+            annotations=None,
+            origin={
+                "kind": "codemode",
+                "cwd": str(world.project),
+                "parent_call_id": "cm-1",
+            },
+        )
+    )
+    assert only_parent_open.outcome is Outcome.ALLOW
+
+    # When another sibling call is also open alongside codemode, fail closed.
+    auto._open_calls = Counter({"cm-1": 1, "sibling-1": 1})
+    parallel_sibling = await auto.decide(
+        SimpleNamespace(
+            toolName="write",
+            toolCallId="cm-o5",
+            input=safe_input,
+            annotations=None,
+            origin={
+                "kind": "codemode",
+                "cwd": str(world.project),
+                "parent_call_id": "cm-1",
+            },
+        )
+    )
+    assert parallel_sibling.outcome is Outcome.ASK
+    assert parallel_sibling.rule_id == "session.parallel_batch"
+
+
+async def test_default_require_approval_prompts_outer_in_auto_and_still_gates_inner_write(
+    world: _World,
+) -> None:
+    code = (
+        'target = ".github/" + "workflows/ci.yml"\n'
+        'await tools.write(path=target, content="name: pwn\\n")\n'
+        'return "wrote"'
+    )
+    # 1. Default CodemodeConfig() rejects outer codemode when user denies
+    seen_deny: list[str] = []
+    deny_client = _Client(allow=False)
+    agent_deny, _, sid_deny = await _open_agent(
+        world,
+        _codemode_stream(code, seen_results=seen_deny),
+        permission="auto",
+        client=deny_client,
+    )
+    await agent_deny.prompt(session_id=sid_deny, prompt=[text_block("attempt stealth write")])
+    assert len(deny_client.requests) == 1
+    assert deny_client.titles()[0].startswith("codemode (Auto:")
+    assert sentence(Reason.UNDECLARED_TOOL) in deny_client.titles()[0]
+    assert any("User denied permission" in text for text in seen_deny)
+    assert not (world.project / ".github" / "workflows" / "ci.yml").exists()
+
+    # 2. Allowing outer codemode still prompts inner dynamic protected path write
+    seen_allow_outer: list[str] = []
+    mixed_client = _Client(responses=[True, False])
+    agent_mixed, _, sid_mixed = await _open_agent(
+        world,
+        _codemode_stream(code, seen_results=seen_allow_outer),
+        permission="auto",
+        client=mixed_client,
+    )
+    await agent_mixed.prompt(session_id=sid_mixed, prompt=[text_block("attempt stealth write")])
+    assert len(mixed_client.requests) == 2
+    assert mixed_client.titles()[0].startswith("codemode (Auto:")
+    assert sentence(Reason.UNDECLARED_TOOL) in mixed_client.titles()[0]
+    inner_title = mixed_client.titles()[1]
+    assert inner_title.startswith("write (")
+    assert sentence(Reason.PROTECTED_PATH) in inner_title
+    assert "codemode" in inner_title
+    assert not (world.project / ".github" / "workflows" / "ci.yml").exists()
+    assert any("ToolPermissionError" in text for text in seen_allow_outer)
+
+
 async def test_auto_redteam_runtime_dynamic_protected_path_caught_before_write(
     world: _World,
 ) -> None:
@@ -387,6 +535,7 @@ async def test_auto_redteam_runtime_dynamic_protected_path_caught_before_write(
         world,
         _codemode_stream(code, seen_results=seen),
         permission="auto",
+        codemode=CodemodeConfig(require_approval=False),
         client=_Client(allow=False),
     )
 
@@ -421,6 +570,7 @@ async def test_auto_redteam_runtime_outside_path_and_destructive_bash_caught(
         world,
         _codemode_stream(code, seen_results=seen),
         permission="auto",
+        codemode=CodemodeConfig(require_approval=False),
         client=_Client(allow=False),
     )
 
@@ -458,6 +608,7 @@ async def test_auto_parallel_inner_calls_are_serialized_decide_run_decide_run(
         world,
         _codemode_stream(code, seen_results=seen),
         permission="auto",
+        codemode=CodemodeConfig(require_approval=False),
         client=_Client(allow=False),
     )
     write_tool = agent._harnesses[session_id].get_tool("write")
@@ -508,6 +659,7 @@ async def test_auto_bash_limits_applied_to_inner_codemode_bash(
         _codemode_stream(code, seen_results=seen),
         permission="auto",
         auto=auto,
+        codemode=CodemodeConfig(require_approval=False),
         client=_Client(allow=False),
     )
 
@@ -591,7 +743,6 @@ async def test_require_approval_prompts_outer_codemode_call(world: _World) -> No
         world,
         _codemode_stream('return "ok"', seen_results=seen),
         permission="ask",
-        codemode=CodemodeConfig(require_approval=True),
         client=_Client(allow=False),
     )
 
@@ -608,6 +759,7 @@ async def test_ask_mode_prompts_inner_write_with_codemode_title(world: _World) -
         world,
         _codemode_stream(code, seen_results=seen),
         permission="ask",
+        codemode=CodemodeConfig(require_approval=False),
         client=_Client(allow=True),
     )
 

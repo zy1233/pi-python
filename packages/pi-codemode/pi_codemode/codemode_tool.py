@@ -17,8 +17,8 @@ if TYPE_CHECKING:
     from pi_agent_core.extensions import ExtensionAPI
 
 CODEMODE_PROMPT_SNIPPET = (
-    "Execute an async Python script in an isolated sandbox to orchestrate multiple tool "
-    "calls, filter outputs locally, and discover deferred tools"
+    "Execute an async Python script in a sandboxed child process (resource limits and audit hook) "
+    "to orchestrate multiple tool calls, filter outputs locally, and discover deferred tools"
 )
 
 CODEMODE_PROMPT_GUIDELINE = (
@@ -38,7 +38,7 @@ class CodemodeParams(BaseModel):
     )
     timeout_ms: int | None = Field(
         default=None,
-        ge=100,
+        ge=1000,
         le=600_000,
         description="Optional wall-clock timeout override in milliseconds.",
     )
@@ -75,9 +75,9 @@ def create_codemode_tool(
         name="codemode",
         description=description
         or (
-            "Execute an async Python script inside an isolated sandbox to orchestrate multiple "
-            "tools (`await tools.<name>(...)`, `ALL_TOOLS`, `search_tools()`, `describe_tool()`, "
-            "`parallel()`, `text()`, `image()`, `print()`)."
+            "Execute an async Python script in a sandboxed child process (resource limits and "
+            "audit hook) to orchestrate multiple tools (`await tools.<name>(...)`, `ALL_TOOLS`, "
+            "`search_tools()`, `describe_tool()`, `parallel()`, `text()`, `image()`, `print()`)."
         ),
         parameters=CodemodeParams,
         execute=execute,
@@ -88,6 +88,8 @@ def create_codemode_tool(
     )
 
 
-def build_codemode_description(pi: ExtensionAPI) -> str:
+def build_codemode_description(
+    pi: ExtensionAPI, *, direct_names: frozenset[str] = frozenset()
+) -> str:
     """Render live ``codemode`` description from the current harness tools."""
-    return render_codemode_description(pi.get_all_tools())
+    return render_codemode_description(pi.get_all_tools(), direct_names=direct_names)

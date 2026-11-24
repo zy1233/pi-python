@@ -153,7 +153,10 @@ command = "python -m pi_agent_cli"
 # mode = "hybrid"            # "hybrid" (default): keep core tools + `codemode` / `tool_search` active;
 #                            # "only": defer non-codemode tools behind `tool_search` and `tools.*`
 # defer_mcp = true           # defer `mcp__*` tool schemas when codemode is active (`pi-mcp-py`)
-# require_approval = false   # set true to ask for permission on the outer `codemode` script too
+# require_approval = true    # default true (matching `workflow`): ask before running outer `codemode`
+#                            # scripts in `ask` / `auto`; set false only if inner `tools.*` gating plus
+#                            # the child process's audit hook / OS limits match your risk model (run
+#                            # `zypi --sandbox`, a container, or a VM for untrusted repositories)
 # timeout_seconds = 120      # per-invocation timeout (1 to 600)
 # max_tool_calls = 100       # inner `tools.*` call budget per invocation (1 to 500)
 # max_output_kb = 64         # return text truncation threshold in KiB (4 to 512)

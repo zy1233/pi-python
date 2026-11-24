@@ -485,10 +485,10 @@ class _BridgeStub:
     def set_active_tool_names(self, names):
         pass
 
-    def activate_tools(self, names):
+    def activate_tools(self, names, *, undefer: bool = False):
         return []
 
-    def deactivate_tools(self, names):
+    def deactivate_tools(self, names, *, defer: bool = False):
         return []
 
     def get_all_tool_info(self):

@@ -140,6 +140,13 @@ class BashLimitRegistry:
 # ----------------------------------------------------------------------- the checks
 
 
+def _same_folder(a: str, b: str) -> bool:
+    """Whether *a* and *b* are absolute paths resolving to the same directory."""
+    if not is_absolute_folder(a) or not is_absolute_folder(b):
+        return False
+    return os.path.normcase(os.path.realpath(a)) == os.path.normcase(os.path.realpath(b))
+
+
 def path_problems(path_value: str | None) -> list[str]:
     """Why a ``PATH`` is not safe for Auto. An entry that is empty or relative means the
     project folder to the shell: a file there can answer to a command name such as ``git``,
@@ -657,15 +664,29 @@ class AutoSession:
         name = str(event.toolName)
         origin = getattr(event, "origin", None)
         origin_cwd: str | None = None
+        codemode_parent_id: str | None = None
         if origin:
             if not isinstance(origin, Mapping) or origin.get("kind") not in (
                 "subagent",
                 "codemode",
             ):
                 return _ask(Reason.UNCLEAR, "session.unknown_origin", by="floor")
+            kind = origin.get("kind")
             cwd = origin.get("cwd")
             if not isinstance(cwd, str) or not cwd:
-                return _ask(Reason.UNCLEAR, "session.subagent_without_cwd", by="floor")
+                rule = (
+                    "session.codemode_without_cwd"
+                    if kind == "codemode"
+                    else "session.subagent_without_cwd"
+                )
+                return _ask(Reason.UNCLEAR, rule, by="floor")
+            if kind == "codemode":
+                if not await asyncio.to_thread(_same_folder, cwd, str(self._harness.env.cwd)):
+                    return _ask(Reason.UNCLEAR, "session.codemode_cwd_mismatch", by="floor")
+                parent_id = origin.get("parent_call_id")
+                if not isinstance(parent_id, str) or not parent_id:
+                    return _ask(Reason.UNCLEAR, "session.codemode_without_parent", by="floor")
+                codemode_parent_id = parent_id
             origin_cwd = cwd
         await self._ensure_checked()
         # Keep the harness's batches in order, also for a tool that came later (an extension).
@@ -676,6 +697,8 @@ class AutoSession:
             # An earlier call of this message has not finished: the harness runs this batch
             # in parallel (Auto was switched on while it was being prepared). This call would
             # be judged on files that the earlier one may still change.
+            return _ask(Reason.UNCLEAR, "session.parallel_batch", by="floor")
+        if codemode_parent_id is not None and self._other_calls_open(codemode_parent_id):
             return _ask(Reason.UNCLEAR, "session.parallel_batch", by="floor")
         tool = self._harness.get_tool(name)
         call = ToolCall(

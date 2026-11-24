@@ -52,7 +52,11 @@ def create_tool_search_tool(pi: ExtensionAPI) -> ToolDefinition:
         signal: Any | None = None,
         on_update: Any | None = None,
     ) -> AgentToolResult:
-        tools = [t for t in pi.get_all_tools() if t.name not in FORBIDDEN_INNER_TOOLS]
+        tools = [
+            t
+            for t in pi.get_all_tools()
+            if t.name not in FORBIDDEN_INNER_TOOLS and (t.active or t.deferred)
+        ]
         q = params.query.strip()
         pattern: re.Pattern[str] | None = None
         if len(q) >= 2 and q.startswith("/") and q.endswith("/"):

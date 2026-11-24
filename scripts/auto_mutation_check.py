@@ -1930,6 +1930,27 @@ WIRING_MUTATIONS: list[Mutation] = [
         tests=(_CLI_TESTS + "test_codemode_auto_and_acp.py",),
     ),
     w(
+        "fail closed: a codemode call from another folder is judged",
+        _AUTO_MODE,
+        '            if kind == "codemode":\n                if not await asyncio.to_thread(_same_folder, cwd, str(self._harness.env.cwd)):',
+        '            if kind == "codemode":\n                if False:',
+        tests=(_CLI_TESTS + "test_codemode_auto_and_acp.py",),
+    ),
+    w(
+        "fail closed: a codemode call without parent_call_id is judged",
+        _AUTO_MODE,
+        "                if not isinstance(parent_id, str) or not parent_id:\n",
+        "                if False:\n",
+        tests=(_CLI_TESTS + "test_codemode_auto_and_acp.py",),
+    ),
+    w(
+        "one by one: a codemode call ignores other open calls of its message",
+        _AUTO_MODE,
+        "        if codemode_parent_id is not None and self._other_calls_open(codemode_parent_id):\n",
+        "        if False:\n",
+        tests=(_CLI_TESTS + "test_codemode_auto_and_acp.py",),
+    ),
+    w(
         "fail closed: a sub-agent without a folder is judged",
         _AUTO_MODE,
         "            if not isinstance(cwd, str) or not cwd:",

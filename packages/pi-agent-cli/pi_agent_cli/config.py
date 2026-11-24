@@ -222,7 +222,7 @@ class CodemodeConfig:
     enabled: bool = True
     mode: CodemodeMode = "hybrid"
     defer_mcp: bool = True
-    require_approval: bool = False
+    require_approval: bool = True
     timeout_seconds: float = DEFAULT_CODEMODE_TIMEOUT_SECONDS
     max_tool_calls: int = DEFAULT_CODEMODE_MAX_TOOL_CALLS
     max_output_kb: int = DEFAULT_CODEMODE_MAX_OUTPUT_KB
@@ -762,7 +762,7 @@ def _codemode_config(value: object) -> CodemodeConfig:
 
     enabled = _bool_opt("enabled", True)
     defer_mcp = _bool_opt("defer_mcp", True)
-    require_approval = _bool_opt("require_approval", False)
+    require_approval = _bool_opt("require_approval", True)
 
     mode: CodemodeMode = "hybrid"
     raw_mode = value.get("mode")

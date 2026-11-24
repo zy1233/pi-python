@@ -131,3 +131,52 @@ class TestMcpDeferredWithCodemode:
             assert "mcp__mock__echo" in offered[0]
         finally:
             await harness2.close()
+
+    async def test_deferred_exposure_requires_active_discovery_tool(
+        self, monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture
+    ) -> None:
+        monkeypatch.setenv("PI_MCP_EXPOSURE", "deferred")
+        offered: list[list[str]] = []
+
+        async def llm(model: Model, context: LlmContext, options: StreamOptions | None = None):
+            offered.append([t.name for t in context.tools])
+            return await mock_text_stream(model, context, options)
+
+        # Even when PI_MCP_EXPOSURE=deferred, without codemode/tool_search MCP tools stay direct
+        with caplog.at_level("WARNING"):
+            harness_no_disc = await _make_harness(extensions=[pi_mcp.activate], stream_fn=llm)
+            try:
+                await harness_no_disc.prompt("go")
+                assert "mcp__mock__echo" in offered[0]
+                assert "mcp__mock__echo" not in harness_no_disc.deferred_tool_names
+                assert "neither codemode nor tool_search is active" in caplog.text
+            finally:
+                await harness_no_disc.close()
+
+        # When codemode is disabled via settings, PI_MCP_EXPOSURE=deferred also keeps MCP direct
+        offered.clear()
+        harness_disabled = await _make_harness(
+            extensions=[pi_codemode.activate, pi_mcp.activate],
+            stream_fn=llm,
+            codemode_settings={"enabled": False},
+        )
+        try:
+            await harness_disabled.prompt("go")
+            assert "mcp__mock__echo" in offered[0]
+            assert "mcp__mock__echo" not in harness_disabled.deferred_tool_names
+        finally:
+            await harness_disabled.close()
+
+        # When codemode IS active, PI_MCP_EXPOSURE=deferred defers even with defer_mcp=False
+        offered.clear()
+        harness_deferred = await _make_harness(
+            extensions=[pi_codemode.activate, pi_mcp.activate],
+            stream_fn=llm,
+            codemode_settings={"defer_mcp": False},
+        )
+        try:
+            await harness_deferred.prompt("go")
+            assert "mcp__mock__echo" not in offered[0]
+            assert "mcp__mock__echo" in harness_deferred.deferred_tool_names
+        finally:
+            await harness_deferred.close()

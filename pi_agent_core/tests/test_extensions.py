@@ -380,10 +380,10 @@ class _ClientStubs:
     def add_turn_barrier(self, wait: Any) -> None:
         pass
 
-    def activate_tools(self, names: Any) -> list[str]:
+    def activate_tools(self, names: Any, *, undefer: bool = False) -> list[str]:
         return []
 
-    def deactivate_tools(self, names: Any) -> list[str]:
+    def deactivate_tools(self, names: Any, *, defer: bool = False) -> list[str]:
         return []
 
     async def invoke_tool(

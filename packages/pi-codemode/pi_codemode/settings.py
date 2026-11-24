@@ -24,7 +24,7 @@ class CodemodeSettings:
     enabled: bool = True
     mode: CodemodeMode = "hybrid"
     defer_mcp: bool = True
-    require_approval: bool = False
+    require_approval: bool = True
     timeout_seconds: float = DEFAULT_TIMEOUT_SECONDS
     max_tool_calls: int = DEFAULT_MAX_TOOL_CALLS
     max_output_kb: int = DEFAULT_MAX_OUTPUT_KB
@@ -38,7 +38,7 @@ class CodemodeSettings:
         mode: CodemodeMode = mode_raw if mode_raw in ("hybrid", "only") else "hybrid"
         defer_mcp = raw["defer_mcp"] if isinstance(raw.get("defer_mcp"), bool) else True
         require_approval = (
-            raw["require_approval"] if isinstance(raw.get("require_approval"), bool) else False
+            raw["require_approval"] if isinstance(raw.get("require_approval"), bool) else True
         )
         timeout_raw = raw.get("timeout_seconds", DEFAULT_TIMEOUT_SECONDS)
         if (

@@ -63,5 +63,6 @@ Environment variables only:
 |----------|---------|---------|
 | `PI_MCP_STARTUP_TIMEOUT` | 60 | Seconds a server may take to start. Then it counts as failed. |
 | `PI_MCP_CALL_TIMEOUT` | 120 | Seconds a tool call may take. |
+| `PI_MCP_EXPOSURE` | auto | Tool exposure mode: `auto` (defer when `codemode`/`tool_search` is active and `[codemode] defer_mcp` is enabled), `direct`, or `deferred` (falls back to `direct` if no discovery tool is active). |
 
 The design is in `docs/specs/2026-10-23-mcp-extension-design.md` of the repository.

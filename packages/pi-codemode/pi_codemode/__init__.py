@@ -32,15 +32,36 @@ class _Controller:
         self.mode: SessionMode = settings.mode if settings.enabled else "off"
         self.tools_registered = False
         self.saved_before_only: list[str] | None = None
+        self._deferred_by_only: set[str] = set()
         self.runtime = CodemodeRuntime(pi, lambda: self.settings)
+
+    def _restore_hidden_tools(self) -> None:
+        if not self.saved_before_only:
+            self._deferred_by_only.clear()
+            return
+        known = {t.name for t in self.pi.get_all_tools()}
+        restore = [n for n in self.saved_before_only if n in known]
+        to_undefer = [n for n in restore if n in self._deferred_by_only]
+        others = [n for n in restore if n not in self._deferred_by_only]
+        if to_undefer:
+            self.pi.activate_tools(to_undefer, undefer=True)
+        if others:
+            self.pi.activate_tools(others)
+        self._deferred_by_only.clear()
+        self.saved_before_only = None
 
     def ensure_tools_registered(self, *, refresh_description: bool = False) -> None:
         if self.tools_registered and not refresh_description:
             return
-        desc = build_codemode_description(self.pi) if self.tools_registered else None
+        direct_names = frozenset(self.saved_before_only or ())
+        desc = (
+            build_codemode_description(self.pi, direct_names=direct_names)
+            if self.tools_registered
+            else None
+        )
         if not self.tools_registered:
             try:
-                desc = build_codemode_description(self.pi)
+                desc = build_codemode_description(self.pi, direct_names=direct_names)
             except Exception:
                 desc = None
         self.pi.register_tool(
@@ -62,27 +83,19 @@ class _Controller:
         if new_mode == "off":
             if self.tools_registered:
                 self.pi.deactivate_tools(["codemode", "tool_search"])
-            if self.saved_before_only:
-                known = {t.name for t in self.pi.get_all_tools()}
-                restore = [n for n in self.saved_before_only if n in known]
-                if restore:
-                    self.pi.activate_tools(restore)
-                self.saved_before_only = None
+            self._restore_hidden_tools()
             deferred = [t.name for t in self.pi.get_all_tools() if t.deferred and not t.active]
             if deferred:
                 self.pi.activate_tools(deferred)
         elif new_mode == "hybrid":
             self.ensure_tools_registered(refresh_description=True)
             self.pi.activate_tools(["codemode", "tool_search"])
-            if self.saved_before_only:
-                known = {t.name for t in self.pi.get_all_tools()}
-                restore = [n for n in self.saved_before_only if n in known]
-                if restore:
-                    self.pi.activate_tools(restore)
-                self.saved_before_only = None
+            self._restore_hidden_tools()
+            self.ensure_tools_registered(refresh_description=True)
         elif new_mode == "only":
             self.ensure_tools_registered(refresh_description=True)
             self.pi.activate_tools(["codemode", "tool_search"])
+            all_by_name = {t.name: t for t in self.pi.get_all_tools()}
             active = self.pi.get_active_tools()
             to_hide = [name for name in active if name not in _META_TOOLS]
             if to_hide:
@@ -91,7 +104,11 @@ class _Controller:
                 else:
                     existing = set(self.saved_before_only)
                     self.saved_before_only.extend(n for n in to_hide if n not in existing)
-                self.pi.deactivate_tools(to_hide)
+                self._deferred_by_only.update(
+                    n for n in to_hide if n in all_by_name and not all_by_name[n].deferred
+                )
+                self.pi.deactivate_tools(to_hide, defer=True)
+            self.ensure_tools_registered(refresh_description=True)
 
         if persist and new_mode != previous:
             self.pi.append_entry(MODE_ENTRY_TYPE, {"mode": new_mode})
@@ -140,6 +157,8 @@ def activate(pi: ExtensionAPI) -> None:
         controller.tools_registered = True
 
     def on_session_start(_event: Any) -> None:
+        if not controller.settings.enabled:
+            return
         restored: SessionMode | None = None
         for entry in pi.get_custom_entries(MODE_ENTRY_TYPE):
             data = getattr(entry, "data", None)

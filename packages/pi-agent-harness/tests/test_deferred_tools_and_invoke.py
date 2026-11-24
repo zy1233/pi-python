@@ -10,6 +10,7 @@ from pydantic import BaseModel, ValidationError
 
 from pi_agent_core.extensions import ExtensionAPI, ExtensionMeta, ExtensionRegistry, ToolDefinition
 from pi_agent_core.tests.mock_stream import mock_text_stream
+from pi_agent_core.tools import SimpleTool
 from pi_agent_core.types import AgentToolResult, LlmContext, Model, StreamOptions
 from pi_agent_harness import AgentHarness, MemorySessionStorage, Session
 from pi_agent_harness.types import AgentHarnessError
@@ -240,3 +241,167 @@ class TestInvokeTool:
         with pytest.raises(RuntimeError, match="aborted"):
             await pi.invoke_tool("cm-2:2", "target", {"msg": "x"}, signal=_Sig())
         assert executed is False
+
+    async def test_invoke_tool_refuses_disabled_tools_and_supports_defer_undefer(self) -> None:
+        captured: dict[str, Any] = {}
+
+        def extension(pi: ExtensionAPI) -> None:
+            captured["pi"] = pi
+
+            async def run_eager(_id, params: _EchoParams, _sig, _upd):
+                return AgentToolResult(content=[{"type": "text", "text": f"e:{params.msg}"}])
+
+            async def run_lazy(_id, params: _EchoParams, _sig, _upd):
+                return AgentToolResult(content=[{"type": "text", "text": f"l:{params.msg}"}])
+
+            pi.register_tool(
+                ToolDefinition(
+                    name="eager_tool",
+                    description="Eager",
+                    parameters=_EchoParams,
+                    execute=run_eager,
+                )
+            )
+            pi.register_tool(
+                ToolDefinition(
+                    name="other_tool",
+                    description="Other active tool",
+                    parameters=_EchoParams,
+                    execute=run_eager,
+                )
+            )
+            pi.register_tool(
+                ToolDefinition(
+                    name="lazy_tool",
+                    description="Lazy",
+                    parameters=_EchoParams,
+                    execute=run_lazy,
+                    deferred=True,
+                )
+            )
+
+        harness = AgentHarness(
+            session=await _session("invoke-disabled"),
+            model=Model(provider="mock", model_id="m1"),
+            stream_fn=mock_text_stream,
+            extensions=[extension],
+        )
+        await harness.load_extensions()
+        pi: ExtensionAPI = captured["pi"]
+
+        # Deferred tool is callable via invoke_tool
+        res_lazy = await pi.invoke_tool("cm-d:1", "lazy_tool", {"msg": "ok"})
+        assert res_lazy.content[0]["text"] == "l:ok"
+
+        # Tool disabled via set_active_tools cannot be called via invoke_tool
+        await harness.set_active_tools(["other_tool"])
+        with pytest.raises(PermissionError, match="disabled in this session"):
+            await pi.invoke_tool("cm-d:2", "eager_tool", {"msg": "blocked"})
+        # Deferred tool remains callable while excluded from active_tool_names
+        res_lazy2 = await pi.invoke_tool("cm-d:3", "lazy_tool", {"msg": "still"})
+        assert res_lazy2.content[0]["text"] == "l:still"
+
+        # Restore eager_tool, hide with defer=True (stays callable), then undefer=True
+        await harness.set_active_tools(["eager_tool", "other_tool"])
+        pi.deactivate_tools(["eager_tool"], defer=True)
+        assert "eager_tool" in harness.deferred_tool_names
+        assert (await pi.invoke_tool("cm-d:4", "eager_tool", {"msg": "hidden"})).content[0][
+            "text"
+        ] == "e:hidden"
+
+        pi.activate_tools(["eager_tool"], undefer=True)
+        pi.deactivate_tools(["eager_tool"])
+        assert "eager_tool" not in harness.deferred_tool_names
+        with pytest.raises(PermissionError, match="disabled in this session"):
+            await pi.invoke_tool("cm-d:5", "eager_tool", {"msg": "now-disabled"})
+
+    async def test_invoke_tool_runs_tool_result_hooks_and_prunes_stale_deferred_on_set_tools(
+        self,
+    ) -> None:
+        captured: dict[str, Any] = {}
+        seen_result_events: list[Any] = []
+
+        def extension(pi: ExtensionAPI) -> None:
+            captured["pi"] = pi
+
+            async def run_target(_id, params: _EchoParams, _sig, _upd):
+                return AgentToolResult(
+                    content=[{"type": "text", "text": f"raw:{params.msg}"}],
+                    details={"raw": True},
+                )
+
+            pi.register_tool(
+                ToolDefinition(
+                    name="target",
+                    description="Target",
+                    parameters=_EchoParams,
+                    execute=run_target,
+                )
+            )
+            pi.register_tool(
+                ToolDefinition(
+                    name="old_lazy",
+                    description="Old deferred",
+                    parameters=_EchoParams,
+                    execute=run_target,
+                    deferred=True,
+                )
+            )
+
+        harness = AgentHarness(
+            session=await _session("invoke-hook"),
+            model=Model(provider="mock", model_id="m1"),
+            stream_fn=mock_text_stream,
+            extensions=[extension],
+        )
+
+        def patch_result(event: Any) -> dict[str, Any]:
+            seen_result_events.append(event)
+            return {
+                "content": [{"type": "text", "text": "redacted"}],
+                "details": {"patched": True},
+                "isError": True,
+            }
+
+        harness.on("tool_result", patch_result)
+        await harness.load_extensions()
+        pi: ExtensionAPI = captured["pi"]
+
+        patched = await pi.invoke_tool(
+            "cm-r:1", "target", {"msg": "secret"}, origin={"kind": "codemode"}
+        )
+        assert len(seen_result_events) == 1
+        assert seen_result_events[0].toolCallId == "cm-r:1"
+        assert seen_result_events[0].toolName == "target"
+        assert patched.content == [{"type": "text", "text": "redacted"}]
+        assert patched.details == {"patched": True, "isError": True}
+
+        # set_tools() removes stale deferred names that are no longer registered
+        assert "old_lazy" in harness.deferred_tool_names
+        replacement = SimpleTool(
+            name="replacement",
+            description="Replacement",
+            label="replacement",
+            parameters=_EchoParams,
+            execute_fn=lambda _id, _p, _s, _u: AgentToolResult(
+                content=[{"type": "text", "text": "ok"}]
+            ),
+        )
+        await harness.set_tools([replacement], active_tool_names=["replacement"])
+        assert harness.deferred_tool_names == []
+
+        readded = SimpleTool(
+            name="old_lazy",
+            description="Readded eager",
+            label="old_lazy",
+            parameters=_EchoParams,
+            execute_fn=lambda _id, _p, _s, _u: AgentToolResult(
+                content=[{"type": "text", "text": "ok"}]
+            ),
+        )
+        await harness.set_tools(
+            [replacement, readded], active_tool_names=["replacement", "old_lazy"]
+        )
+        assert harness.deferred_tool_names == []
+        await harness.set_active_tools(["replacement"])
+        assert harness.deferred_tool_names == []

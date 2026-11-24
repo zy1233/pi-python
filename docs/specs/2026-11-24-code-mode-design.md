@@ -347,8 +347,8 @@ ACP client (zypi / vscode / Zed): 单条 ToolCallStart -> 节流 progress 更新
 因此，本设计确立如下双层契约：
 
 1. **外层 `codemode` 与 `tool_search` 的声明**：
-   - **默认配置（`[codemode] require_approval = false`）**：`codemode` 启动的仅是一个受限计算沙盒，其本身不直接读写磁盘或联网，所有外部副作用都必须通过内层 `tools.*` 经过宿主门控，因此 `codemode` 默认声明 `ToolAnnotations(destructiveHint=False, openWorldHint=False)`（在 `ask` 与 `auto` 下免去外层冗余弹窗，严格满足 Rule A0 单调性：`ask` 免问则 `auto` 必免问）。
-   - **保守开关（`[codemode] require_approval = true`）**：为高敏环境提供配置选项；开启后 `codemode.annotations = None`，在 `ask` 与 `auto` 模式下每次执行脚本前先弹一次外层确认。
+   - **默认配置（`[codemode] require_approval = true`，PR #147 评审后收紧）**：与 `workflow` 及 `AGENTS.md` 不变量 8 一致，`codemode` 运行在同一套子进程沙箱（audit hook 仅作速度栏，OS 内核层在不同平台存在已记录边界），因此默认不声明 `annotations`（`None`），在 `ask` 与 `auto` 下每次运行脚本前先向用户确认，避免绕过内层门控的风险；内层每一次 `tools.*` 调用仍同步经宿主 `invoke_tool` 逐条审查。
+   - **可选静默外层（`[codemode] require_approval = false`）**：若用户已运行在 `zypi --sandbox`、容器或 VM 等强边界中，可在 `~/.pi-python/agent.toml` 显式设为 `false`，外层 `codemode` 将声明 `ToolAnnotations(destructiveHint=False, openWorldHint=False)` 从而在 `ask` / `auto` 下免去外层确认，仅由内层逐条门控。
    - **`tool_search`**：声明 `ToolAnnotations(readOnlyHint=True, destructiveHint=False, openWorldHint=False)`，`ask` 与 `auto` 下均直接放行。
 2. **内层每一次工具调用的运行期实时门控**：
    - 脚本运行到 `await tools.<name>(args)` 时，所有表达式和变量**已经在沙盒内求值成具体字面量**，作为确定性 JSON 载荷到达宿主 `_CodemodeHost`。
@@ -484,7 +484,7 @@ enabled = true             # true | false（见 §11 D2 默认值评审项）
 mode = "hybrid"            # "hybrid": 保留常用内置工具直接调用 + codemode
                            # "only": 除 codemode 与元工具外，将常规工具转为仅在 codemode 内调用
 defer_mcp = true           # codemode 启用时，MCP 工具默认走 deferred 延迟加载
-require_approval = false   # true: ask/auto 模式下每次执行 codemode 脚本前额外确认一次
+require_approval = true    # 默认 true：ask/auto 下每次执行 codemode 脚本前确认（可选设为 false 免外层弹窗）
 timeout_seconds = 120      # 单次脚本墙钟上限（1..600 秒）
 max_tool_calls = 100       # 单次脚本最大内部工具调用次数（1..500）
 max_output_kb = 64         # 返回给模型的文本上限（4..512 KiB）
@@ -530,7 +530,7 @@ max_output_kb = 64         # 返回给模型的文本上限（4..512 KiB）
 |---|---|---|---|---|
 | **D1** | 脚本语言与沙盒引擎 | **Python + 共享 `pi_agent_core.sandbox`（`pi-sandbox-child`）** | JS/QuickJS（`python-quickjs-ng`）或 `pydantic-monty` | 与仓库全 Python 工具生态一致；复用已验证的 5 平台内核/低完整性/审计钩子沙盒；零新增第三方原生轮子与打包体积 |
 | **D2** | 默认启用策略 | **默认启用（`enabled = true, mode = "hybrid"`）** | 默认关闭（`enabled = false`，opt-in） | 开箱即用对齐 Pi 1.0 体验，同时保留传统工具直调避免弱模型不适应；若倾向极度保守可改为默认 `false` |
-| **D3** | 外层 `codemode` 权限声明 | **默认 `require_approval = false`（外层免问，内层逐条门控）** | 默认 `require_approval = true`（每次运行脚本先弹外层确认） | 保证只读多步编排在 `ask`/`auto` 下零打扰（Rule A0）；真实副作用均由内层 `invoke_tool` 把关；提供配置供高敏用户一键开启外层确认 |
+| **D3** | 外层 `codemode` 权限声明 | **默认 `require_approval = true`（对齐 `workflow` 与不变量 8/9c）** | 默认 `require_approval = false`（外层免问，内层逐条门控） | PR #147 评审确认：子进程 PEP 578 audit hook 仅作速度栏且各平台内核限制存在差异，默认不声明免问 `annotations`，在 `ask`/`auto` 下先确认外层脚本并保留内层 `invoke_tool` 逐条实时审查；处于容器/sandbox 环境的用户可显式设为 `require_approval = false` |
 | **D4** | Auto 模式审查机制 | **运行期对已求值实参逐条同步审查 + 内层非只读调用串行锁** | 学 Claude Code 执行前对源码跑静态模型分类器 | 从架构上彻底根除 Claude Code 的「运行期动态值盲区」，完全复用现有规则地板、模型裁判与 `BashLimitRegistry`（不变量 9b、9d） |
 | **D5** | MCP 工具延迟暴露 | **`codemode` 启用时默认 `defer_mcp = true`** | 默认全量直接暴露 | 解决多 MCP server schema 撑爆上下文痛点，配合 `search_tools` / `tool_search` 按需发现 |
 | **D6** | 跨轮次状态模型 | **单次无状态调用（每次干净函数体）** | 跨轮次持久化内存 REPL 会话 | 与会话 JSONL 树 `navigate_tree` / `session/resume` / 重放完全一致，不引入隐式脏状态 |

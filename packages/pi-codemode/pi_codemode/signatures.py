@@ -6,6 +6,7 @@ import keyword
 import re
 from collections import Counter
 from collections.abc import Mapping, Sequence
+from collections.abc import Set as AbstractSet
 from typing import TYPE_CHECKING, Any
 
 if TYPE_CHECKING:
@@ -112,6 +113,8 @@ def build_tools_catalog(tools: Sequence[ToolInfo]) -> dict[str, dict[str, Any]]:
     for info in tools:
         if info.name in FORBIDDEN_INNER_TOOLS:
             continue
+        if not info.active and not info.deferred:
+            continue
         call_name = normalize_tool_identifier(info.name, taken)
         read_only = is_harmless_annotations(info.annotations)
         params = dict(info.parameters) if isinstance(info.parameters, Mapping) else {}
@@ -150,20 +153,23 @@ def group_deferred_namespaces(names: Sequence[str]) -> list[tuple[str, int]]:
     return sorted(counts.items())
 
 
-def render_codemode_description(tools: Sequence[ToolInfo]) -> str:
+def render_codemode_description(
+    tools: Sequence[ToolInfo], *, direct_names: AbstractSet[str] = frozenset()
+) -> str:
     """Build a concise ``codemode`` tool description with direct stubs & deferred counts."""
     catalog = build_tools_catalog(tools)
     direct_lines: list[str] = []
     deferred_names: list[str] = []
     for name, entry in catalog.items():
-        if entry["deferred"] and not entry["active"]:
+        if entry["deferred"] and not entry["active"] and name not in direct_names:
             deferred_names.append(name)
         else:
             direct_lines.append(f"- {entry['signature']}")
 
     lines = [
-        "Execute an async Python script inside an isolated sandbox to orchestrate multiple "
-        "tools, filter large outputs locally, and return only the distilled result.",
+        "Execute an async Python script in a sandboxed child process (resource limits and "
+        "audit hook) to orchestrate multiple tools, filter large outputs locally, and return "
+        "only the distilled result.",
         "Pass raw Python code without markdown fences (supports top-level `await`, `return`, "
         "or a trailing expression).",
         "",

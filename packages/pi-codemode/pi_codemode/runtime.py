@@ -24,7 +24,6 @@ from pi_codemode.settings import CodemodeSettings
 from pi_codemode.signatures import (
     FORBIDDEN_INNER_TOOLS,
     build_tools_catalog,
-    is_harmless_annotations,
 )
 
 if TYPE_CHECKING:
@@ -50,17 +49,18 @@ class ToolPermissionError(ToolError):
 
 
 class _GateLock:
-    """Allows parallel harmless calls when sequential policy is off; serializes mutating calls."""
+    """Writer-preferring RW lock for inner tool gating under parallel vs sequential policies."""
 
     def __init__(self) -> None:
         self._cond = asyncio.Condition()
         self._readers = 0
         self._writer = False
+        self._waiting_writers = 0
 
     @contextlib.asynccontextmanager
     async def reader(self) -> AsyncIterator[None]:
         async with self._cond:
-            while self._writer:
+            while self._writer or self._waiting_writers > 0:
                 await self._cond.wait()
             self._readers += 1
         try:
@@ -74,9 +74,17 @@ class _GateLock:
     @contextlib.asynccontextmanager
     async def writer(self) -> AsyncIterator[None]:
         async with self._cond:
-            while self._writer or self._readers > 0:
-                await self._cond.wait()
-            self._writer = True
+            self._waiting_writers += 1
+            acquired = False
+            try:
+                while self._writer or self._readers > 0:
+                    await self._cond.wait()
+                self._writer = True
+                acquired = True
+            finally:
+                self._waiting_writers -= 1
+                if not acquired:
+                    self._cond.notify_all()
         try:
             yield
         finally:
@@ -198,7 +206,7 @@ class _CodemodeHost:
             "cwd": self._cwd,
             "parent_call_id": self._outer_call_id,
         }
-        harmless = bool(entry.get("read_only")) or is_harmless_annotations(None)
+        harmless = bool(entry.get("read_only"))
         need_exclusive = (not harmless) or self._pi.is_sequential_tool_policy
 
         arg_preview = _summarize_args(args)

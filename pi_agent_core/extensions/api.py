@@ -155,13 +155,26 @@ class ExtensionAPI:
         """Change the active tool set."""
         self._require_bridge().set_active_tool_names(names)
 
-    def activate_tools(self, names: Iterable[str]) -> list[str]:
-        """Enable registered (including deferred) tools in ``active_tool_names``."""
-        return self._require_bridge().activate_tools(list(names))
+    def activate_tools(self, names: Iterable[str], *, undefer: bool = False) -> list[str]:
+        """Enable registered (including deferred) tools in ``active_tool_names``.
 
-    def deactivate_tools(self, names: Iterable[str]) -> list[str]:
-        """Remove tools from ``active_tool_names`` while keeping them registered."""
-        return self._require_bridge().deactivate_tools(list(names))
+        When *undefer* is True, also clears the deferred mark on the activated names.
+        """
+        bridge = self._require_bridge()
+        if undefer:
+            return bridge.activate_tools(list(names), undefer=True)
+        return bridge.activate_tools(list(names))
+
+    def deactivate_tools(self, names: Iterable[str], *, defer: bool = False) -> list[str]:
+        """Remove tools from ``active_tool_names`` while keeping them registered.
+
+        When *defer* is True, marks those tools as deferred so they remain callable via
+        ``invoke_tool`` / ``codemode``.
+        """
+        bridge = self._require_bridge()
+        if defer:
+            return bridge.deactivate_tools(list(names), defer=True)
+        return bridge.deactivate_tools(list(names))
 
     def get_all_tools(self) -> list[ToolInfo]:
         """All registered tools (built-in + extension) with metadata."""

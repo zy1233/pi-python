@@ -15,10 +15,12 @@ sub-agents that can run ``bash`` / ``edit`` / ``write`` themselves. Their tool c
 asked about individually (the harness bridge's ``tool_call_gate``), not covered by allowing
 the workflow.
 
-``codemode`` declares itself harmless by default (unless ``[codemode] require_approval = true``)
-because every inner ``tools.*`` call executes on the host via ``AgentHarness.invoke_tool`` and
-passes through this same permission & Auto gate with concrete runtime arguments
-(``origin = {"kind": "codemode", "cwd": ...}``).
+``codemode`` declares no annotations by default (``[codemode] require_approval = true``),
+matching ``workflow`` and invariant 8: ``ask`` and ``auto`` confirm before running an outer
+script. When a user opts into ``require_approval = false``, the outer call declares
+``destructiveHint: false, openWorldHint: false`` and every inner ``tools.*`` call still passes
+individually through ``AgentHarness.invoke_tool`` → ``check_tool_call`` with concrete runtime
+arguments (``origin = {"kind": "codemode", "cwd": ...}``).
 """
 
 from __future__ import annotations

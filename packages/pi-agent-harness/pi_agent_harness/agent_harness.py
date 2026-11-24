@@ -573,12 +573,21 @@ class AgentHarness:
         except RuntimeError:
             pass
 
-    def activate_tools(self, names: Iterable[str]) -> list[str]:
-        """Add registered tools to ``active_tool_names`` (returning newly activated names)."""
+    def activate_tools(self, names: Iterable[str], *, undefer: bool = False) -> list[str]:
+        """Add registered tools to ``active_tool_names`` (returning newly activated names).
+
+        When *undefer* is True, also clears any deferred mark on *names* so re-deactivating
+        them later leaves them disabled rather than deferred.
+        """
         requested = list(names)
         unknown = [n for n in requested if n not in self._tools]
         if unknown:
             raise ValueError(f"Unknown tool(s): {unknown}")
+        if undefer:
+            had_deferred = any(n in self._deferred_tool_names for n in requested)
+            self._deferred_tool_names.difference_update(requested)
+            if had_deferred:
+                self.invalidate_system_prompt_cache()
         current = set(self.active_tool_names)
         added: list[str] = []
         for n in requested:
@@ -589,9 +598,23 @@ class AgentHarness:
             self._set_active_tools_sync([*self.active_tool_names, *added])
         return added
 
-    def deactivate_tools(self, names: Iterable[str]) -> list[str]:
-        """Remove tools from ``active_tool_names`` while keeping them in ``_tools``."""
-        to_remove = set(names)
+    def deactivate_tools(self, names: Iterable[str], *, defer: bool = False) -> list[str]:
+        """Remove tools from ``active_tool_names`` while keeping them in ``_tools``.
+
+        When *defer* is True, marks the removed tools as deferred (remaining discoverable and
+        callable via ``invoke_tool``). Without *defer*, a non-deferred tool removed from
+        ``active_tool_names`` becomes disabled to ``invoke_tool``.
+        """
+        requested = list(names)
+        if defer:
+            unknown = [n for n in requested if n not in self._tools]
+            if unknown:
+                raise ValueError(f"Unknown tool(s): {unknown}")
+            before = len(self._deferred_tool_names)
+            self._deferred_tool_names.update(requested)
+            if len(self._deferred_tool_names) != before:
+                self.invalidate_system_prompt_cache()
+        to_remove = set(requested)
         removed = [n for n in self.active_tool_names if n in to_remove]
         if removed:
             self._set_active_tools_sync([n for n in self.active_tool_names if n not in to_remove])
@@ -616,10 +639,18 @@ class AgentHarness:
         signal: Any | None = None,
         on_update: Any | None = None,
     ) -> AgentToolResult:
-        """Invoke a registered tool (active or deferred) through validation and policy gates."""
+        """Invoke an enabled tool (active or deferred) through validation, policy, and result hooks.
+
+        Runs ``prepare_arguments``, ``validate_tool_arguments``, ``tool_call`` hooks (via
+        ``check_tool_call``), ``tool.execute``, and ``tool_result`` hooks. Deliberately omits
+        top-level ``tool_execution_start`` / ``tool_execution_update`` / ``tool_execution_end``
+        loop events because the caller (e.g. ``codemode``) owns its own nested progress stream.
+        """
         tool = self._tools.get(tool_name)
         if tool is None:
             raise KeyError(f"Tool {tool_name!r} not found")
+        if tool_name not in self.active_tool_names and tool_name not in self._deferred_tool_names:
+            raise PermissionError(f"Tool {tool_name!r} is disabled in this session")
         if not isinstance(args, dict):
             raise TypeError("Tool arguments must be a dict")
 
@@ -653,7 +684,56 @@ class AgentHarness:
         if signal and getattr(signal, "aborted", False):
             raise RuntimeError("Operation aborted")
 
-        return await tool.execute(tool_call_id, validated_args, signal, on_update)
+        tool_result = await tool.execute(tool_call_id, validated_args, signal, on_update)
+        raw_details = getattr(tool_result, "details", None)
+        is_error = bool(
+            isinstance(raw_details, Mapping)
+            and (raw_details.get("isError") is True or raw_details.get("is_error") is True)
+        )
+        hook_patch = await self._emit_hook(
+            ToolResultEvent(
+                toolCallId=tool_call_id,
+                toolName=tool_name,
+                input=validated_dict,
+                content=list(getattr(tool_result, "content", None) or []),
+                details=raw_details,
+                isError=is_error,
+            )
+        )
+        if not hook_patch:
+            return tool_result
+        if isinstance(hook_patch, Mapping):
+            get = hook_patch.get
+        else:
+
+            def get(k: str, default: Any = None) -> Any:
+                return getattr(hook_patch, k, default)
+
+        patched_content = get("content")
+        patched_details = get("details")
+        patched_is_error = get("is_error", get("isError"))
+        final_details = (
+            dict(patched_details)
+            if isinstance(patched_details, Mapping)
+            else (
+                patched_details
+                if patched_details is not None
+                else (dict(raw_details) if isinstance(raw_details, Mapping) else raw_details)
+            )
+        )
+        if patched_is_error is not None:
+            if final_details is None:
+                final_details = {}
+            if isinstance(final_details, dict):
+                final_details["isError"] = bool(patched_is_error)
+        return AgentToolResult(
+            content=(
+                list(patched_content)
+                if patched_content is not None
+                else list(getattr(tool_result, "content", None) or [])
+            ),
+            details=final_details,
+        )
 
     def _create_bridge(self) -> HarnessBridge:
         """Build the ``HarnessBridge`` implementation backed by this harness."""
@@ -678,11 +758,11 @@ class AgentHarness:
             def set_active_tool_names(self, names: list[str]) -> None:
                 harness._set_active_tools_sync(names)
 
-            def activate_tools(self, names: Iterable[str]) -> list[str]:
-                return harness.activate_tools(names)
+            def activate_tools(self, names: Iterable[str], *, undefer: bool = False) -> list[str]:
+                return harness.activate_tools(names, undefer=undefer)
 
-            def deactivate_tools(self, names: Iterable[str]) -> list[str]:
-                return harness.deactivate_tools(names)
+            def deactivate_tools(self, names: Iterable[str], *, defer: bool = False) -> list[str]:
+                return harness.deactivate_tools(names, defer=defer)
 
             def get_all_tool_info(self) -> list[ToolInfo]:
                 active_set = set(harness.active_tool_names)
@@ -1717,6 +1797,7 @@ class AgentHarness:
         previous_tool_names = list(self._tools)
         previous_active = list(self.active_tool_names)
         self._tools = next_tools
+        self._deferred_tool_names &= set(next_tools)
         self.active_tool_names = list(next_active)
         if self.phase == "idle":
             await self.session.append_active_tools_change(self.active_tool_names)

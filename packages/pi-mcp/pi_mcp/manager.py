@@ -16,7 +16,7 @@ from pi_agent_core.extensions import ToolDefinition
 from pi_agent_core.types import AgentTool, AgentToolResult
 from pi_mcp.connection import ServerConnection
 from pi_mcp.errors import ConnectionUnavailable
-from pi_mcp.settings import BARRIER_WAIT, Settings
+from pi_mcp.settings import BARRIER_WAIT, EXPOSURE_ENV, Settings
 from pi_mcp.tools import public_name, shape_result
 from pi_mcp.transport import describe_transport
 
@@ -153,11 +153,29 @@ class Manager:
                 continue
             self._public[key] = name
 
+    def _has_discovery_tool(self) -> bool:
+        get_active = getattr(self._pi, "get_active_tools", None)
+        if not callable(get_active):
+            return False
+        try:
+            active = set(get_active())
+        except Exception:
+            return False
+        return bool(active & {"codemode", "tool_search"})
+
     def _should_defer(self) -> bool:
-        if self._settings.exposure == "deferred":
-            return True
         if self._settings.exposure == "direct":
             return False
+        if not self._has_discovery_tool():
+            if self._settings.exposure == "deferred":
+                logger.warning(
+                    "%s=deferred ignored: neither codemode nor tool_search is active; "
+                    "exposing MCP tools directly so they remain reachable",
+                    EXPOSURE_ENV,
+                )
+            return False
+        if self._settings.exposure == "deferred":
+            return True
         get_settings = getattr(self._pi, "get_settings", None)
         if callable(get_settings):
             try:
@@ -166,13 +184,7 @@ class Manager:
                     return False
             except Exception:
                 pass
-        get_active = getattr(self._pi, "get_active_tools", None)
-        if callable(get_active):
-            try:
-                return "codemode" in set(get_active())
-            except Exception:
-                return False
-        return False
+        return True
 
     @staticmethod
     def _definition(

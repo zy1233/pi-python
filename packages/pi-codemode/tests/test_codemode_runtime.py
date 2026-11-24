@@ -6,7 +6,10 @@ import asyncio
 from typing import Any
 
 import pi_codemode
-from pydantic import BaseModel
+import pytest
+from pi_codemode.codemode_tool import CodemodeParams
+from pi_codemode.runtime import _GateLock
+from pydantic import BaseModel, ValidationError
 
 from pi_agent_core.event_stream import AssistantMessageEventStream
 from pi_agent_core.extensions import ExtensionAPI, ToolDefinition
@@ -279,25 +282,157 @@ return errs
         assert peak >= 2
 
     async def test_output_truncation_and_require_approval_setting(self) -> None:
-        seen_annotations: list[Any] = []
+        # Default require_approval=True leaves outer codemode annotations as None
+        default_annotations: list[Any] = []
+        harness_default = AgentHarness(
+            session=await _session("t5a"),
+            model=_model(),
+            stream_fn=_single_codemode_llm('return "ok"'),
+            extensions=[pi_codemode.activate],
+        )
+        harness_default.on("tool_call", lambda ev: default_annotations.append(ev.annotations))
+        await harness_default.prompt("go")
+        assert default_annotations == [None]
 
+        # Explicit require_approval=False declares outer codemode harmless + truncates output
+        opt_out_annotations: list[Any] = []
         harness2 = AgentHarness(
             session=await _session("t5b"),
             model=_model(),
             stream_fn=_single_codemode_llm('return "A" * 10000'),
         )
         harness2.set_extension_settings(
-            "pi-codemode", {"max_output_kb": 4, "require_approval": True}
+            "pi-codemode", {"max_output_kb": 4, "require_approval": False}
         )
         harness2.load_extension(pi_codemode.activate, name="pi-codemode")
-        harness2.on("tool_call", lambda ev: seen_annotations.append(ev.annotations))
+        harness2.on("tool_call", lambda ev: opt_out_annotations.append(ev.annotations))
         await harness2.prompt("go")
 
-        assert seen_annotations == [None]
+        assert opt_out_annotations == [{"destructiveHint": False, "openWorldHint": False}]
         results = await _tool_results(harness2)
         text_out = results[0].content[0]["text"]
         assert "Output truncated to 4 KiB" in text_out
         assert results[0].details["truncated"] is True
+
+    async def test_disabled_tool_omitted_from_catalog_and_blocked_in_codemode(self) -> None:
+        def ext(pi: ExtensionAPI) -> None:
+            async def run_read(_id, params: _ReadParams, _sig, _upd):
+                return AgentToolResult(content=[{"type": "text", "text": f"r:{params.path}"}])
+
+            async def run_secret(_id, params: _ReadParams, _sig, _upd):
+                return AgentToolResult(content=[{"type": "text", "text": f"s:{params.path}"}])
+
+            pi.register_tool(
+                ToolDefinition(
+                    name="read",
+                    description="Read file",
+                    parameters=_ReadParams,
+                    execute=run_read,
+                    annotations={"readOnlyHint": True},
+                )
+            )
+            pi.register_tool(
+                ToolDefinition(
+                    name="secret_tool",
+                    description="Disabled tool",
+                    parameters=_ReadParams,
+                    execute=run_secret,
+                    annotations={"readOnlyHint": True},
+                )
+            )
+
+        harness = AgentHarness(
+            session=await _session("t-disabled"),
+            model=_model(),
+            stream_fn=_single_codemode_llm(
+                "names = sorted(ALL_TOOLS)\n"
+                "try:\n"
+                '    await call_tool("secret_tool", {"path": "x"})\n'
+                "    err = None\n"
+                "except Exception as exc:\n"
+                "    err = str(exc)\n"
+                'return {"names": names, "err": err}'
+            ),
+            extensions=[ext, pi_codemode.activate],
+        )
+        await harness.load_extensions()
+        await harness.set_active_tools(["read", "codemode", "tool_search"])
+        await harness.prompt("go")
+
+        results = await _tool_results(harness)
+        import json
+
+        payload = json.loads(results[0].content[0]["text"])
+        assert payload["names"] == ["read"]
+        assert "Unknown tool 'secret_tool'" in (payload["err"] or "")
+
+    async def test_gate_lock_prefers_waiting_writers_and_wakes_on_cancel(self) -> None:
+        lock = _GateLock()
+        events: list[str] = []
+
+        async with lock.reader():
+            writer_started = asyncio.Event()
+            writer_acquired = asyncio.Event()
+            reader2_acquired = asyncio.Event()
+
+            async def writer() -> None:
+                writer_started.set()
+                async with lock.writer():
+                    writer_acquired.set()
+                    events.append("writer")
+
+            async def reader2() -> None:
+                async with lock.reader():
+                    reader2_acquired.set()
+                    events.append("reader2")
+
+            w_task = asyncio.create_task(writer())
+            await writer_started.wait()
+            await asyncio.sleep(0)  # writer is queued in _waiting_writers
+
+            r2_task = asyncio.create_task(reader2())
+            await asyncio.sleep(0)
+            # Reader 2 must yield to the queued writer instead of starving it
+            assert not reader2_acquired.is_set()
+            assert not writer_acquired.is_set()
+
+        await asyncio.wait_for(asyncio.gather(w_task, r2_task), timeout=5)
+        assert events == ["writer", "reader2"]
+
+        # Cancelling a queued writer notifies blocked readers cleanly
+        async with lock.reader():
+            w_queued = asyncio.Event()
+
+            async def cancelled_writer() -> None:
+                w_queued.set()
+                async with lock.writer():
+                    pass
+
+            cw_task = asyncio.create_task(cancelled_writer())
+            await w_queued.wait()
+            await asyncio.sleep(0)
+
+            r3_acquired = asyncio.Event()
+
+            async def reader3() -> None:
+                async with lock.reader():
+                    r3_acquired.set()
+
+            r3_task = asyncio.create_task(reader3())
+            await asyncio.sleep(0)
+            assert not r3_acquired.is_set()
+
+            cw_task.cancel()
+            with pytest.raises(asyncio.CancelledError):
+                await cw_task
+            await asyncio.wait_for(r3_task, timeout=5)
+            assert r3_acquired.is_set()
+
+    def test_codemode_params_rejects_timeout_below_minimum(self) -> None:
+        with pytest.raises(ValidationError):
+            CodemodeParams(code="return 1", timeout_ms=500)
+        valid = CodemodeParams(code="return 1", timeout_ms=1000)
+        assert valid.timeout_ms == 1000
 
     async def test_abort_cancels_running_codemode_script(self) -> None:
         started = asyncio.Event()
