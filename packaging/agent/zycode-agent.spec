@@ -18,6 +18,7 @@ OUR_PACKAGES = [
     "pi_goal_x",
     "pi_dynamic_workflows",
     "pi_mcp",
+    "pi_codemode",
 ]
 # Distributions whose entry points (group ``pi_agent.extensions``) and versions are read at run
 # time through ``importlib.metadata``: the metadata has to be in the bundle.
@@ -29,6 +30,7 @@ OUR_DISTRIBUTIONS = [
     "pi-goal-x-py",
     "pi-dynamic-workflows-py",
     "pi-mcp-py",
+    "pi-codemode-py",
 ]
 # Packages that load part of themselves by name, so the analysis does not see it.
 BY_NAME = ["langchain_openai", "langchain_core", "tiktoken_ext", "acp"]

@@ -22,7 +22,7 @@ jobs:
           python-version: "3.12"
           cache: pip
       - name: Install packages (dev)
-        run: pip install -e ".[dev]" -e "./packages/pi-agent-harness" -e "./packages/pi-agent-cli" -e "./packages/pi-web-access" -e "./packages/pi-goal-x" -e "./packages/pi-dynamic-workflows" -e "./packages/pi-mcp"
+        run: pip install -e ".[dev]" -e "./packages/pi-agent-harness" -e "./packages/pi-agent-cli" -e "./packages/pi-web-access" -e "./packages/pi-goal-x" -e "./packages/pi-dynamic-workflows" -e "./packages/pi-mcp" -e "./packages/pi-codemode"
       - name: Run tests
         run: pytest -v
       - name: Lint
@@ -64,6 +64,9 @@ jobs:
 
       - name: Build pi-mcp
         run: python -m build --outdir dist/ packages/pi-mcp
+
+      - name: Build pi-codemode
+        run: python -m build --outdir dist/ packages/pi-codemode
 
       - uses: actions/upload-artifact@v6
         with:

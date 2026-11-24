@@ -11,6 +11,7 @@ import math
 import os
 from collections.abc import Mapping
 from dataclasses import dataclass
+from typing import Literal
 
 from pi_agent_core.coding_tools.truncate import DEFAULT_MAX_BYTES
 
@@ -18,6 +19,10 @@ logger = logging.getLogger(__name__)
 
 STARTUP_TIMEOUT_ENV = "PI_MCP_STARTUP_TIMEOUT"
 CALL_TIMEOUT_ENV = "PI_MCP_CALL_TIMEOUT"
+EXPOSURE_ENV = "PI_MCP_EXPOSURE"
+
+ExposureMode = Literal["auto", "direct", "deferred"]
+_VALID_EXPOSURES: set[str] = {"auto", "direct", "deferred"}
 
 DEFAULT_STARTUP_TIMEOUT = 60.0
 """Seconds from the start of a server to the end of its tool list. Then it counts as failed."""
@@ -53,6 +58,7 @@ MAX_LOG_BYTES = 512 * 1024
 class Settings:
     startup_timeout: float = DEFAULT_STARTUP_TIMEOUT
     call_timeout: float = DEFAULT_CALL_TIMEOUT
+    exposure: ExposureMode = "auto"
 
     @classmethod
     def from_env(cls, environ: Mapping[str, str] | None = None) -> Settings:
@@ -61,7 +67,19 @@ class Settings:
         return cls(
             startup_timeout=_seconds(env, STARTUP_TIMEOUT_ENV, DEFAULT_STARTUP_TIMEOUT),
             call_timeout=_seconds(env, CALL_TIMEOUT_ENV, DEFAULT_CALL_TIMEOUT),
+            exposure=_exposure(env),
         )
+
+
+def _exposure(env: Mapping[str, str]) -> ExposureMode:
+    raw = env.get(EXPOSURE_ENV)
+    if raw is None or not raw.strip():
+        return "auto"
+    val = raw.strip().lower()
+    if val in _VALID_EXPOSURES:
+        return val  # type: ignore[return-value]
+    logger.warning("%s must be auto, direct or deferred; using auto", EXPOSURE_ENV)
+    return "auto"
 
 
 def _seconds(env: Mapping[str, str], name: str, default: float) -> float:
