@@ -39,7 +39,7 @@ for package in [*OUR_PACKAGES, *BY_NAME]:
         package, filter=lambda name: ".tests.test_" not in name and not name.endswith(".conftest")
     )
 
-datas = [(CHILD_DIR, "pi_dynamic_workflows/sandbox/frozen-child")]
+datas = [(CHILD_DIR, "pi_agent_core/sandbox/frozen-child")]
 for package in ("pi_dynamic_workflows", "pi_agent_cli", "pi_agent_core", "pi_web_access", "pi_goal_x"):
     datas += collect_data_files(package)
 for distribution in OUR_DISTRIBUTIONS:

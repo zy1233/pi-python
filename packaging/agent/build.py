@@ -32,7 +32,7 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[2]
 HERE = Path(__file__).resolve().parent
-CHILD_SCRIPT = ROOT / "packages/pi-dynamic-workflows/pi_dynamic_workflows/sandbox/child.py"
+CHILD_SCRIPT = ROOT / "pi_agent_core/sandbox/child.py"
 PROGRAM = "zycode-agent"
 # The name of the program inside an agent archive (``pack`` writes the second one on Windows).
 PROGRAM_FILES = (PROGRAM, PROGRAM + ".exe")
