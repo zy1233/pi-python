@@ -171,6 +171,49 @@ describe.skipIf(!chrome || !built)("webview in headless Chrome", () => {
     });
   });
 
+  it("shows script text that holds HTML as text, wraps one very long line, and keeps the buttons reachable", () => {
+    const script =
+      "</pre><img src=x onerror=\"window.__pwn=1\"><script>window.__pwn=2</script>\n" +
+      "x".repeat(20_000) +
+      "\n" +
+      Array.from({ length: 100 }, (_, i) => `line_${i} = 1`).join("\n");
+    const out = run(`${state}
+      state({});
+      host({ type: "permission", requestId: "p1", kind: "tool", title: "codemode", summary: ${lit(script)}, canDiff: false, options: [{ id: "allow-once", name: "Allow once", kind: "allow_once" }, { id: "reject-once", name: "Reject", kind: "reject_once" }] });
+      const summary = document.querySelector(".perm-summary");
+      const card = document.querySelector(".permission");
+      const allow = [...card.querySelectorAll("button")][0];
+      const summaryRect = summary.getBoundingClientRect();
+      const allowRect = allow.getBoundingClientRect();
+      window.__result = {
+        text: summary.textContent,
+        imgs: card.querySelectorAll("img").length,
+        scripts: card.querySelectorAll("script").length,
+        pwn: window.__pwn ?? null,
+        children: summary.children.length,
+        hScroll: summary.scrollWidth > summary.clientWidth,
+        vScroll: summary.scrollHeight > summary.clientHeight,
+        overflowY: getComputedStyle(summary).overflowY,
+        allowBelow: allowRect.top >= summaryRect.bottom,
+        allowSize: allowRect.height > 0 && allowRect.width > 0,
+        allowInsideCard: allowRect.bottom <= card.getBoundingClientRect().bottom,
+      };`);
+    expect(out).toMatchObject({
+      ok: true,
+      text: script,
+      imgs: 0,
+      scripts: 0,
+      pwn: null,
+      children: 0,
+      hScroll: false,
+      vScroll: true,
+      overflowY: "auto",
+      allowBelow: true,
+      allowSize: true,
+      allowInsideCard: true,
+    });
+  });
+
   it("shows the setup button, the error detail, and the mode switch only when the agent has a mode option", () => {
     const out = run(`${state}
       state({ status: "needs-setup", detail: "zycode needs a model and an API key. Run the setup in a terminal." });
