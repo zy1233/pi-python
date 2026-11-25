@@ -2,7 +2,7 @@
   "name": "zycode",
   "displayName": "zycode",
   "description": "Chat with the zycode coding agent in VS Code. Unofficial; not affiliated with pi, Microsoft, or any model vendor.",
-  "version": "1.10.0",
+  "version": "1.12.0",
   "publisher": "zycode",
   "icon": "media/icon.png",
   "galleryBanner": {
