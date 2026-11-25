@@ -1384,16 +1384,18 @@ class PiAcpAgent(Agent):
         return self._harnesses.get(session_id) is harness
 
     async def _advertise_commands(self, session_id: str) -> None:
-        """Send ``AvailableCommandsUpdate`` so ACP clients show slash commands."""
+        """Send ``AvailableCommandsUpdate`` so ACP clients show slash commands and skills.
+
+        Loaded skills are advertised as ``skill:<name>``.
+        """
         if self._conn is None:
             return
         harness = self._harnesses.get(session_id)
         if harness is None:
             return
         commands = harness.extension_registry.get_commands()
-        if not commands:
-            return
         available: list[AvailableCommand] = []
+        seen_names: set[str] = set()
         for name, cmd in commands.items():
             try:
                 ac = AvailableCommand(
@@ -1410,6 +1412,24 @@ class PiAcpAgent(Agent):
                 # every ``session/prompt`` fail (audit P7-17).
                 logger.warning("Command /%s is not advertised: %s", name, _why_invalid(exc))
                 continue
+            seen_names.add(name)
+            available.append(ac)
+        for skill in harness.resources.skills or []:
+            cmd_name = f"skill:{skill.name}"
+            if cmd_name in commands or cmd_name in seen_names:
+                continue
+            try:
+                ac = AvailableCommand(
+                    name=cmd_name,
+                    description=skill.description,
+                    input=AvailableCommandInput(
+                        root=UnstructuredCommandInput(hint="<args>"),
+                    ),
+                )
+            except Exception as exc:
+                logger.warning("Command /%s is not advertised: %s", cmd_name, _why_invalid(exc))
+                continue
+            seen_names.add(cmd_name)
             available.append(ac)
         if not available:
             return

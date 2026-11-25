@@ -24,6 +24,7 @@ from pi_agent_harness.skills import (
     format_skills_for_system_prompt,
     load_skills,
     load_sourced_skills,
+    skill_invocation_command,
 )
 from pi_agent_harness.types import (
     AgentHarnessResources,
@@ -137,6 +138,43 @@ def test_format_skills_for_system_prompt_and_invocation():
     assert "Use Chinese." in invocation
 
 
+def test_skill_invocation_command_reads_back_what_format_skill_invocation_wrote():
+    skill = Skill(
+        name="writer",
+        description="Write polished text",
+        content="Use concise prose.\n\nKeep it short.",
+        filePath="/skills/writer/SKILL.md",
+    )
+    assert skill_invocation_command(format_skill_invocation(skill)) == "/skill:writer"
+    assert (
+        skill_invocation_command(format_skill_invocation(skill, "Answer in Chinese."))
+        == "/skill:writer Answer in Chinese."
+    )
+    # The arguments keep their own lines.
+    assert (
+        skill_invocation_command(format_skill_invocation(skill, "one\ntwo"))
+        == "/skill:writer one\ntwo"
+    )
+
+    # A skill with no text, a folder name with a space, and a Windows path all read back.
+    for path in ("/my skills/bare/SKILL.md", "C:\\Users\\me\\skills\\bare\\SKILL.md"):
+        bare = Skill(name="bare", description="x", content="", filePath=path)
+        assert skill_invocation_command(format_skill_invocation(bare)) == "/skill:bare"
+        assert skill_invocation_command(format_skill_invocation(bare, "go")) == "/skill:bare go"
+
+
+def test_skill_invocation_command_ignores_text_that_is_not_an_invocation():
+    for text in (
+        "",
+        "hello",
+        "/skill:writer hi",  # what the user types, not what the chat stores
+        "Use skill `writer`.",  # no "References" line
+        "Use skill `writer`.\nsome other line\n\nbody",
+        "Please. Use skill `writer`.\nReferences are relative to /s.\n\nbody",
+    ):
+        assert skill_invocation_command(text) is None
+
+
 @pytest.mark.asyncio
 async def test_agent_harness_injects_skills_and_runs_skill_prompt():
     seen: dict[str, object] = {}
@@ -166,6 +204,79 @@ async def test_agent_harness_injects_skills_and_runs_skill_prompt():
     user_text = _user_text(user_messages[-1])
     assert "Use concise prose." in user_text
     assert "Answer in Chinese." in user_text
+
+
+@pytest.mark.asyncio
+async def test_agent_harness_prompt_expands_skill_slash_command():
+    seen: list[str] = []
+
+    async def recording_stream(model, context, options=None):
+        seen.extend(_user_text(m) for m in context.messages if getattr(m, "role", None) == "user")
+        return await mock_text_stream(model, context, options)
+
+    skill = Skill(
+        name="writer",
+        description="Write polished text",
+        content="Use concise prose.",
+        filePath="/skills/writer/SKILL.md",
+    )
+    harness = AgentHarness(
+        session=await _session(),
+        model=_model(),
+        stream_fn=recording_stream,
+        resources=AgentHarnessResources(skills=[skill]),
+    )
+
+    await harness.prompt("/skill:writer Answer in Chinese.")
+    assert "Use skill `writer`." in seen[-1]
+    assert "Use concise prose." in seen[-1]
+    assert "Additional instructions:" in seen[-1]
+    assert "Answer in Chinese." in seen[-1]
+
+    await harness.prompt("/skill:nope hi")
+    assert seen[-1] == "/skill:nope hi"
+
+
+@pytest.mark.asyncio
+async def test_agent_harness_extension_command_wins_over_skill_slash_command():
+    seen: list[str] = []
+    ran: list[str] = []
+
+    async def recording_stream(model, context, options=None):
+        seen.extend(_user_text(m) for m in context.messages if getattr(m, "role", None) == "user")
+        return await mock_text_stream(model, context, options)
+
+    def activate(pi) -> None:
+        def handler(args: str) -> None:
+            ran.append(args)
+            pi.send_message("from ext")
+
+        pi.register_command("skill:writer", description="Extension override", handler=handler)
+
+    skill = Skill(
+        name="writer",
+        description="Write polished text",
+        content="Use concise prose.",
+        filePath="/skills/writer/SKILL.md",
+    )
+    session = await _session()
+    harness = AgentHarness(
+        session=session,
+        model=_model(),
+        stream_fn=recording_stream,
+        resources=AgentHarnessResources(skills=[skill]),
+        extensions=[activate],
+    )
+
+    reply = await harness.prompt("/skill:writer Answer in Chinese.")
+    await harness.wait_for_idle()
+
+    assert ran == ["Answer in Chinese."]
+    assert reply.content[0]["text"] == "from ext"
+    assert seen == []  # the command answered: no model call, and the skill was not expanded
+    # The chat keeps what the user typed, not the text of the skill.
+    context = await session.build_context()
+    assert _user_text(context.messages[0]) == "/skill:writer Answer in Chinese."
 
 
 @pytest.mark.asyncio

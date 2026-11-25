@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- **Skills as `/skill:<name>` slash commands (`pi-agent-cli`, `pi-agent-harness`)**: the agent lists every loaded skill in the ACP `available_commands_update` as `skill:<name>`, with the description of the skill and an `<args>` hint. It does so also when no extension registers a command, and also for a skill with `disable-model-invocation` (only the user can call such a skill). `AgentHarness.prompt("/skill:<name> [args]")` turns the text into the prompt of the skill (`format_skill_invocation`), so a client needs no skill menu of its own. An extension command with the same name `skill:<name>` wins over the skill, in the list and when it runs. The chat list and the replay of a loaded chat show the line that the user typed (`/skill:<name> [args]`), not the text of the skill; the new `skill_invocation_command` reads that line back from the stored text, and the model reads the same text as before (#152).
+
 ## [1.1.0] - 2026-11-24
 
 This is a minor release. It introduces code mode (`pi-codemode-py`) with deferred `tool_search`, shared sandbox v2, and runtime Auto gating, adds the built-in `skill-creator` skill, adds a live `thinking_level` session option saved and restored on load, makes `zypi` consume ACP `usage_update`, and fixes `bash` late output-limit detection, cross-chunk `<thought>` leading whitespace, and `edit` diff persistence. All eight Python packages and the TUI move to `1.1.0`.

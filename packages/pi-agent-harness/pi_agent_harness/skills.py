@@ -70,6 +70,39 @@ def format_skill_invocation(skill: Skill, additional_instructions: str | None = 
     return "\n".join(parts)
 
 
+# What ``format_skill_invocation`` writes, read back: the first line, the "References" line and
+# the blank line before the skill text, and the line before the user's arguments. They stay
+# next to the writer, and a round-trip test holds the two together.
+_SKILL_INVOCATION_HEAD = re.compile(
+    r"\AUse skill `(?P<name>[^`\n]+)`\.\nReferences are relative to [^\n]*\.\n\n"
+)
+_ADDITIONAL_INSTRUCTIONS = "\n\nAdditional instructions:\n"
+
+
+def skill_invocation_command(text: str) -> str | None:
+    """The ``/skill:<name> [args]`` line that the text of a skill prompt stands for.
+
+    *text* is a message that ``format_skill_invocation`` made. Returns ``None`` when it is not
+    such a message. The chat list and the replay of a chat show this line, which the user
+    typed, and not the whole text of the skill. It changes only what a client shows. The model
+    reads the same message as before.
+
+    The arguments are the text after the last ``Additional instructions:`` line. If a skill
+    has such a line in its own text and the user gave no arguments, the display shows a part of
+    the skill as the arguments. That is a display error and nothing more.
+    """
+    match = _SKILL_INVOCATION_HEAD.match(text)
+    if match is None:
+        return None
+    command = f"/skill:{match['name']}"
+    cut = text.rfind(_ADDITIONAL_INSTRUCTIONS)
+    if cut != -1:
+        arguments = text[cut + len(_ADDITIONAL_INSTRUCTIONS) :].strip()
+        if arguments:
+            command = f"{command} {arguments}"
+    return command
+
+
 async def _load_skill_path(
     env: FileSystem,
     path: str,
