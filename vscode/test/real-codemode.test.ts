@@ -1,8 +1,11 @@
 // The real agent and a fake model server on 127.0.0.1: the model calls `workflow` and `codemode`,
 // and the permission cards must show the whole script of each call. Off by default:
 // ZYCODE_REAL_AGENT=1. It needs agent 1.1.0, which has `codemode`: set ZYCODE_REAL_AGENT_BINARY to
-// that binary (for example `.vsix-cache/v1.1.0/` after `npm run package linux-x64`), or use a
-// ZYCODE_REAL_AGENT_PYTHON in which `pi-codemode-py` is installed.
+// that binary (for example the unpacked `.vsix-cache/v1.1.0/zycode-agent-linux-x86_64-1.1.0.tar.gz`),
+// or use a ZYCODE_REAL_AGENT_PYTHON in which `pi-codemode-py` is installed. A Python is needed in
+// both cases: it runs the fake model server (`support/fake_model.py`), so set
+// ZYCODE_REAL_AGENT_PYTHON also when you set ZYCODE_REAL_AGENT_BINARY. Without a Python the test
+// is skipped.
 import { spawn, type ChildProcess } from "node:child_process";
 import { existsSync, mkdirSync, writeFileSync } from "node:fs";
 import path from "node:path";
@@ -15,7 +18,7 @@ const here = path.dirname(fileURLToPath(import.meta.url));
 const repo = path.resolve(here, "../..");
 const python = process.env.ZYCODE_REAL_AGENT_PYTHON ?? path.join(repo, ".venv", "bin", "python");
 const binary = process.env.ZYCODE_REAL_AGENT_BINARY;
-const enabled = process.env.ZYCODE_REAL_AGENT === "1" && (binary !== undefined || existsSync(python)) && process.platform !== "win32";
+const enabled = process.env.ZYCODE_REAL_AGENT === "1" && existsSync(python) && process.platform !== "win32";
 
 // The scripts that the fake model sends when the prompt has RUN-SMOKE (`SCRIPT` and `CODEMODE_CODE`
 // of packaging/agent/smoke.py).
@@ -55,6 +58,7 @@ async function fakeModel(): Promise<number> {
       const match = /PORT (\d+)/.exec(buffer);
       if (match) resolve(Number(match[1]));
     });
+    child.on("error", reject);
     child.on("exit", (code) => reject(new Error(`fake model exited with ${code}`)));
   });
 }
