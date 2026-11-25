@@ -1,0 +1,535 @@
+---
+import { render } from 'astro:content';
+import Footer from '../../components/Footer.astro';
+import Header from '../../components/Header.astro';
+import Icon from '../../components/Icon.astro';
+import { homePath, messages, otherLocale, type Locale } from '../../i18n';
+import Base from '../../layouts/Base.astro';
+import {
+  blogPath,
+  estimateReadingMinutes,
+  findTranslation,
+  formatDate,
+  getPublishedPosts,
+  isoDate,
+  postPath,
+  type BlogPost,
+} from '../../lib/blog';
+
+export async function getStaticPaths() {
+  const posts = await getPublishedPosts();
+  return posts.map((post, index) => ({
+    params: { slug: post.id },
+    props: {
+      post,
+      newerPost: index > 0 ? posts[index - 1] : undefined,
+      olderPost: index < posts.length - 1 ? posts[index + 1] : undefined,
+      translation: findTranslation(post, posts),
+    },
+  }));
+}
+
+interface Props {
+  post: BlogPost;
+  newerPost?: BlogPost;
+  olderPost?: BlogPost;
+  translation?: BlogPost;
+}
+
+const { post, newerPost, olderPost, translation } = Astro.props;
+const { Content } = await render(post);
+
+const locale: Locale = post.data.lang;
+const other = otherLocale(locale);
+const t = messages[locale];
+const canonicalPath = postPath(post.id);
+const readingMinutes = estimateReadingMinutes(post.body);
+const langBadge = locale === 'zh' ? t.blog.langBadgeZh : t.blog.langBadgeEn;
+const switchHref = translation ? postPath(translation.id) : blogPath[other];
+
+const alternates = translation
+  ? {
+      [locale]: canonicalPath,
+      [translation.data.lang]: postPath(translation.id),
+      xDefault: locale === 'en' ? canonicalPath : postPath(translation.id),
+    }
+  : undefined;
+
+const site = Astro.site!;
+const absolute = (value: string) => new URL(value, site).href;
+
+const articleJsonLd = {
+  '@context': 'https://schema.org',
+  '@type': 'BlogPosting',
+  headline: post.data.title,
+  description: post.data.description,
+  datePublished: post.data.date.toISOString(),
+  ...(post.data.updated ? { dateModified: post.data.updated.toISOString() } : {}),
+  inLanguage: t.hreflang,
+  author: {
+    '@type': 'Organization',
+    name: post.data.author,
+    url: absolute(homePath.en),
+  },
+  url: absolute(canonicalPath),
+  mainEntityOfPage: {
+    '@type': 'WebPage',
+    '@id': absolute(canonicalPath),
+  },
+  ...(post.data.tags.length > 0 ? { keywords: post.data.tags } : {}),
+};
+---
+
+<Base
+  locale={locale}
+  path={canonicalPath}
+  alternates={alternates}
+  title={`${post.data.title} — zycode`}
+  description={post.data.description}
+  ogType="article"
+  publishedTime={post.data.date.toISOString()}
+  modifiedTime={post.data.updated?.toISOString()}
+  jsonLd={articleJsonLd}
+  noindex={post.data.draft}
+>
+  <Header locale={locale} activeNav="blog" switchHref={switchHref} />
+
+  <main id="main" class="post-page">
+    <article class="wrap post-shell">
+      <nav class="breadcrumb" aria-label={t.blog.breadcrumbLabel}>
+        <ol>
+          <li><a href={homePath[locale]}>{t.blog.breadcrumbHome}</a></li>
+          <li><a href={blogPath[locale]}>{t.blog.breadcrumbBlog}</a></li>
+          <li><a href={canonicalPath} aria-current="page">{post.data.title}</a></li>
+        </ol>
+      </nav>
+
+      <header class="post-head">
+        <div class="post-head__meta">
+          <time datetime={isoDate(post.data.date)}>{formatDate(post.data.date, locale)}</time>
+          {
+            post.data.updated && (
+              <>
+                <span aria-hidden="true">·</span>
+                <span>
+                  {t.blog.updatedLabel}{' '}
+                  <time datetime={isoDate(post.data.updated)}>{formatDate(post.data.updated, locale)}</time>
+                </span>
+              </>
+            )
+          }
+          <span aria-hidden="true">·</span>
+          <span>{t.blog.readMinutes.replace('{min}', String(readingMinutes))}</span>
+          <span class="lang-tag">{langBadge}</span>
+          {post.data.draft && <span class="lang-tag lang-tag--draft">{t.blog.draftBadge}</span>}
+          {
+            translation && (
+              <a
+                class="translation-link"
+                href={postPath(translation.id)}
+                hreflang={messages[translation.data.lang].hreflang}
+                lang={messages[translation.data.lang].lang}
+              >
+                {t.blog.readOtherLang}
+              </a>
+            )
+          }
+        </div>
+
+        <h1 class="post-head__title">{post.data.title}</h1>
+        <p class="lead post-head__desc">{post.data.description}</p>
+
+        {
+          post.data.tags.length > 0 && (
+            <ul class="post-head__tags" role="list">
+              {post.data.tags.map((tag) => (
+                <li>#{tag}</li>
+              ))}
+            </ul>
+          )
+        }
+      </header>
+
+      <div class="prose" data-prose>
+        <Content />
+      </div>
+
+      <footer class="post-foot">
+        <a class="link-arrow post-foot__back" href={blogPath[locale]}>
+          <Icon name="arrow-left" size={16} />
+          <span>{t.blog.backToBlog}</span>
+        </a>
+
+        {
+          (newerPost || olderPost) && (
+            <nav class="post-neighbors" aria-label={t.blog.postNavLabel}>
+              {olderPost ? (
+                <a class="neighbor" href={postPath(olderPost.id)} lang={olderPost.data.lang === 'zh' ? 'zh-Hans' : 'en'}>
+                  <span class="neighbor__label">{t.blog.prevPost}</span>
+                  <span class="neighbor__title">{olderPost.data.title}</span>
+                </a>
+              ) : (
+                <span />
+              )}
+              {newerPost && (
+                <a
+                  class="neighbor neighbor--end"
+                  href={postPath(newerPost.id)}
+                  lang={newerPost.data.lang === 'zh' ? 'zh-Hans' : 'en'}
+                >
+                  <span class="neighbor__label">{t.blog.nextPost}</span>
+                  <span class="neighbor__title">{newerPost.data.title}</span>
+                </a>
+              )}
+            </nav>
+          )
+        }
+      </footer>
+    </article>
+  </main>
+
+  <Footer locale={locale} />
+</Base>
+
+<script>
+  // Ensure rendered Markdown <pre> blocks and <table> elements are keyboard-scrollable without breaking 320px reflow.
+  document.querySelectorAll<HTMLElement>('[data-prose]').forEach((prose) => {
+    prose.querySelectorAll<HTMLPreElement>('pre').forEach((pre) => {
+      if (!pre.hasAttribute('tabindex')) pre.setAttribute('tabindex', '0');
+    });
+    prose.querySelectorAll<HTMLTableElement>('table').forEach((table) => {
+      if (table.parentElement?.classList.contains('table-scroll')) return;
+      const wrapper = document.createElement('div');
+      wrapper.className = 'table-scroll';
+      wrapper.tabIndex = 0;
+      wrapper.setAttribute('role', 'region');
+      const caption = table.querySelector('caption')?.textContent?.trim();
+      wrapper.setAttribute('aria-label', caption || 'Data table');
+      table.parentNode?.insertBefore(wrapper, table);
+      wrapper.appendChild(table);
+    });
+  });
+</script>
+
+<style>
+  .post-page {
+    padding-block: clamp(2rem, 5vw, 3.5rem) clamp(4rem, 8vw, 6.5rem);
+  }
+
+  .post-shell {
+    max-width: 52rem;
+  }
+
+  /* Breadcrumbs: semantic <ol>, CSS separator hidden from screen readers via empty alt text. */
+  .breadcrumb {
+    margin-bottom: 1.75rem;
+  }
+
+  .breadcrumb > ol {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 0.35rem 0.55rem;
+    margin: 0;
+    padding: 0;
+    list-style: none;
+    font: 500 0.82rem/1.4 var(--font-mono);
+    color: var(--ink-3);
+  }
+
+  .breadcrumb > ol > li {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.55rem;
+    min-width: 0;
+  }
+
+  .breadcrumb > ol > li + li::before {
+    content: '/' / '';
+    color: var(--ink-3);
+    opacity: 0.7;
+  }
+
+  .breadcrumb > ol > li > a {
+    color: var(--ink-2);
+    text-decoration-line: none;
+    overflow-wrap: break-word;
+  }
+
+  .breadcrumb > ol > li > a:hover,
+  .breadcrumb > ol > li > a:focus-visible {
+    color: var(--ink);
+    text-decoration-line: underline;
+    position: relative;
+    z-index: 1;
+  }
+
+  .breadcrumb > ol > li > a[aria-current='page'] {
+    color: var(--ink);
+    font-weight: 600;
+  }
+
+  @media (forced-colors: active) {
+    .breadcrumb > ol > li > a[aria-current='page'] {
+      text-decoration-line: underline;
+    }
+  }
+
+  .post-head {
+    display: grid;
+    gap: 1.15rem;
+    padding-bottom: clamp(1.75rem, 4vw, 2.5rem);
+    border-bottom: 1px solid var(--ink);
+  }
+
+  .post-head__meta {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 0.45rem 0.65rem;
+    font: 500 0.82rem/1.4 var(--font-mono);
+    color: var(--ink-3);
+  }
+
+  .lang-tag {
+    display: inline-flex;
+    align-items: center;
+    padding: 0.16rem 0.5rem;
+    border: 1px solid var(--rule-2);
+    border-radius: 4px;
+    font: 600 0.72rem/1.2 var(--font-mono);
+    color: var(--ink-2);
+    background: var(--paper-2);
+  }
+
+  .lang-tag--draft {
+    border-color: var(--warn);
+    color: var(--warn);
+  }
+
+  .translation-link {
+    margin-inline-start: auto;
+    font: 600 0.8rem/1.2 var(--font-mono);
+    color: var(--signal-text);
+    text-decoration-line: underline;
+  }
+
+  .post-head__title {
+    font-size: var(--step-3);
+    font-weight: 750;
+    line-height: 1.08;
+    letter-spacing: -0.03em;
+    overflow-wrap: break-word;
+  }
+
+  :global(:lang(zh-Hans)) .post-head__title {
+    font-size: clamp(1.9rem, 1.35rem + 2.2vw, 2.85rem);
+    line-height: 1.2;
+    letter-spacing: 0;
+  }
+
+  .post-head__desc {
+    max-width: 58ch;
+  }
+
+  .post-head__tags {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.45rem 0.75rem;
+    margin: 0.2rem 0 0;
+    padding: 0;
+    list-style: none;
+    font: 500 0.8rem/1.3 var(--font-mono);
+    color: var(--ink-2);
+  }
+
+  /* ---- Markdown prose ---------------------------------------------------- */
+
+  .prose {
+    max-width: 65ch;
+    margin-top: clamp(2rem, 4vw, 3rem);
+    font-size: var(--step-0);
+    line-height: 1.75;
+    overflow-wrap: break-word;
+  }
+
+  .prose :global(> * + *) {
+    margin-top: 1.25rem;
+  }
+
+  .prose :global(h2) {
+    margin-top: 2.6rem;
+    padding-top: 1.15rem;
+    border-top: 1px solid var(--rule);
+    font-size: var(--step-2);
+    font-weight: 700;
+    line-height: 1.22;
+    letter-spacing: -0.02em;
+    text-wrap: balance;
+  }
+
+  .prose :global(h3) {
+    margin-top: 2rem;
+    font-size: var(--step-1);
+    font-weight: 700;
+    line-height: 1.28;
+    text-wrap: balance;
+  }
+
+  .prose :global(h4) {
+    margin-top: 1.5rem;
+    font-size: var(--step-0);
+    font-weight: 700;
+    text-wrap: balance;
+  }
+
+  .prose :global(p),
+  .prose :global(li),
+  .prose :global(blockquote) {
+    text-wrap: pretty;
+  }
+
+  .prose :global(ul),
+  .prose :global(ol) {
+    padding-inline-start: 1.45rem;
+    display: grid;
+    gap: 0.5rem;
+  }
+
+  .prose :global(blockquote) {
+    padding: 0.85rem 1.15rem;
+    border-inline-start: 3px solid var(--signal);
+    background: var(--paper-2);
+    color: var(--ink-2);
+    border-radius: 0 var(--radius) var(--radius) 0;
+  }
+
+  .prose :global(blockquote > * + *) {
+    margin-top: 0.75rem;
+  }
+
+  .prose :global(hr) {
+    border: 0;
+    border-top: 1px solid var(--rule-2);
+    margin-block: 2.25rem;
+  }
+
+  .prose :global(pre) {
+    margin: 1.6rem 0;
+    padding: 1.1rem 1.2rem;
+    border: 1px solid var(--ink);
+    border-radius: 8px;
+    background: var(--term-bg) !important;
+    color: var(--term-ink);
+    overflow-x: auto;
+    font: 400 0.86rem/1.68 var(--font-mono);
+    tab-size: 2;
+  }
+
+  .prose :global(pre code) {
+    padding: 0;
+    border-radius: 0;
+    background: none;
+    font: inherit;
+    color: inherit;
+    overflow-wrap: normal;
+  }
+
+  .prose :global(img) {
+    display: block;
+    height: auto;
+    margin-block: 1.75rem;
+    border: 1px solid var(--rule-2);
+    border-radius: var(--radius);
+  }
+
+  .prose :global(.table-scroll) {
+    margin-block: 1.6rem;
+    overflow-x: auto;
+    max-inline-size: 100%;
+    border: 1px solid var(--rule-2);
+    border-radius: var(--radius);
+  }
+
+  .prose :global(table) {
+    width: 100%;
+    border-collapse: collapse;
+    font-size: 0.92rem;
+    line-height: 1.5;
+  }
+
+  .prose :global(th),
+  .prose :global(td) {
+    padding: 0.65rem 0.9rem;
+    border-bottom: 1px solid var(--rule);
+    text-align: start;
+    vertical-align: top;
+  }
+
+  .prose :global(thead th) {
+    background: var(--paper-2);
+    font: 600 0.78rem/1.3 var(--font-mono);
+    letter-spacing: 0.04em;
+    color: var(--ink-2);
+    border-bottom: 1px solid var(--rule-2);
+  }
+
+  .prose :global(tbody tr:last-child td) {
+    border-bottom: 0;
+  }
+
+  /* ---- Post footer & prev/next navigation -------------------------------- */
+
+  .post-foot {
+    margin-top: clamp(3rem, 6vw, 4.5rem);
+    padding-top: 2rem;
+    border-top: 1px solid var(--ink);
+    display: grid;
+    gap: 2rem;
+    justify-items: start;
+  }
+
+  .post-neighbors {
+    width: 100%;
+    display: grid;
+    gap: 1rem;
+  }
+
+  @media (min-width: 640px) {
+    .post-neighbors {
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+    }
+  }
+
+  .neighbor {
+    display: grid;
+    gap: 0.35rem;
+    padding: 1rem 1.15rem;
+    border: 1px solid var(--rule-2);
+    border-radius: var(--radius);
+    background: var(--paper-2);
+    text-decoration: none;
+    transition: border-color 0.15s ease;
+  }
+
+  .neighbor:hover {
+    border-color: var(--ink);
+  }
+
+  .neighbor--end {
+    text-align: end;
+  }
+
+  .neighbor__label {
+    font: 500 0.75rem/1.2 var(--font-mono);
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+    color: var(--ink-3);
+  }
+
+  .neighbor__title {
+    font-weight: 600;
+    color: var(--ink);
+    overflow-wrap: break-word;
+  }
+</style>

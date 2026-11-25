@@ -18,6 +18,11 @@ export default defineConfig({
   // Keep the normal HTML rules, so that `a <code>b</code> c` keeps its spaces.
   compressHTML: true,
   devToolbar: { enabled: false },
+  markdown: {
+    shikiConfig: {
+      theme: 'vitesse-dark',
+    },
+  },
   i18n: {
     defaultLocale: 'en',
     locales: ['en', 'zh'],
