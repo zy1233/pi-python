@@ -1,5 +1,44 @@
 # Changelog
 
+## 1.10.0 (2026-11-25)
+
+Stable release. It follows 1.8.0 and bundles agent 1.1.0 (1.8.0 had 1.0.1). A user of 1.8.0 gets it as an update.
+
+### New
+
+- **The Thinking menu changes the level live.** The bundled agent now has the `thinking_level` option, so a change takes effect at once: no question, no edit of `agent.toml`, no restart, and the chat stays open. The agent saves the level in the chat. A past chat that you open starts at its own level, and a new chat starts at the level of `agent.toml`. With `reasoning = false` the menu stays off. For an agent that you choose with `zycode.agentPath` and that has no such option (1.0.1 or older), the menu still edits one line of `agent.toml` and restarts the agent.
+- **Code mode.** Agent 1.1.0 has a `codemode` tool: the model writes one Python script that calls the other tools, and the script runs in a sandbox. It is on by default. In **Ask** and **Auto**, the question card of `codemode` shows the whole script (see "Fixed"). Each tool call that the script makes is asked about on its own card, as an ordinary call. The command `/codemode [status|on|hybrid|only|off]` shows or changes the mode, and appears in the `/` menu by itself. A script has weaker limits on macOS: use a container or a virtual machine for code that you do not trust.
+- **`skill-creator` skill.** Agent 1.1.0 has a built-in skill that helps the model install, check and write Agent Skills. It needs no setup.
+- **Images in the chat.** Paste or drop up to 4 images into the message box (PNG, JPEG, GIF or WebP). They go to the agent only when it says that it accepts images; if not, the chat says so and sends nothing.
+- **MCP servers from VS Code.** The new setting `zycode.mcpServers` lists MCP servers (stdio, and HTTP or SSE when the agent supports them). The extension gives them to the agent when a chat starts. Only your user settings count, and only in a trusted workspace. Values of `env` and `headers` are plain text in `settings.json`.
+- **Add to chat.** **Add selection to chat** (editor menu) and **Add to chat context** (file menu in the Explorer) put a reference in the message box. They add to the open chat. If the file is outside the folder of that chat, a notice says so.
+- **Buttons in the chat title:** **New chat**, **Restart agent** and **Open agent.toml**.
+- **Prompt history.** **Up** and **Down** in the message box bring back your earlier messages, with their `@` references. **Esc** leaves the history, and **Esc** also stops a running answer.
+- **Colours in code blocks.** The code blocks in answers have syntax colours.
+- A **Save all** button on the notice that says that files have unsaved changes (the agent reads the files on disk).
+- A file that may hold secrets (for example `.env`, `.aws/credentials` or a key file) shows a **may hold secrets** badge in the `@` list.
+- A one-time tip tells you to set `context_window` in `agent.toml` to show the Context row.
+
+### Changed
+
+- **Bundles `zycode-agent` 1.1.0** for `linux-x64`, `linux-arm64`, `darwin-arm64`, `darwin-x64`, and `win32-x64` (was 1.0.1). The package of `linux-x64` is 73.7 MiB. Besides the items above, agent 1.1.0 shows an `edit` that you open again from a past chat as plain text, with no diff (the diff of a new call is not changed), and its `bash` tool fails a call that went over the output limit also when the command ended first. The full list of agent changes is in the [CHANGELOG of the repository](https://github.com/zy1233/pi-python/blob/main/CHANGELOG.md).
+- In the `@` list, the header says **References** (was "Context"). The README says that a reference sends the path only.
+- When you stop the agent on Windows, the extension ends the whole process tree.
+- With more than one folder open, the agent now starts in the folder of the file in the active editor (a file on disk that is inside one of the open folders). With no such editor, it starts in the first open folder, as before. The folder is chosen each time the agent starts: when the chat view first opens, at **Restart agent**, and after a trust or folder change that lets it start; a new chat keeps the folder of the running agent.
+- The `@` list keeps the old rows (in italic, with "searching…") while a new search runs, and it ignores Enter, Tab and a click on them. The text box is a plain text box for a screen reader, the list names only its options, and a live region says how many suggestions there are.
+- The `@` list also opens for the full-width character `＠`, and the `/` menu for `／` at the start of a line, as an input method types them.
+
+### Fixed
+
+- **The question card of `codemode` and of `workflow` showed no script.** The card now shows what the agent runs: the whole `code` of a `codemode` call, and for a `workflow` call the whole `script`, or, when the call has a `name`, the built-in workflow with its whole `args` as JSON (the agent ignores `script` when `name` is set, and the card says so). The whole command of `bash` is shown the same way. A long script does not get cut: the text scrolls inside the card, and **Allow once** and **Reject** stay below it. The dialog that shows when the chat view is hidden has the whole script too.
+- A `.gitignore` or `files.exclude` pattern with many `*` could freeze the `@` file list for seconds, or it was dropped with no message, and a `!` rule that was dropped could leave a file hidden. Such a pattern now works and is fast. A filter uses at most 100 such patterns, and the log has one warning when more are dropped.
+- Images: the state that VS Code saves for the chat view holds at most 2,000,000 characters of image data, and a notice says when an image is not saved. The message still sends every image.
+- **Down** in the prompt history no longer drops an entry that you edited.
+- Picking a file name in the `@` list now replaces the rest of a Chinese or Japanese file name that is after the cursor.
+- A quote in a path (`@"a\"b c.txt"`) works.
+- `/new` from the **/** button keeps your draft and references. A message that starts with `/` is sent as a command, and a client command also works while references are attached.
+- Two messages that the agent sends outside a turn no longer join into one line.
+
 ## 1.8.0 (2026-11-20)
 
 Stable release. It follows 1.6.0 and bundles agent 1.0.1 (1.6.0 had 1.0.0). A user of 1.6.0 gets it as an update.

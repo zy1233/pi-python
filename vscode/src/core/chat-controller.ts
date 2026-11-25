@@ -1582,7 +1582,7 @@ export class ChatController {
       }
       return { ...base, kind: "tool", title: `Unexpected trust question: ${title}`, summary: "" };
     }
-    return { ...base, kind: "tool", title, summary: summarizeInput(rawInput) };
+    return { ...base, kind: "tool", title, summary: summarizeInput(rawInput, title) };
   }
 
   /** The user's choice on a card. Only an option that the request listed counts. */

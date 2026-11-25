@@ -124,10 +124,38 @@ export class ToolCallStore {
   }
 }
 
-/** What the permission card shows under the title: the whole command, or the path. */
-export function summarizeInput(rawInput: unknown): string {
+/** The name of the tool in a card title: the text up to the first white space or `(`. */
+function toolNameOf(title: string): string {
+  return /^[^\s(]*/.exec(title)![0];
+}
+
+/**
+ * What the permission card shows under the title, whole and never cut. It shows what the agent runs:
+ * the command of `bash`, the path of `read`, `write` and `edit`, the script of `codemode` (`code`),
+ * and the script of `workflow`. For every tool, `command`, `path`, `code` and `script` are read in
+ * that order. The one tool with more is `workflow`: the agent runs a built-in workflow when `name` is
+ * a non-empty string and ignores `script` then, so for `workflow` (the title is `workflow`,
+ * `workflow (codemode)` or `workflow (Auto: ...)`) the card shows the name, the whole `args` as
+ * JSON, and a line that says that `script` is ignored. Any other tool has no `name` meaning here:
+ * an MCP tool with `{ name: "my-repo" }` shows nothing, and so does a call with no `title`. The card
+ * scrolls a long text (`.perm-summary` in `media/chat.css`), and the Allow and Reject buttons stay
+ * outside the scroll area.
+ */
+export function summarizeInput(rawInput: unknown, title?: string): string {
   if (!isRecord(rawInput)) return "";
-  if (typeof rawInput.command === "string") return rawInput.command;
-  if (typeof rawInput.path === "string") return rawInput.path;
+  for (const key of ["command", "path", "code"]) {
+    const value = rawInput[key];
+    if (typeof value === "string") return value;
+  }
+  if (title !== undefined && toolNameOf(title) === "workflow" && typeof rawInput.name === "string" && rawInput.name !== "") {
+    const lines = [`built-in workflow: ${rawInput.name}`];
+    if (rawInput.args !== undefined && rawInput.args !== null) {
+      const args = JSON.stringify(rawInput.args);
+      if (args !== undefined) lines.push(`args: ${args}`);
+    }
+    if (typeof rawInput.script === "string") lines.push("The agent ignores `script` when `name` is set.");
+    return lines.join("\n");
+  }
+  if (typeof rawInput.script === "string") return rawInput.script;
   return "";
 }
