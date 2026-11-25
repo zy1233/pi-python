@@ -172,3 +172,34 @@ export function approvalTooltipLine(pendingCount: number | undefined): string | 
     ? "Waiting for your approval in the zycode chat."
     : `Waiting for your approval on ${pendingCount} requests in the zycode chat.`;
 }
+
+/**
+ * Title for an Auto mode notice sent as an out-of-turn agent message (`entry_message`,
+ * `problems_message`, or `config_problems_message`), or `undefined` for normal agent messages.
+ *
+ * The match reads the words of `auto_mode.py` in the agent. If the agent changes a text, the match can
+ * stop finding it, and the chat then shows the notice as a plain answer. `test/fixtures/auto-notices.json`
+ * holds the real texts: `packages/pi-agent-cli/tests/test_vscode_auto_notices.py` checks that the agent
+ * still writes them, and `test/status-row.test.ts` checks that this match finds them.
+ */
+export function autoModeNoticeTitle(text: string): string | undefined {
+  const trimmed = text.trimStart();
+  if (
+    trimmed.startsWith("Auto mode is on.") &&
+    (trimmed.includes("no question") ||
+      trimmed.includes("Auto does not guard") ||
+      trimmed.includes("/auto-log") ||
+      trimmed.includes("Auto cannot check"))
+  ) {
+    return trimmed.includes("Auto cannot check this session safely") || trimmed.includes("not the id of a model")
+      ? "Auto mode is on (warning)"
+      : "Auto mode is on";
+  }
+  if (trimmed.startsWith("Auto cannot check this session safely.")) {
+    return "Auto mode warning";
+  }
+  if (trimmed.startsWith("Settings in agent.toml that Auto cannot work with.")) {
+    return "Auto mode settings warning";
+  }
+  return undefined;
+}

@@ -157,6 +157,7 @@ export class ChatController {
   private cancelTimer: NodeJS.Timeout | undefined;
   private counter = 0;
   private segmentId: string | undefined;
+  private activeThought: { messageId: string; startedAt: number } | undefined;
   private modeNoticeShown = false;
   private stuckModeNoticeShown = false;
   private contextHintShown = false;
@@ -414,7 +415,27 @@ export class ChatController {
   }
 
   transcript(): TranscriptItem[] {
-    return this.items.map((item) => structuredClone(item));
+    return this.items.map((item) => {
+      const cloned = structuredClone(item);
+      if (cloned.type === "agent" && this.activeThought?.messageId === cloned.id) {
+        cloned.thoughtMs = Math.max(0, this.now() - this.activeThought.startedAt);
+        cloned.thoughtActive = true;
+      }
+      return cloned;
+    });
+  }
+
+  private finishActiveThought(): void {
+    const active = this.activeThought;
+    if (!active) return;
+    this.activeThought = undefined;
+    const durationMs = Math.max(0, this.now() - active.startedAt);
+    const item = this.items.find((i) => i.type === "agent" && i.id === active.messageId);
+    if (item && item.type === "agent") {
+      item.thoughtMs = durationMs;
+      delete item.thoughtActive;
+    }
+    this.emit({ type: "agentThoughtEnd", messageId: active.messageId, durationMs });
   }
 
   /** The diff of a tool call (the result if the call has run, else the proposal), or `undefined`. */
@@ -830,6 +851,7 @@ export class ChatController {
     this.generation++;
     this.stopping = true;
     this.turnInFlight = false;
+    this.finishActiveThought();
     this.clearCancelTimer();
     this.cancelAllPermissions();
     const conn = this.conn;
@@ -872,6 +894,7 @@ export class ChatController {
   private onProcessExit(generation: number, proc: AgentProcess, info: { code: number | null; signal: NodeJS.Signals | null }): void {
     if (generation !== this.generation || this.stopping || proc !== this.proc) return;
     this.turnInFlight = false;
+    this.finishActiveThought();
     this.cancelAllPermissions();
     this.clearCancelTimer();
     const text = this.exitText(info, proc);
@@ -989,6 +1012,7 @@ export class ChatController {
 
   private finishTurn(stopReason: string): void {
     this.turnInFlight = false;
+    this.finishActiveThought();
     this.segmentId = undefined;
     this.clearCancelTimer();
     this.cancelAllPermissions();
@@ -1072,6 +1096,7 @@ export class ChatController {
 
   private resetTranscript(): void {
     this.turnInFlight = false;
+    this.activeThought = undefined;
     this.items = [];
     this.toolItemIndices.clear();
     this.tools.clear();
@@ -1461,9 +1486,14 @@ export class ChatController {
       this.items.push(item);
     }
     if (thought) {
+      if (!replay && this.activeThought?.messageId !== item.id) {
+        this.finishActiveThought();
+        this.activeThought = { messageId: item.id, startedAt: this.now() };
+      }
       item.thought += text;
       this.emit({ type: "agentThought", messageId: item.id, text });
     } else {
+      if (!replay) this.finishActiveThought();
       const outOfTurn = !replay && !this.turnInFlight && this.status !== "busy" && this.status !== "cancelling";
       const chunkText =
         outOfTurn && item.text !== "" && !item.text.endsWith("\n") && !text.startsWith("\n")
@@ -1489,6 +1519,7 @@ export class ChatController {
     const applied = this.tools.applyWithDelta(update);
     if (!applied) return;
     const { view } = applied;
+    if (!replay) this.finishActiveThought();
     this.segmentId = undefined;
     const deltaOnly =
       !replay && applied.pureTerminalAppend && applied.terminalDelta !== undefined
@@ -1543,6 +1574,7 @@ export class ChatController {
         view,
       };
       this.pending.set(requestId, entry);
+      this.finishActiveThought();
       this.segmentId = undefined;
       this.items.push({ type: "permission", request: view });
       this.emit({ type: "permission", ...view });
@@ -1640,6 +1672,7 @@ export class ChatController {
   }
 
   private pushNotice(level: NoticeLevel, text: string, actions?: NoticeAction[]): void {
+    this.finishActiveThought();
     this.segmentId = undefined;
     if (actions) {
       this.items.push({ type: "notice", level, text, actions });

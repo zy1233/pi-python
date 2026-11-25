@@ -1,6 +1,6 @@
 # zycode for VS Code
 
-**Unofficial; not affiliated with pi or Microsoft.**
+**Unofficial; not affiliated with pi, Microsoft, or any model vendor.**
 
 zycode is a coding agent. This extension puts it in a chat view in VS Code. The agent can read your files, edit them, and run commands, and it asks you before it does anything that is not read-only. The extension starts the agent program on your machine and talks to it over the [Agent Client Protocol](https://agentclientprotocol.com). Source: <https://github.com/zy1233/pi-python> (`vscode`). Site: <https://zycode.dev>.
 
@@ -17,7 +17,8 @@ zycode is a coding agent. This extension puts it in a chat view in VS Code. The 
 - A **Past chats** view under the chat: the chats of the open folder. Open one to continue it, or delete it.
 - A mode menu in the chat: **Ask**, **Auto** and **Always approve**, plus a **Model** menu when multiple models are configured in `agent.toml`.
 - A **Thinking** menu next to it: the thinking level of the model (`off` to `max`; `max` only for an agent of version 1.0.0 or later). With the bundled agent a change takes effect at once, with no restart. An older agent (one that you choose with `zycode.agentPath`) needs an edit of `agent.toml` and a restart (see Thinking level).
-- Commands (Command Palette, category *zycode*): Open chat, New chat, Stop, Restart agent, Set up model and API key, Open the getting-started guide, Open agent.toml, Show log, Refresh past chats.
+- An avatar on every message. The `zycode` avatar is a built-in mascot that follows the model of the chat. Your avatar is a plain icon, or an image that you choose. Click an avatar to change it (see Avatars).
+- Commands (Command Palette, category *zycode*): Open chat, New chat, Stop, Restart agent, Set up model and API key, Open the getting-started guide, Open settings, Open agent.toml, Show log, Refresh past chats, Add selection to chat, Add to chat context, Choose user avatar, Choose zycode avatar, Choose built-in zycode avatar, Use account picture as avatar, Reset user avatar to default, Reset zycode avatar to default.
 
 ## The first start
 
@@ -27,7 +28,7 @@ zycode is a coding agent. This extension puts it in a chat view in VS Code. The 
 
 Open the guide again at any time: Command Palette, **zycode: Open the getting-started guide** (or *Welcome: Open Walkthrough*, then *Get started with zycode*).
 
-The agent keeps its settings in `~/.pi-python` (`agent.toml` and `local.env`), or in the folder that `PI_HOME` names. **zycode: Open agent.toml** opens `agent.toml`. It has the model and the *name* of the key variable, and no key. The key is in `local.env`, a file that only your user can read.
+The agent keeps its settings in `~/.pi-python` (`agent.toml` and `local.env`), or in the folder that `PI_HOME` names. **zycode: Open agent.toml** opens `agent.toml`. The **…** menu in the title of the chat view has the same item, and so has Alt+click (Option+click on macOS) on the gear button. `agent.toml` has the model and the *name* of the key variable, and no key. The key is in `local.env`, a file that only your user can read.
 
 **The extension never sees your key.** You type it in the terminal, and the agent saves it in `local.env`. The extension does not read, log or store it. Never type a key in the chat or in the VS Code settings.
 
@@ -75,6 +76,17 @@ The **Thinking** menu in the chat header shows the thinking level that the runni
 - The menu is off while an answer runs, when `agent.toml` does not exist yet (run the setup first) and when it is not valid TOML.
 - The menu does not change how thinking blocks are shown. That is `zycode.showThinking`.
 
+## Avatars
+
+Each message has an avatar. Click an avatar to change it. The Command Palette has the same actions: **zycode: Choose user avatar**, **zycode: Choose zycode avatar**, **zycode: Choose built-in zycode avatar**, **zycode: Use account picture as avatar**, and two commands that reset an avatar. The avatars are not in the Tab order of the chat, so a keyboard user changes an avatar with these commands.
+
+- **The zycode side.** By default the avatar follows the model of the chat. When the id or the name of the model matches Claude, Gemini, DeepSeek, OpenAI (GPT), Grok, Kimi or Qwen, the chat shows the mascot of that family. For any other model, it shows the mascot that `zycode.assistantAvatarPreset` names (Claude by default). Set `zycode.autoModelAvatar` to `false` to stop the automatic change. You can also use an image of your own (`zycode.assistantAvatar`).
+- **Your side.** The default is a plain user icon. You can use an image of your own: a file (PNG, JPEG, GIF, WebP, SVG or ICO, up to 2 MB), an `https://` address, or a `data:image/...` URI. For a chosen file, the extension keeps a copy in its own storage folder.
+- **The picture of your account is off by default.** zycode does not use your accounts unless you ask it to. **zycode: Use account picture as avatar** (or **Use account picture…** in the menu of your avatar) lets you choose GitHub or Microsoft. VS Code then asks you to sign in, or to allow zycode to use the account. After you agree, zycode sends the sign-in token of that account to `api.github.com` (GitHub) or to `graph.microsoft.com` (Microsoft), and downloads your picture. It sends nothing else. An image of your own wins over the account picture. Choose **Off** in the same command to stop. If you write `github` or `microsoft` in `zycode.accountAvatar` by hand, zycode asks nothing: with no permission from VS Code, it shows the plain icon and writes a hint to its log.
+- **Per machine.** `zycode.userAvatar`, `zycode.assistantAvatar` and `zycode.accountAvatar` are machine settings. VS Code does not sync them, and a folder (`.vscode/settings.json`) cannot set them.
+
+**The mascots are not logos, and the vendors are not involved.** The built-in mascots are illustrations from the community, made with AI tools and shared on the web. The mascots for OpenAI (GPT), Grok and Qwen are crops of community character illustrations at <https://aigengtu.com/characters> (credit: ZipZipPipe). They are not the logos or the official characters of any company. zycode is not affiliated with, endorsed by, or sponsored by OpenAI, Anthropic, Google, xAI, DeepSeek, Moonshot AI, Alibaba Cloud, or any other maker of an AI model. A mascot only helps you tell the models apart in the chat. The names of the models and of the companies belong to their owners.
+
 ## Settings
 
 | Setting | Default | Meaning |
@@ -82,14 +94,21 @@ The **Thinking** menu in the chat header shows the thinking level that the runni
 | `zycode.agentPath` | empty | A program to run instead of the bundled agent: an absolute path, or a name that is found on `PATH`. |
 | `zycode.agentArgs` | `[]` | Arguments for it. For a Python install: path `python`, arguments `["-m", "pi_agent_cli"]`. |
 | `zycode.permissionMode` | `ask` | The mode of a start: `ask` or `auto` (see above). It cannot be `always-approve`. |
-| `zycode.showThinking` | `true` | Show the thinking blocks of the model (collapsed). |
+| `zycode.showThinking` | `true` | Show the thinking blocks of the model (open while the model thinks, closed when it is done). |
+| `zycode.autoModelAvatar` | `true` | The `zycode` avatar follows the model of the chat (see Avatars). |
+| `zycode.assistantAvatarPreset` | `claude` | The built-in mascot to use when the setting above is off, or when the model has no mascot. |
+| `zycode.assistantAvatar` | empty | An image of your own for `zycode`: a file path, an `https://` address, or a `data:image/...` URI. A machine setting. |
+| `zycode.userAvatar` | empty | An image of your own for you. It takes the same forms. A machine setting. |
+| `zycode.accountAvatar` | `off` | `off`, `github` or `microsoft`: the account whose picture shows as your avatar. Use the command **zycode: Use account picture as avatar** to turn it on (see Avatars). A machine setting. |
 | `zycode.mcpServers` | `[]` | Application-scoped MCP server definitions forwarded in `session/new` and `session/load` (trusted workspaces only). Supports stdio servers and HTTP/SSE servers when the agent advertises support (`mcpCapabilities`). Note: `env` and `headers` values are stored as plain text in `settings.json`. |
 
-`zycode.agentPath`, `zycode.agentArgs` and `zycode.mcpServers` do not read the settings of a folder (`.vscode/settings.json`): a folder must not choose the program or MCP servers that run on your machine. The same is true for `zycode.permissionMode`.
+`zycode.agentPath`, `zycode.agentArgs` and `zycode.mcpServers` do not read the settings of a folder (`.vscode/settings.json`): a folder must not choose the program or MCP servers that run on your machine. The same is true for `zycode.permissionMode`. The three avatar settings that name a file or an account are machine settings: a folder cannot set them either.
 
 ## Privacy
 
 The extension has no telemetry and sends nothing to its authors. The agent sends your conversation, and the files that it reads, to the model service that you chose in `agent.toml`. In `auto` mode it also sends some `bash` commands to a model (see Permissions). The extension and the authors see none of it.
+
+Avatars use the network in two cases only, and both are your choice. If you turn on the account picture (see Avatars), the extension sends the sign-in token of your GitHub account to `api.github.com`, or the token of your Microsoft account to `graph.microsoft.com`, and it downloads the picture. If you set `zycode.userAvatar` or `zycode.assistantAvatar` to an `https://` address, the extension downloads the image from that address. The built-in mascots are in the package and need no network.
 
 ## Limits
 

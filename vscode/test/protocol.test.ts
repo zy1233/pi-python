@@ -91,6 +91,14 @@ describe("parseWebviewMessage", () => {
       requestId: 0,
       query: "src/",
     });
+    expect(parseWebviewMessage({ type: "pickAvatar", role: "user", extra: 1 })).toEqual({
+      type: "pickAvatar",
+      role: "user",
+    });
+    expect(parseWebviewMessage({ type: "pickAvatar", role: "assistant" })).toEqual({
+      type: "pickAvatar",
+      role: "assistant",
+    });
   });
 
   it("refuses bad input", () => {
@@ -130,6 +138,8 @@ describe("parseWebviewMessage", () => {
       { type: "openFile", path: "src/a.ts", line: 0 },
       { type: "openFile", path: "src/a.ts", line: -3 },
       { type: "openLink", url: "" },
+      { type: "pickAvatar" },
+      { type: "pickAvatar", role: "system" },
     ];
     for (const value of bad) expect(parseWebviewMessage(value)).toBeUndefined();
   });

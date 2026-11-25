@@ -7,6 +7,8 @@ import { ChatController } from "./core/chat-controller.js";
 import { agentConfigPath } from "./core/first-run.js";
 import { normalizeRelativePath } from "./core/mentions.js";
 import type { SessionRow } from "./core/session-list.js";
+import { createAvatarCommands } from "./ui/avatar-commands.js";
+import { AvatarProvider, normalizeAccountAvatar } from "./ui/avatars.js";
 import { CHAT_VIEW_ID, ChatViewProvider } from "./ui/chat-view.js";
 import { DIFF_SCHEME, DiffDocuments } from "./ui/diff-documents.js";
 import { SessionsView } from "./ui/sessions-view.js";
@@ -50,15 +52,28 @@ export function activate(context: vscode.ExtensionContext): void {
   context.subscriptions.push(host, channel, status);
 
   const diffs = new DiffDocuments(() => chat.diffStore);
+  let latestModelIds: [string | undefined, string | undefined] = [undefined, undefined];
+  const avatars = new AvatarProvider(context.extensionUri, host.log, () => view.refreshAvatars());
+  const avatarCommands = createAvatarCommands({
+    avatars,
+    refresh: () => view.refreshAvatars(),
+    notify: (level, text) => host.notify(level, text),
+    storageDir: context.globalStorageUri?.fsPath,
+    activeModel: () => latestModelIds,
+  });
+
   const view = new ChatViewProvider(context.extensionUri, chat, {
     showLog: () => host.showLog(),
     showDiff: (info) => diffs.open(info),
     notify: (text) => host.notify("info", text),
     openGuide,
     openAgentConfig: () => void openAgentConfig(chat),
+    resolveAvatars: (webview) => avatars.resolve(webview),
+    pickAvatar: avatarCommands.pickAvatar,
   });
   const sessions = new SessionsView(chat);
   context.subscriptions.push(
+    avatars,
     view,
     sessions,
     diffs,
@@ -72,6 +87,10 @@ export function activate(context: vscode.ExtensionContext): void {
     chat.onMessage((message) => {
       if (message.type !== "state") return;
       status.update(message);
+      latestModelIds = [message.models?.current, message.model];
+      if (avatars.setActiveModel(message.models?.current, message.model)) {
+        view.refreshAvatars();
+      }
       // The guide opens by itself once, when the first start finds that nothing is set up.
       if (message.status === "needs-setup" && context.globalState.get<boolean>(GUIDE_SHOWN_KEY) !== true) {
         void context.globalState.update(GUIDE_SHOWN_KEY, true);
@@ -91,7 +110,16 @@ export function activate(context: vscode.ExtensionContext): void {
     vscode.commands.registerCommand("zycode.showLog", () => host.showLog()),
     vscode.commands.registerCommand("zycode.runSetup", () => chat.runSetup()),
     vscode.commands.registerCommand("zycode.openGuide", openGuide),
+    vscode.commands.registerCommand("zycode.openSettings", () =>
+      vscode.commands.executeCommand("workbench.action.openSettings", "@ext:zycode.zycode"),
+    ),
     vscode.commands.registerCommand("zycode.openAgentConfig", () => openAgentConfig(chat)),
+    vscode.commands.registerCommand("zycode.chooseUserAvatar", () => avatarCommands.chooseAvatar("user")),
+    vscode.commands.registerCommand("zycode.chooseAssistantAvatar", () => avatarCommands.chooseAvatar("assistant")),
+    vscode.commands.registerCommand("zycode.chooseAccountAvatar", () => avatarCommands.chooseAccountAvatar()),
+    vscode.commands.registerCommand("zycode.resetUserAvatar", () => avatarCommands.resetAvatar("user")),
+    vscode.commands.registerCommand("zycode.resetAssistantAvatar", () => avatarCommands.resetAvatar("assistant")),
+    vscode.commands.registerCommand("zycode.chooseAssistantPreset", () => avatarCommands.chooseAssistantPreset()),
     vscode.commands.registerCommand("zycode.refreshSessions", () => chat.refreshSessions()),
     vscode.commands.registerCommand("zycode.openSession", async (id: unknown) => {
       if (typeof id !== "string") return;
@@ -152,6 +180,19 @@ export function activate(context: vscode.ExtensionContext): void {
         void chat.applyPermissionMode(host.settings().permissionMode);
       }
       if (event.affectsConfiguration("zycode.showThinking")) chat.refreshSettings();
+      if (
+        event.affectsConfiguration("zycode.userAvatar") ||
+        event.affectsConfiguration("zycode.assistantAvatar") ||
+        event.affectsConfiguration("zycode.assistantAvatarPreset") ||
+        event.affectsConfiguration("zycode.autoModelAvatar")
+      ) {
+        avatars.clearCustomCache();
+        view.refreshAvatars();
+      }
+      if (event.affectsConfiguration("zycode.accountAvatar")) {
+        avatars.clearAccountCache();
+        view.refreshAvatars();
+      }
       if (event.affectsConfiguration("zycode.agentPath") || event.affectsConfiguration("zycode.agentArgs")) {
         void vscode.window
           .showInformationMessage("zycode: the agent program changed. Restart the agent to use it.", "Restart agent")
@@ -159,6 +200,18 @@ export function activate(context: vscode.ExtensionContext): void {
       }
     }),
   );
+
+  if (vscode.authentication?.onDidChangeSessions) {
+    context.subscriptions.push(
+      vscode.authentication.onDidChangeSessions((event) => {
+        // Only the account that the user chose matters. With the account picture off, nothing runs.
+        const chosen = normalizeAccountAvatar(vscode.workspace.getConfiguration("zycode").get<string>("accountAvatar", "off"));
+        if (chosen === "off" || event?.provider?.id !== chosen) return;
+        avatars.clearAccountCache();
+        view.refreshAvatars();
+      }),
+    );
+  }
 
   void chat.start();
 }

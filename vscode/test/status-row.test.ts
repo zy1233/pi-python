@@ -1,8 +1,10 @@
+import { readFileSync } from "node:fs";
 import { describe, expect, it } from "vitest";
 
 import {
   approvalStatusText,
   approvalTooltipLine,
+  autoModeNoticeTitle,
   contextBadge,
   contextLevel,
   describeContext,
@@ -254,5 +256,49 @@ describe("the status bar item", () => {
     expect(approvalTooltipLine(0)).toBeUndefined();
     expect(approvalTooltipLine(1)).toBe("Waiting for your approval in the zycode chat.");
     expect(approvalTooltipLine(2)).toBe("Waiting for your approval on 2 requests in the zycode chat.");
+  });
+
+  it("identifies Auto mode notices for collapsed rendering and leaves normal text undefined", () => {
+    const entry =
+      "Auto mode is on. These run with no question: tools that only read, edits inside the project folder, and shell commands that only read. Auto does not guard what tools that only read can read (read, grep, find, ls, fetch_url, web_search). A sandbox is the boundary, not Auto. /auto-log shows what Auto decided.";
+    expect(autoModeNoticeTitle(entry)).toBe("Auto mode is on");
+    expect(autoModeNoticeTitle(`${entry}\n\nAuto cannot check this session safely.`)).toBe("Auto mode is on (warning)");
+    expect(autoModeNoticeTitle('Auto mode is on. The model that [auto] names, "bad", is not the id of a model in [model] or [[models]]: /auto-log')).toBe(
+      "Auto mode is on (warning)",
+    );
+    expect(autoModeNoticeTitle("Auto cannot check this session safely. It asks about every call.")).toBe("Auto mode warning");
+    expect(autoModeNoticeTitle("Settings in agent.toml that Auto cannot work with.")).toBe("Auto mode settings warning");
+    expect(autoModeNoticeTitle("Auto mode is great for coding.")).toBeUndefined();
+    expect(autoModeNoticeTitle("Here is the answer you asked for.")).toBeUndefined();
+  });
+
+  it("folds each Auto notice that the agent really writes", () => {
+    // The texts come from `auto_mode.py`. `test_vscode_auto_notices.py` (pytest) fails when the agent
+    // writes anything else, so this test and the agent cannot drift apart without a failure.
+    const notices = JSON.parse(readFileSync(new URL("./fixtures/auto-notices.json", import.meta.url), "utf8")) as Record<
+      string,
+      string
+    >;
+    const notice = (name: string): string => {
+      const text = notices[name];
+      if (text === undefined) throw new Error(`auto-notices.json has no "${name}"`);
+      return text;
+    };
+    expect(Object.keys(notices).sort()).toEqual([
+      "configProblems",
+      "entry",
+      "entryFromConfig",
+      "entryRules",
+      "entryUnknownModel",
+      "entryWithProblems",
+      "problems",
+    ]);
+    expect(autoModeNoticeTitle(notice("entry"))).toBe("Auto mode is on");
+    expect(autoModeNoticeTitle(notice("entryRules"))).toBe("Auto mode is on");
+    expect(autoModeNoticeTitle(notice("entryFromConfig"))).toBe("Auto mode is on");
+    expect(autoModeNoticeTitle(notice("entryUnknownModel"))).toBe("Auto mode is on (warning)");
+    expect(autoModeNoticeTitle(notice("entryWithProblems"))).toBe("Auto mode is on (warning)");
+    expect(autoModeNoticeTitle(notice("problems"))).toBe("Auto mode warning");
+    expect(autoModeNoticeTitle(notice("configProblems"))).toBe("Auto mode settings warning");
   });
 });

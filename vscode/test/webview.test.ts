@@ -72,7 +72,8 @@ describe.skipIf(!chrome || !built)("webview in headless Chrome", () => {
       const t = document.querySelector("[data-testid=transcript]");
       window.__result = {
         first: window.__posted[0],
-        imgs: t.querySelectorAll("img").length,
+        imgs: t.querySelectorAll("img:not(.avatar)").length,
+        bodyImgs: t.querySelectorAll(".msg .body img").length,
         scripts: t.querySelectorAll("script").length,
         pwn: window.__pwn ?? null,
         text: t.textContent,
@@ -82,6 +83,7 @@ describe.skipIf(!chrome || !built)("webview in headless Chrome", () => {
     expect(out.ok).toBe(true);
     expect(out.first).toEqual({ type: "ready" });
     expect(out.imgs).toBe(0);
+    expect(out.bodyImgs).toBe(0);
     expect(out.scripts).toBe(0);
     expect(out.pwn).toBeNull();
     expect(out.text).toContain("<img src=x onerror=alert(1)>");
@@ -291,7 +293,8 @@ describe.skipIf(!chrome || !built)("webview in headless Chrome", () => {
       host({ type: "agentText", messageId: "a", text: ${lit(source)} });
       const body = document.querySelector(".msg.agent .body");
       window.__result = {
-        imgs: document.querySelectorAll("img").length,
+        imgs: document.querySelectorAll("img:not(.avatar)").length,
+        bodyImgs: body.querySelectorAll("img").length,
         frames: document.querySelectorAll("iframe").length,
         scripts: body.querySelectorAll("script").length,
         bold: body.querySelectorAll("b").length,
@@ -299,7 +302,7 @@ describe.skipIf(!chrome || !built)("webview in headless Chrome", () => {
         links: [...body.querySelectorAll("a")].map((a) => ({ url: a.dataset.url, text: a.textContent, href: a.getAttribute("href") })),
         text: body.textContent,
       };`);
-    expect(out).toMatchObject({ ok: true, imgs: 0, frames: 0, scripts: 0, bold: 0, pwn: null });
+    expect(out).toMatchObject({ ok: true, imgs: 0, bodyImgs: 0, frames: 0, scripts: 0, bold: 0, pwn: null });
     // The image is a link with its description. It loads nothing. The javascript: link is not a link.
     expect(out.links).toEqual([{ url: "https://example.com/a.png", text: "pic", href: "#" }]);
     expect(out.text).toContain("<iframe src=//example.com></iframe>");
@@ -417,6 +420,191 @@ describe.skipIf(!chrome || !built)("webview in headless Chrome", () => {
       state({ showThinking: true });
       window.__result = { shown, afterOff, afterOn: hidden() };`);
     expect(out).toMatchObject({ ok: true, shown: true, afterOff: true, afterOn: false });
+  });
+
+  it("auto-expands thinking while streaming, auto-collapses when done, keeps duration visible at bottom, and respects manual toggle", () => {
+    const out = run(`${state}
+      state({ status: "busy", showThinking: true });
+      host({ type: "agentThought", messageId: "a1", text: "step 1" });
+      const thought = document.querySelector(".thought");
+      const wrap = document.querySelector(".thought-wrap");
+      const dur = document.querySelector(".thought-duration");
+      const whileStreaming = {
+        open: thought.open,
+        streaming: thought.classList.contains("streaming"),
+        durHidden: dur.hidden,
+        durText: dur.textContent,
+        wrapHidden: wrap.hidden,
+      };
+      host({ type: "agentThoughtEnd", messageId: "a1", durationMs: 3450 });
+      const afterThoughtEnd = {
+        open: thought.open,
+        streaming: thought.classList.contains("streaming"),
+        durHidden: dur.hidden,
+        durText: dur.textContent,
+      };
+      host({ type: "agentText", messageId: "a1", text: "Done." });
+      const afterText = { open: thought.open, durHidden: dur.hidden, durText: dur.textContent };
+
+      // Manual toggle during streaming prevents auto-collapse from overriding user choice.
+      host({ type: "agentThought", messageId: "a2", text: "manual" });
+      const t2 = document.querySelectorAll(".thought")[1];
+      t2.open = false;
+      t2.dispatchEvent(new Event("toggle"));
+      host({ type: "agentThoughtEnd", messageId: "a2", durationMs: 1200 });
+      const manualAfterEnd = t2.open;
+
+      // Also test auto-collapse when agentText arrives without prior agentThoughtEnd, and showThinking: false hiding wrap.
+      host({ type: "agentThought", messageId: "a3", text: "fast" });
+      const t3 = document.querySelectorAll(".thought")[2];
+      const t3OpenDuring = t3.open;
+      host({ type: "agentText", messageId: "a3", text: "reply" });
+      const t3OpenAfterText = t3.open;
+      state({ status: "ready", showThinking: false });
+      const t3WrapHiddenOff = document.querySelectorAll(".thought-wrap")[2].hidden;
+
+      window.__result = {
+        whileStreaming,
+        afterThoughtEnd,
+        afterText,
+        manualAfterEnd,
+        t3OpenDuring,
+        t3OpenAfterText,
+        t3WrapHiddenOff,
+      };`);
+    expect(out).toMatchObject({
+      ok: true,
+      whileStreaming: {
+        open: true,
+        streaming: true,
+        durHidden: false,
+        wrapHidden: false,
+      },
+      afterThoughtEnd: {
+        open: false,
+        streaming: false,
+        durHidden: false,
+        durText: "Thought for 3.4 s",
+      },
+      afterText: {
+        open: false,
+        durHidden: false,
+        durText: "Thought for 3.4 s",
+      },
+      manualAfterEnd: false,
+      t3OpenDuring: true,
+      t3OpenAfterText: false,
+      t3WrapHiddenOff: true,
+    });
+    expect((out.whileStreaming as { durText: string }).durText).toMatch(/^Thinking · /);
+  });
+
+  it("collapses Auto mode notice messages by default, preserves open state on reload, and leaves normal agent replies open", () => {
+    const entryText =
+      "Auto mode is on. These run with no question: tools that only read, edits inside the project folder, and shell commands that only read. Auto does not guard what tools that only read can read (read, grep, find, ls, fetch_url, web_search). A sandbox is the boundary, not Auto. /auto-log shows what Auto decided.";
+    const out = run(`${state}
+      state({});
+      host({ type: "agentText", messageId: "auto1", text: ${lit(entryText)} });
+      host({ type: "agentText", messageId: "normal1", text: "Hello, how can I help?" });
+      const autoMsg = document.querySelectorAll(".msg.agent")[0];
+      const normalMsg = document.querySelectorAll(".msg.agent")[1];
+      const details = autoMsg.querySelector("details.auto-notice");
+      const initiallyCollapsed = details !== null && details.open === false && details.querySelector("summary").textContent === "Auto mode is on";
+      details.open = true;
+      details.dispatchEvent(new Event("toggle"));
+      window.__result = {
+        initiallyCollapsed,
+        isAutoClass: autoMsg.classList.contains("auto-notice-msg"),
+        normalHasDetails: normalMsg.querySelector("details.auto-notice") !== null,
+        normalText: normalMsg.querySelector(".body").textContent,
+        savedAutoOpen: window.__webviewState.openDetails["auto:auto1"],
+      };`);
+    expect(out).toMatchObject({
+      ok: true,
+      initiallyCollapsed: true,
+      isAutoClass: true,
+      normalHasDetails: false,
+      normalText: "Hello, how can I help?",
+      savedAutoOpen: true,
+    });
+  });
+
+  it("renders user and assistant avatars left of names, updates live, and falls back gracefully on image error", () => {
+    const pngUri = "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==";
+    const out = run(`${state}
+      state({});
+      host({ type: "userMessage", id: "u1", text: "hi" });
+      host({ type: "agentText", messageId: "a1", text: "hello" });
+
+      const userAuthor = document.querySelector(".msg.user .msg-author");
+      const agentAuthor = document.querySelector(".msg.agent .msg-author");
+      const initialFallback = {
+        userFirstIsAvatar: userAuthor.firstElementChild.classList.contains("avatar-slot"),
+        userHasFallback: userAuthor.querySelector(".avatar-fallback-user") !== null,
+        agentHasFallback: agentAuthor.querySelector(".avatar-fallback-assistant") !== null,
+        userWho: userAuthor.querySelector(".who").textContent,
+        agentWho: agentAuthor.querySelector(".who").textContent,
+        // A long chat has an avatar button on every message: none of them may be a Tab stop.
+        userTabIndex: userAuthor.querySelector("button.avatar-slot").getAttribute("tabindex"),
+        agentTabIndex: agentAuthor.querySelector("button.avatar-slot").getAttribute("tabindex"),
+      };
+
+      host({ type: "avatars", avatars: { user: ${lit(pngUri)}, assistant: ${lit(pngUri)} } });
+      const afterAvatars = {
+        userSrc: userAuthor.querySelector("img.avatar")?.getAttribute("src"),
+        agentSrc: agentAuthor.querySelector("img.avatar")?.getAttribute("src"),
+      };
+
+      // Simulate broken image error on user avatar -> falls back to .avatar-fallback-user.
+      const userImg = userAuthor.querySelector("img.avatar");
+      userImg.dispatchEvent(new Event("error"));
+      const afterError = {
+        userImgCount: userAuthor.querySelectorAll("img.avatar").length,
+        userHasFallback: userAuthor.querySelector(".avatar-fallback-user") !== null,
+      };
+
+      // Live update changes existing messages' avatar images.
+      const pngUri2 = "data:image/png;base64,AAAA";
+      host({ type: "avatars", avatars: { user: pngUri2, assistant: pngUri2 } });
+      const afterSecondUpdate = {
+        userSrc: userAuthor.querySelector("img.avatar")?.getAttribute("src"),
+        agentSrc: agentAuthor.querySelector("img.avatar")?.getAttribute("src"),
+      };
+
+      // Clicking either avatar button posts pickAvatar with its role.
+      userAuthor.querySelector("button.avatar-slot").click();
+      agentAuthor.querySelector("button.avatar-slot").click();
+      const pickedAvatars = window.__posted.filter((m) => m.type === "pickAvatar");
+
+      window.__result = { initialFallback, afterAvatars, afterError, afterSecondUpdate, pickedAvatars };`);
+    expect(out).toMatchObject({
+      ok: true,
+      initialFallback: {
+        userFirstIsAvatar: true,
+        userHasFallback: true,
+        agentHasFallback: true,
+        userWho: "You",
+        agentWho: "zycode",
+        userTabIndex: "-1",
+        agentTabIndex: "-1",
+      },
+      afterAvatars: {
+        userSrc: pngUri,
+        agentSrc: pngUri,
+      },
+      afterError: {
+        userImgCount: 0,
+        userHasFallback: true,
+      },
+      afterSecondUpdate: {
+        userSrc: "data:image/png;base64,AAAA",
+        agentSrc: "data:image/png;base64,AAAA",
+      },
+      pickedAvatars: [
+        { type: "pickAvatar", role: "user" },
+        { type: "pickAvatar", role: "assistant" },
+      ],
+    });
   });
 });
 

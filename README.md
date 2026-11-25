@@ -11,7 +11,7 @@ English | [简体中文](README.zh-CN.md)
 
 Website: [zycode.dev](https://zycode.dev) ([中文](https://zycode.dev/zh/))
 
-> Unofficial project: this repository is not affiliated with, endorsed by, or maintained by the official [pi](https://github.com/earendil-works/pi) project or its maintainers.
+> Unofficial project: this repository is not affiliated with, endorsed by, or maintained by the official [pi](https://github.com/earendil-works/pi) project or its maintainers. It is also not affiliated with, endorsed by, or sponsored by any maker of an AI model (for example OpenAI, Anthropic, Google, DeepSeek, xAI, Moonshot AI or Alibaba Cloud). Model and company names only say which models you can connect to. They belong to their owners.
 
 ## Overview
 
@@ -126,7 +126,7 @@ See [TUI & Code-Agent Guide](docs/TUI-AND-CODE-AGENT.md) and [Windows notes](doc
 
 ### VS Code extension
 
-The extension `zycode.zycode` ([`vscode/README.md`](vscode/README.md)) puts the zycode agent in a chat view in VS Code with the agent binary bundled inside (no separate Python install needed). It is unofficial and not affiliated with pi or Microsoft.
+The extension `zycode.zycode` ([`vscode/README.md`](vscode/README.md)) puts the zycode agent in a chat view in VS Code with the agent binary bundled inside (no separate Python install needed). It is unofficial and not affiliated with pi, Microsoft, or any model vendor. The mascot avatars in the chat are community illustrations, not the logos of any company.
 
 - **VS Code:** install from the [Visual Studio Marketplace](https://marketplace.visualstudio.com/items?itemName=zycode.zycode), or run `code --install-extension zycode.zycode`.
 - **VSCodium / Open VSX:** install from [Open VSX](https://open-vsx.org/extension/zycode/zycode).

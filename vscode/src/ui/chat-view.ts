@@ -6,6 +6,8 @@ import { MAX_MENTIONS, type MentionAttachment } from "../core/mentions.js";
 import {
   isSafeLink,
   parseWebviewMessage,
+  type AvatarRole,
+  type AvatarState,
   type HostMessage,
   type WebviewMessage,
 } from "../core/protocol.js";
@@ -31,6 +33,7 @@ export class ChatViewProvider implements vscode.WebviewViewProvider, vscode.Disp
   private latestMentionRequest = 0;
   private webviewReady = false;
   private pendingMentions: MentionAttachment[] = [];
+  private avatarSeq = 0;
 
   constructor(
     private readonly extensionUri: vscode.Uri,
@@ -41,6 +44,8 @@ export class ChatViewProvider implements vscode.WebviewViewProvider, vscode.Disp
       notify(text: string): void;
       openGuide(): void;
       openAgentConfig(): void;
+      resolveAvatars?: (webview: vscode.Webview) => Promise<AvatarState>;
+      pickAvatar?: (role: AvatarRole) => Promise<void> | void;
     },
   ) {
     this.subscription = controller.onMessage((message) => {
@@ -100,6 +105,21 @@ export class ChatViewProvider implements vscode.WebviewViewProvider, vscode.Disp
     this.subscription.dispose();
   }
 
+  /** Re-resolves and posts user and assistant avatars to the active webview, if ready. */
+  refreshAvatars(): void {
+    if (!this.view || !this.webviewReady || !this.actions.resolveAvatars) return;
+    const seq = ++this.avatarSeq;
+    const webview = this.view.webview;
+    void this.actions
+      .resolveAvatars(webview)
+      .then((avatars) => {
+        if (this.webviewReady && this.view?.webview === webview && seq === this.avatarSeq) {
+          this.post({ type: "avatars", avatars });
+        }
+      })
+      .catch(() => undefined);
+  }
+
   private post(message: HostMessage): void {
     void this.view?.webview.postMessage(message);
   }
@@ -115,6 +135,7 @@ export class ChatViewProvider implements vscode.WebviewViewProvider, vscode.Disp
         for (const item of this.pendingMentions.splice(0)) {
           this.post({ type: "insertMention", item });
         }
+        this.refreshAvatars();
         if (controller.currentStatus === "stopped") await controller.start();
         return;
       case "send":
@@ -173,6 +194,9 @@ export class ChatViewProvider implements vscode.WebviewViewProvider, vscode.Disp
       case "openLink":
         if (isSafeLink(message.url)) await vscode.env.openExternal(vscode.Uri.parse(message.url, true));
         return;
+      case "pickAvatar":
+        await this.actions.pickAvatar?.(message.role);
+        return;
       case "showDiff": {
         const info = controller.diffFor(message.toolCallId);
         if (info) await this.actions.showDiff(info);
@@ -190,7 +214,7 @@ export class ChatViewProvider implements vscode.WebviewViewProvider, vscode.Disp
       "default-src 'none'",
       `style-src ${webview.cspSource}`,
       `script-src 'nonce-${token}'`,
-      "img-src data:",
+      `img-src ${webview.cspSource} data:`,
     ].join("; ");
     return `<!DOCTYPE html>
 <html lang="en">
