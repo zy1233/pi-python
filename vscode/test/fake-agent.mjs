@@ -165,10 +165,14 @@ async function runPrompt(ctx, sessionId, prompt) {
     await notify({ sessionId, update: { sessionUpdate: "tool_call_update", toolCallId: "call_bs", status: "completed", content: [{ type: "terminal", terminalId: "call_bs" }, { type: "content", content: { type: "text", text: "chunk1\nchunk2\nchunk3\n" } }], _meta: { terminal_exit: { terminal_id: "call_bs", exit_code: 0 } } } });
     return "end_turn";
   }
-  if (prompt === "tool:codemode" || prompt === "tool:workflow") {
-    const isCode = prompt === "tool:codemode";
-    const rawInput = isCode ? { code: CODEMODE_SCRIPT, timeout_ms: 5000 } : { script: WORKFLOW_SCRIPT, max_agents: 2 };
-    const name = isCode ? "codemode" : "workflow";
+  if (prompt === "tool:codemode" || prompt === "tool:workflow" || prompt === "tool:workflow-name" || prompt === "tool:mcp-name") {
+    const calls = {
+      "tool:codemode": ["codemode", { code: CODEMODE_SCRIPT, timeout_ms: 5000 }],
+      "tool:workflow": ["workflow", { script: WORKFLOW_SCRIPT, max_agents: 2 }],
+      "tool:workflow-name": ["workflow", { name: "deep-research", args: { question: "why?" } }],
+      "tool:mcp-name": ["mcp__demo__create", { name: "my-repo" }],
+    };
+    const [name, rawInput] = calls[prompt];
     await notify({ sessionId, update: { sessionUpdate: "tool_call", toolCallId: "call_s", title: name, kind: "other", status: "pending", rawInput } });
     const outcome = await ask(ctx, sessionId, { toolCallId: "call_s", kind: "other", status: "pending", title: name, rawInput }, allowReject);
     const allowed = outcome.outcome === "selected" && outcome.optionId === "allow-once";

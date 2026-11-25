@@ -109,27 +109,47 @@ describe("lastTextBlock and summarizeInput", () => {
     expect(summarizeInput({ script, max_agents: 3, args: { a: 1 } })).toBe(script);
   });
 
-  it("shows the built-in workflow that runs, and not the script that the agent ignores", () => {
+  it("shows the built-in workflow that runs, and not the script that the agent ignores, for a workflow call", () => {
     const script = "async def main():\n    await agent('x')\n";
     const ignored = "The agent ignores `script` when `name` is set.";
-    expect(summarizeInput({ name: "deep-research", script })).toBe(`built-in workflow: deep-research\n${ignored}`);
-    expect(summarizeInput({ name: "deep-research", script })).not.toContain("async def");
-    expect(summarizeInput({ name: "deep-research", args: { question: "q" } })).toBe(
-      'built-in workflow: deep-research\nargs: {"question":"q"}',
-    );
-    expect(summarizeInput({ name: "deep-research" })).toBe("built-in workflow: deep-research");
-    expect(summarizeInput({ name: "deep-research", args: { question: "q" }, script })).toBe(
-      `built-in workflow: deep-research\nargs: {"question":"q"}\n${ignored}`,
-    );
+    for (const title of ["workflow", "workflow (codemode)", "workflow (Auto: no rule; workflow sub-agent in /p)"]) {
+      expect(summarizeInput({ name: "deep-research", script }, title)).toBe(`built-in workflow: deep-research\n${ignored}`);
+      expect(summarizeInput({ name: "deep-research", script }, title)).not.toContain("async def");
+      expect(summarizeInput({ name: "deep-research", args: { question: "q" } }, title)).toBe(
+        'built-in workflow: deep-research\nargs: {"question":"q"}',
+      );
+      expect(summarizeInput({ name: "deep-research" }, title)).toBe("built-in workflow: deep-research");
+      expect(summarizeInput({ name: "deep-research", args: { question: "q" }, script }, title)).toBe(
+        `built-in workflow: deep-research\nargs: {"question":"q"}\n${ignored}`,
+      );
+    }
     const question = "why ".repeat(5000);
-    expect(summarizeInput({ name: "w", args: { question, list: [1, { a: null }] } })).toBe(
+    expect(summarizeInput({ name: "w", args: { question, list: [1, { a: null }] } }, "workflow")).toBe(
       `built-in workflow: w\nargs: ${JSON.stringify({ question, list: [1, { a: null }] })}`,
     );
-    expect(summarizeInput({ name: "w", args: null })).toBe("built-in workflow: w");
-    expect(summarizeInput({ script })).toBe(script);
-    expect(summarizeInput({ name: "", script })).toBe(script);
-    expect(summarizeInput({ name: 5, script })).toBe(script);
-    expect(summarizeInput({ name: "", args: { a: 1 } })).toBe("");
+    expect(summarizeInput({ name: "w", args: null }, "workflow")).toBe("built-in workflow: w");
+    expect(summarizeInput({ script }, "workflow")).toBe(script);
+    expect(summarizeInput({ name: "", script }, "workflow")).toBe(script);
+    expect(summarizeInput({ name: 5, script }, "workflow")).toBe(script);
+    expect(summarizeInput({ name: "", args: { a: 1 } }, "workflow")).toBe("");
+  });
+
+  it("gives `name` no meaning for a tool that is not workflow, and for a call with no title", () => {
+    const script = "async def main():\n    pass\n";
+    expect(summarizeInput({ name: "deep-research" })).toBe("");
+    expect(summarizeInput({ name: "review", args: {} })).toBe("");
+    expect(summarizeInput({ name: "deep-research" }, undefined)).toBe("");
+    expect(summarizeInput({ name: "deep-research" }, "")).toBe("");
+    for (const title of ["mcp__github__create_repository", "mcp__demo__create (codemode)", "create_repository", "workflows", "my-workflow", "workflow_x"]) {
+      expect(summarizeInput({ name: "deep-research" }, title)).toBe("");
+      expect(summarizeInput({ name: "my-repo", private: true }, title)).toBe("");
+      expect(summarizeInput({ name: "my-repo", args: { a: 1 } }, title)).toBe("");
+    }
+    expect(summarizeInput({ name: "my-repo", script }, "mcp__github__create_repository")).toBe(script);
+    expect(summarizeInput({ name: "my-repo", script })).toBe(script);
+    expect(summarizeInput({ name: "my-repo", code: "c" }, "mcp__demo__run")).toBe("c");
+    expect(summarizeInput({ name: "my-repo", path: "p" }, "workflow")).toBe("p");
+    expect(summarizeInput({ name: "my-repo", command: "ls" }, "workflow")).toBe("ls");
   });
 
   it("reads the command first, then the path, then the code, then the script, and skips values that are not text", () => {

@@ -274,6 +274,22 @@ describe("chat", () => {
     }
   });
 
+  it("shows the built-in workflow of a workflow call by name, and nothing for an MCP tool with a name", async () => {
+    for (const [prompt, title, summary] of [
+      ["tool:workflow-name", "workflow", 'built-in workflow: deep-research\nargs: {"question":"why?"}'],
+      ["tool:mcp-name", "mcp__demo__create", ""],
+    ] as const) {
+      const { controller, messages } = setup();
+      await controller.start();
+      const turn = controller.send(prompt);
+      await waitFor(() => ofType(messages, "permission").length === 1, "the permission card");
+      const card = ofType(messages, "permission")[0]!;
+      expect(card).toMatchObject({ kind: "tool", title, summary });
+      expect(controller.answerPermission(card.requestId, "reject-once")).toBe(true);
+      await turn;
+    }
+  });
+
   it("asks for a write, and sends the choice that the user made", async () => {
     const { controller, messages } = setup();
     await controller.start();
