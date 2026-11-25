@@ -59,6 +59,23 @@ export interface AccountSessionLike {
   account: { id: string; label?: string };
 }
 
+/** The accounts whose picture the user can choose as their avatar. */
+export type AccountAvatarProvider = "github" | "microsoft";
+/** The value of `zycode.accountAvatar`: `off` (the default), or the account that the user chose. */
+export type AccountAvatarSetting = "off" | AccountAvatarProvider;
+
+export const ACCOUNT_AVATAR_SETTING_KEY = "accountAvatar";
+
+export function normalizeAccountAvatar(raw: unknown): AccountAvatarSetting {
+  return raw === "github" || raw === "microsoft" ? raw : "off";
+}
+
+/** The sign-in provider of VS Code, and the scopes that zycode asks for, for each account. */
+const ACCOUNT_SESSIONS: Record<AccountAvatarProvider, { providerId: string; scopes: readonly string[] }> = {
+  github: { providerId: "github", scopes: ["read:user"] },
+  microsoft: { providerId: "microsoft", scopes: ["User.Read"] },
+};
+
 export interface AccountAvatarDeps {
   getSession?: (
     providerId: string,
@@ -67,6 +84,14 @@ export interface AccountAvatarDeps {
   ) => PromiseLike<AccountSessionLike | undefined>;
   fetch?: typeof globalThis.fetch;
   log?: Logger;
+}
+
+export interface AccountConsentDeps {
+  getSession?: (
+    providerId: string,
+    scopes: readonly string[],
+    options: { createIfNone: true },
+  ) => PromiseLike<AccountSessionLike | undefined>;
 }
 
 function parseContentType(header: string | null): string {
@@ -191,11 +216,74 @@ async function getSilentSession(
   }
 }
 
+async function fetchGithubAvatar(
+  session: AccountSessionLike,
+  fetchFn: typeof globalThis.fetch,
+  log: Logger | undefined,
+): Promise<string | undefined> {
+  try {
+    let avatarUrl: string | undefined;
+    try {
+      // The sign-in token goes to `api.github.com` and nowhere else.
+      const res = await fetchFn("https://api.github.com/user", {
+        headers: {
+          Authorization: `Bearer ${session.accessToken}`,
+          "User-Agent": "zycode-vscode",
+        },
+        signal: AbortSignal.timeout(FETCH_TIMEOUT_MS),
+      });
+      if (res.ok) {
+        const json = (await res.json()) as { avatar_url?: unknown };
+        if (typeof json.avatar_url === "string" && json.avatar_url.startsWith("https://")) {
+          avatarUrl = json.avatar_url;
+        }
+      }
+    } catch {
+      // Fall through to account.id avatar URL if applicable.
+    }
+    if (!avatarUrl && /^\d+$/.test(session.account.id)) {
+      avatarUrl = `https://avatars.githubusercontent.com/u/${session.account.id}?s=80`;
+    }
+    if (avatarUrl) {
+      // The picture itself is a plain download: no token goes with it.
+      return await fetchImageDataUri(avatarUrl, fetchFn, MAX_ACCOUNT_AVATAR_BYTES, undefined, true);
+    }
+  } catch (error) {
+    log?.warn(`Failed to resolve GitHub account avatar: ${error instanceof Error ? error.message : String(error)}`);
+  }
+  return undefined;
+}
+
+async function fetchMicrosoftAvatar(
+  session: AccountSessionLike,
+  fetchFn: typeof globalThis.fetch,
+  log: Logger | undefined,
+): Promise<string | undefined> {
+  try {
+    // The sign-in token goes to `graph.microsoft.com` and nowhere else.
+    return await fetchImageDataUri(
+      "https://graph.microsoft.com/v1.0/me/photo/$value",
+      fetchFn,
+      MAX_ACCOUNT_AVATAR_BYTES,
+      { Authorization: `Bearer ${session.accessToken}` },
+      true,
+    );
+  } catch (error) {
+    log?.warn(`Failed to resolve Microsoft account avatar: ${error instanceof Error ? error.message : String(error)}`);
+  }
+  return undefined;
+}
+
 /**
- * Silently resolves the signed-in VS Code account's avatar (GitHub or Microsoft) as a `data:` URI.
- * Never prompts the user to sign in (`silent: true` only).
+ * Resolves the picture of the account that the user chose (`zycode.accountAvatar`) as a `data:` URI.
+ * It never asks the user to sign in and never shows a badge (`silent: true` only): VS Code gives a
+ * session only to an account that the user already allowed `zycode` to use, in
+ * {@link requestAccountSession}. With no such session, it logs a hint and returns `undefined`.
  */
-export async function resolveVscodeAccountAvatar(deps: AccountAvatarDeps = {}): Promise<string | undefined> {
+export async function resolveVscodeAccountAvatar(
+  provider: AccountAvatarProvider,
+  deps: AccountAvatarDeps = {},
+): Promise<string | undefined> {
   const getSession =
     deps.getSession ??
     (vscode.authentication?.getSession
@@ -203,62 +291,45 @@ export async function resolveVscodeAccountAvatar(deps: AccountAvatarDeps = {}): 
       : undefined);
   if (!getSession) return undefined;
 
+  const { providerId, scopes } = ACCOUNT_SESSIONS[provider];
+  const session = await getSilentSession(getSession, providerId, scopes);
+  if (!session) {
+    deps.log?.info(
+      `The account avatar is set to ${provider}, but VS Code has no ${provider} session that zycode may use. ` +
+        'Run "zycode: Use account picture as avatar" to allow it, or set zycode.accountAvatar to "off".',
+    );
+    return undefined;
+  }
+
   const fetchFn = deps.fetch ?? globalThis.fetch;
+  return provider === "github"
+    ? fetchGithubAvatar(session, fetchFn, deps.log)
+    : fetchMicrosoftAvatar(session, fetchFn, deps.log);
+}
 
-  const ghSession =
-    (await getSilentSession(getSession, "github", ["read:user"])) ??
-    (await getSilentSession(getSession, "github", ["user:email"])) ??
-    (await getSilentSession(getSession, "github", []));
+/**
+ * Asks VS Code for a session of `provider`. VS Code shows its own question: to sign in, or to allow
+ * `zycode` to use an account that is already signed in. Call it only for a choice that the user just
+ * made (the command); a lookup that runs by itself must use {@link resolveVscodeAccountAvatar}.
+ * Returns `false` when the user says no, or when VS Code has no such provider.
+ */
+export async function requestAccountSession(
+  provider: AccountAvatarProvider,
+  deps: AccountConsentDeps = {},
+): Promise<boolean> {
+  const getSession =
+    deps.getSession ??
+    (vscode.authentication?.getSession
+      ? (providerId, scopes, options) => vscode.authentication.getSession(providerId, scopes, options)
+      : undefined);
+  if (!getSession) return false;
 
-  if (ghSession) {
-    try {
-      let avatarUrl: string | undefined;
-      try {
-        const res = await fetchFn("https://api.github.com/user", {
-          headers: {
-            Authorization: `Bearer ${ghSession.accessToken}`,
-            "User-Agent": "zycode-vscode",
-          },
-          signal: AbortSignal.timeout(FETCH_TIMEOUT_MS),
-        });
-        if (res.ok) {
-          const json = (await res.json()) as { avatar_url?: unknown };
-          if (typeof json.avatar_url === "string" && json.avatar_url.startsWith("https://")) {
-            avatarUrl = json.avatar_url;
-          }
-        }
-      } catch {
-        // Fall through to account.id avatar URL if applicable.
-      }
-      if (!avatarUrl && /^\d+$/.test(ghSession.account.id)) {
-        avatarUrl = `https://avatars.githubusercontent.com/u/${ghSession.account.id}?s=80`;
-      }
-      if (avatarUrl) {
-        const uri = await fetchImageDataUri(avatarUrl, fetchFn, MAX_ACCOUNT_AVATAR_BYTES, undefined, true);
-        if (uri) return uri;
-      }
-    } catch (error) {
-      deps.log?.warn(`Failed to resolve GitHub account avatar: ${error instanceof Error ? error.message : String(error)}`);
-    }
+  const { providerId, scopes } = ACCOUNT_SESSIONS[provider];
+  try {
+    return (await getSession(providerId, scopes, { createIfNone: true })) !== undefined;
+  } catch {
+    return false;
   }
-
-  const msSession = await getSilentSession(getSession, "microsoft", ["User.Read"]);
-  if (msSession) {
-    try {
-      const uri = await fetchImageDataUri(
-        "https://graph.microsoft.com/v1.0/me/photo/$value",
-        fetchFn,
-        MAX_ACCOUNT_AVATAR_BYTES,
-        { Authorization: `Bearer ${msSession.accessToken}` },
-        true,
-      );
-      if (uri) return uri;
-    } catch (error) {
-      deps.log?.warn(`Failed to resolve Microsoft account avatar: ${error instanceof Error ? error.message : String(error)}`);
-    }
-  }
-
-  return undefined;
 }
 
 export interface ImportAvatarDeps {
@@ -341,8 +412,16 @@ export async function importLocalAvatarFile(
   const fileName = `${role}-${nowFn()}${ext}`;
   const targetPath = path.join(avatarsDir, fileName);
 
-  await mkdirFn(avatarsDir, { recursive: true });
-  await writeFileFn(targetPath, data);
+  try {
+    await mkdirFn(avatarsDir, { recursive: true });
+    await writeFileFn(targetPath, data);
+  } catch (error) {
+    // A full disk or a folder with no write access must give the user a message, not an unhandled rejection.
+    return {
+      ok: false,
+      reason: `Could not save a copy of the image in the storage folder of the extension (${error instanceof Error ? error.message : String(error)}).`,
+    };
+  }
   await cleanupStoredAvatars(role, storageDir, deps, fileName);
   return { ok: true, path: targetPath };
 }
@@ -350,13 +429,24 @@ export async function importLocalAvatarFile(
 /** Resolves and caches user and assistant avatars for the chat webview. */
 export class AvatarProvider implements vscode.Disposable {
   private customCache = new Map<string, string | undefined>();
-  private accountCache: { resolved: boolean; value: string | undefined } | undefined;
-  private accountPending: Promise<string | undefined> | undefined;
+  /** What the last lookup of the chosen account found (`undefined` when it found no picture). */
+  private accountCache: { provider: AccountAvatarProvider; value: string | undefined } | undefined;
+  /** The account that a lookup in the background is for, while it runs. */
+  private accountLookup: AccountAvatarProvider | undefined;
+  /** Grows when the account cache is cleared, so a lookup that began before then stores nothing. */
+  private accountEpoch = 0;
   private activeModelIds: [string | undefined, string | undefined] = [undefined, undefined];
 
+  /**
+   * @param onAccountAvatar called when a lookup in the background found the account picture: the
+   *   caller posts the avatars to the chat again.
+   * @param accountDeps replaces the sign-in and the network calls of the account lookup (for tests).
+   */
   constructor(
     private readonly extensionUri: vscode.Uri,
     private readonly log: Logger,
+    private readonly onAccountAvatar: () => void = () => undefined,
+    private readonly accountDeps: Pick<AccountAvatarDeps, "getSession" | "fetch"> = {},
   ) {}
 
   setActiveModel(modelId?: string, modelName?: string): boolean {
@@ -378,8 +468,9 @@ export class AvatarProvider implements vscode.Disposable {
   }
 
   clearAccountCache(): void {
+    this.accountEpoch += 1;
     this.accountCache = undefined;
-    this.accountPending = undefined;
+    this.accountLookup = undefined;
   }
 
   dispose(): void {
@@ -397,23 +488,28 @@ export class AvatarProvider implements vscode.Disposable {
     return resolved;
   }
 
-  private async resolveAccountCached(): Promise<string | undefined> {
-    if (this.accountCache?.resolved) return this.accountCache.value;
-    if (!this.accountPending) {
-      this.accountPending = resolveVscodeAccountAvatar({ log: this.log })
-        .then((value) => {
-          this.accountCache = { resolved: true, value };
-          return value;
-        })
-        .catch(() => {
-          this.accountCache = { resolved: true, value: undefined };
-          return undefined;
-        })
-        .finally(() => {
-          this.accountPending = undefined;
-        });
-    }
-    return this.accountPending;
+  /**
+   * The picture of `provider` if a lookup already found it. With no answer yet, it starts a lookup in the
+   * background and returns `undefined` at once: a slow network must not hold back the other avatars.
+   * `onAccountAvatar` runs when the picture arrives.
+   */
+  private accountPicture(provider: AccountAvatarProvider): string | undefined {
+    if (this.accountCache?.provider === provider) return this.accountCache.value;
+    if (this.accountLookup !== provider) this.lookUpAccount(provider);
+    return undefined;
+  }
+
+  private lookUpAccount(provider: AccountAvatarProvider): void {
+    const epoch = this.accountEpoch;
+    this.accountLookup = provider;
+    void resolveVscodeAccountAvatar(provider, { ...this.accountDeps, log: this.log })
+      .catch(() => undefined)
+      .then((value) => {
+        if (epoch !== this.accountEpoch) return;
+        this.accountLookup = undefined;
+        this.accountCache = { provider, value };
+        if (value !== undefined) this.onAccountAvatar();
+      });
   }
 
   async resolve(webview: vscode.Webview): Promise<AvatarState> {
@@ -422,6 +518,7 @@ export class AvatarProvider implements vscode.Disposable {
     const rawAssistant = config.get<string>("assistantAvatar", "");
     const rawPreset = config.get<string>("assistantAvatarPreset", "claude");
     const autoModelAvatar = config.get<boolean>("autoModelAvatar", true);
+    const accountAvatar = normalizeAccountAvatar(config.get<string>(ACCOUNT_AVATAR_SETTING_KEY, "off"));
 
     const matchedPreset = autoModelAvatar ? matchModelAvatarPreset(...this.activeModelIds) : undefined;
     const [customUser, customAssistant] = await Promise.all([
@@ -429,7 +526,10 @@ export class AvatarProvider implements vscode.Disposable {
       matchedPreset === undefined ? this.resolveCustomCached(rawAssistant) : Promise.resolve(undefined),
     ]);
 
-    const user = customUser ?? (await this.resolveAccountCached());
+    // The account picture is off until the user turns it on (`zycode.accountAvatar`), and no lookup
+    // starts while an image of their own is set. A lookup can be slow, so the default icon shows
+    // first and the picture follows when it arrives.
+    const user = customUser ?? (accountAvatar === "off" ? undefined : this.accountPicture(accountAvatar));
     const assistant =
       matchedPreset !== undefined
         ? this.presetUri(webview, matchedPreset)

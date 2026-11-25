@@ -102,6 +102,7 @@ describe("extension wiring", () => {
       for (const cmd of [
         "zycode.chooseUserAvatar",
         "zycode.chooseAssistantAvatar",
+        "zycode.chooseAccountAvatar",
         "zycode.resetUserAvatar",
         "zycode.resetAssistantAvatar",
         "zycode.chooseAssistantPreset",

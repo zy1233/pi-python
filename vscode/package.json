@@ -1,7 +1,7 @@
 {
   "name": "zycode",
   "displayName": "zycode",
-  "description": "Chat with the zycode coding agent in VS Code. Unofficial; not affiliated with pi or Microsoft.",
+  "description": "Chat with the zycode coding agent in VS Code. Unofficial; not affiliated with pi, Microsoft, or any model vendor.",
   "version": "1.10.0",
   "publisher": "zycode",
   "icon": "media/icon.png",
@@ -141,6 +141,11 @@
         "category": "zycode"
       },
       {
+        "command": "zycode.chooseAccountAvatar",
+        "title": "Use account picture as avatar",
+        "category": "zycode"
+      },
+      {
         "command": "zycode.resetUserAvatar",
         "title": "Reset user avatar to default",
         "category": "zycode"
@@ -197,8 +202,29 @@
         "zycode.userAvatar": {
           "type": "string",
           "default": "",
-          "scope": "application",
-          "markdownDescription": "Custom avatar for your messages (`You`). Accepts a local image file path (supports `~/`), an `https://` image URL, or a `data:image/...` URI. Leave empty to use your signed-in VS Code account avatar (with a built-in user icon fallback).\n\n[Choose local image…](command:zycode.chooseUserAvatar) · [Reset to default](command:zycode.resetUserAvatar)"
+          "scope": "machine",
+          "markdownDescription": "Custom avatar for your messages (`You`). Accepts a local image file path (supports `~/`), an `https://` image URL, or a `data:image/...` URI. Leave empty to use the built-in user icon, or the account picture that `#zycode.accountAvatar#` turns on. A file path is valid on one machine only, so this setting is per machine and is not synced.\n\n[Choose local image…](command:zycode.chooseUserAvatar) · [Use account picture…](command:zycode.chooseAccountAvatar) · [Reset to default](command:zycode.resetUserAvatar)"
+        },
+        "zycode.accountAvatar": {
+          "type": "string",
+          "enum": [
+            "off",
+            "github",
+            "microsoft"
+          ],
+          "enumItemLabels": [
+            "Off",
+            "GitHub",
+            "Microsoft"
+          ],
+          "enumDescriptions": [
+            "Show the built-in user icon. zycode makes no request for an account picture.",
+            "Show the picture of your GitHub account. zycode sends your GitHub sign-in token to api.github.com.",
+            "Show the photo of your Microsoft account. zycode sends your Microsoft sign-in token to graph.microsoft.com."
+          ],
+          "default": "off",
+          "scope": "machine",
+          "markdownDescription": "The account whose picture zycode shows as your avatar (`You`). It is off until you choose an account with [Use account picture…](command:zycode.chooseAccountAvatar): VS Code then asks you to sign in, or to allow zycode to use the account. Setting a value here by hand does not ask: with no permission from VS Code, zycode shows the built-in icon and writes a hint to its log. An image of your own (`#zycode.userAvatar#`) wins over this picture. This setting is per machine, like the permission that VS Code keeps for the account."
         },
         "zycode.autoModelAvatar": {
           "type": "boolean",
@@ -242,8 +268,8 @@
         "zycode.assistantAvatar": {
           "type": "string",
           "default": "",
-          "scope": "application",
-          "markdownDescription": "Custom avatar for `zycode` messages. Accepts a local image file path (supports `~/`), an `https://` image URL, or a `data:image/...` URI. Overrides `#zycode.assistantAvatarPreset#` when `#zycode.autoModelAvatar#` is off (or as fallback for unrecognized models). Leave empty to use the selected built-in mascot.\n\n[Choose local image…](command:zycode.chooseAssistantAvatar) · [Choose built-in mascot…](command:zycode.chooseAssistantPreset) · [Reset to default](command:zycode.resetAssistantAvatar)"
+          "scope": "machine",
+          "markdownDescription": "Custom avatar for `zycode` messages. Accepts a local image file path (supports `~/`), an `https://` image URL, or a `data:image/...` URI. Overrides `#zycode.assistantAvatarPreset#` when `#zycode.autoModelAvatar#` is off (or as fallback for unrecognized models). Leave empty to use the selected built-in mascot. A file path is valid on one machine only, so this setting is per machine and is not synced.\n\n[Choose local image…](command:zycode.chooseAssistantAvatar) · [Choose built-in mascot…](command:zycode.chooseAssistantPreset) · [Reset to default](command:zycode.resetAssistantAvatar)"
         },
         "zycode.mcpServers": {
           "type": "array",
@@ -318,6 +344,11 @@
           "alt": "zycode.openAgentConfig",
           "when": "view == zycode.chat",
           "group": "navigation@3"
+        },
+        {
+          "command": "zycode.openAgentConfig",
+          "when": "view == zycode.chat",
+          "group": "9_config@1"
         },
         {
           "command": "zycode.newChat",

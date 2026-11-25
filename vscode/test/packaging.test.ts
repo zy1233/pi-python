@@ -255,16 +255,54 @@ describe("manifest contributions", () => {
       "qwen",
     ]);
     expect(manifest.contributes.configuration.properties["zycode.assistantAvatarPreset"].default).toBe("claude");
-    expect(manifest.contributes.configuration.properties["zycode.userAvatar"].scope).toBe("application");
-    expect(manifest.contributes.configuration.properties["zycode.assistantAvatar"].scope).toBe("application");
+    // A file path is valid on one machine only: these settings are not synced, and a folder cannot set them.
+    for (const key of ["zycode.userAvatar", "zycode.assistantAvatar", "zycode.accountAvatar"]) {
+      expect(manifest.contributes.configuration.properties[key].scope, key).toBe("machine");
+    }
 
     const declared = new Set<string>(manifest.contributes.commands.map((c: { command: string }) => c.command));
-    for (const key of ["zycode.userAvatar", "zycode.assistantAvatar"]) {
+    for (const key of ["zycode.userAvatar", "zycode.assistantAvatar", "zycode.accountAvatar"]) {
       const desc = String(manifest.contributes.configuration.properties[key].markdownDescription);
       const links = [...desc.matchAll(/command:(zycode\.[A-Za-z.]+)/g)].map((m) => m[1]!);
-      expect(links.length).toBeGreaterThanOrEqual(2);
+      expect(links.length, key).toBeGreaterThanOrEqual(key === "zycode.accountAvatar" ? 1 : 2);
       for (const cmd of links) expect(declared.has(cmd), cmd).toBe(true);
     }
+  });
+
+  it("keeps the account picture off by default, and turns it on only through a command that asks", () => {
+    const setting = manifest.contributes.configuration.properties["zycode.accountAvatar"];
+    expect(setting.default).toBe("off");
+    expect(setting.enum).toEqual(["off", "github", "microsoft"]);
+    expect(setting.enumDescriptions).toHaveLength(setting.enum.length);
+    expect(setting.markdownDescription).toContain("command:zycode.chooseAccountAvatar");
+    const command = manifest.contributes.commands.find((c: { command: string }) => c.command === "zycode.chooseAccountAvatar");
+    expect(command?.title).toBe("Use account picture as avatar");
+    expect(command?.category).toBe("zycode");
+  });
+
+  it("keeps the settings that name a program, a file, an account or a permission out of folder settings", () => {
+    // `machine` and `application` settings come from the user's settings only: a folder (`.vscode/settings.json`)
+    // must not choose the program, the MCP servers, the permission mode, a file to read, or an account to use.
+    const properties = manifest.contributes.configuration.properties as Record<string, { scope?: string }>;
+    for (const key of [
+      "zycode.agentPath",
+      "zycode.agentArgs",
+      "zycode.mcpServers",
+      "zycode.permissionMode",
+      "zycode.userAvatar",
+      "zycode.assistantAvatar",
+      "zycode.accountAvatar",
+    ]) {
+      expect(["machine", "application"], key).toContain(properties[key]?.scope);
+    }
+  });
+
+  it("puts the agent.toml command in the overflow menu of the chat title, where a user can find it", () => {
+    const titleItems = manifest.contributes.menus["view/title"] as { command: string; when: string; group?: string }[];
+    const item = titleItems.find((i) => i.when === "view == zycode.chat" && i.command === "zycode.openAgentConfig");
+    expect(item).toBeDefined();
+    // A group other than `navigation` goes to the `…` menu; `navigation` would add a fourth button.
+    expect(item?.group?.startsWith("navigation")).toBe(false);
   });
 
   it("has a walkthrough whose pages are in the package", () => {
