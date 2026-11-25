@@ -332,7 +332,7 @@
     "typecheck": "tsc --noEmit -p tsconfig.json && tsc --noEmit -p src/webview/tsconfig.json",
     "lint": "eslint .",
     "test": "vitest run",
-    "test:agent": "ZYCODE_REAL_AGENT=1 vitest run test/real-agent.test.ts test/real-first-run.test.ts test/real-thinking.test.ts",
+    "test:agent": "ZYCODE_REAL_AGENT=1 vitest run test/real-agent.test.ts test/real-first-run.test.ts test/real-thinking.test.ts test/real-codemode.test.ts",
     "check": "npm run typecheck && npm run lint && npm test",
     "package": "node scripts/package.mjs",
     "package:all": "node scripts/package.mjs all",
