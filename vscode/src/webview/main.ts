@@ -707,7 +707,14 @@ function fillAvatarSlot(slot: HTMLElement, role: "user" | "assistant"): void {
 }
 
 function createAvatarEl(role: "user" | "assistant"): HTMLElement {
-  const slot = el("span", { class: "avatar-slot", ariaHidden: true, dataset: { role } });
+  const label = role === "user" ? "Change your avatar" : "Change zycode avatar";
+  const slot = el("button", {
+    class: "avatar-slot",
+    type: "button",
+    title: label,
+    ariaLabel: label,
+    dataset: { role },
+  });
   fillAvatarSlot(slot, role);
   return slot;
 }
@@ -2275,6 +2282,15 @@ input.addEventListener("keydown", (event) => {
 transcript.addEventListener("click", (event) => {
   const target = event.target;
   if (!(target instanceof Element)) return;
+  const avatarBtn = target.closest<HTMLElement>(".avatar-slot[data-role]");
+  if (avatarBtn) {
+    const role = avatarBtn.dataset.role;
+    if (role === "user" || role === "assistant") {
+      event.preventDefault();
+      send({ type: "pickAvatar", role });
+      return;
+    }
+  }
   const link = target.closest("a[data-url]");
   if (link instanceof HTMLElement && link.dataset.url) {
     event.preventDefault();

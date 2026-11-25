@@ -1,14 +1,29 @@
+import { existsSync, mkdtempSync, readdirSync, rmSync, writeFileSync } from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { describe, expect, it, vi } from "vitest";
 
-vi.mock("vscode", () => ({
-  authentication: { getSession: vi.fn(async () => undefined) },
-  workspace: { getConfiguration: () => ({ get: (_k: string, d?: unknown) => d }) },
-  Uri: { joinPath: (base: { fsPath: string }, ...segs: string[]) => ({ fsPath: path.join(base.fsPath, ...segs), toString: () => "" }) },
+const mockConfig = vi.hoisted(() => ({
+  values: {} as Record<string, unknown>,
 }));
 
-import { resolveCustomAvatar, resolveVscodeAccountAvatar } from "../src/ui/avatars.js";
+vi.mock("vscode", () => ({
+  authentication: { getSession: vi.fn(async () => undefined) },
+  workspace: {
+    getConfiguration: () => ({
+      get: (k: string, d?: unknown) => (k in mockConfig.values ? mockConfig.values[k] : d),
+    }),
+  },
+  Uri: {
+    joinPath: (base: { fsPath: string }, ...segs: string[]) => {
+      const joined = path.posix.join(base.fsPath.replace(/\\/g, "/"), ...segs);
+      return { fsPath: joined, toString: () => `file://${joined}` };
+    },
+  },
+}));
+
+import { matchModelAvatarPreset } from "../src/core/avatar-presets.js";
+import { AvatarProvider, cleanupStoredAvatars, importLocalAvatarFile, resolveCustomAvatar, resolveVscodeAccountAvatar } from "../src/ui/avatars.js";
 
 describe("resolveCustomAvatar", () => {
   it("returns undefined for empty input", async () => {
@@ -157,5 +172,130 @@ describe("resolveVscodeAccountAvatar", () => {
       }),
     });
     expect(out).toBe(`data:image/jpeg;base64,${Buffer.from(jpgBytes).toString("base64")}`);
+  });
+});
+
+describe("importLocalAvatarFile & cleanupStoredAvatars", () => {
+  it("copies valid images into storageDir/avatars, cleans up old files for the same role, and leaves other roles intact", async () => {
+    const tmp = mkdtempSync(path.join(os.tmpdir(), "zycode-avatar-import-"));
+    try {
+      const storageDir = path.join(tmp, "globalStorage");
+      const src1 = path.join(tmp, "pic1.png");
+      const src2 = path.join(tmp, "pic2.jpg");
+      const srcAst = path.join(tmp, "bot.png");
+      writeFileSync(src1, Buffer.from([137, 80, 78, 71, 1]));
+      writeFileSync(src2, Buffer.from([255, 216, 255, 2]));
+      writeFileSync(srcAst, Buffer.from([137, 80, 78, 71, 3]));
+
+      const astRes = await importLocalAvatarFile(srcAst, "assistant", storageDir, { now: () => 1000 });
+      expect(astRes).toEqual({ ok: true, path: path.join(storageDir, "avatars", "assistant-1000.png") });
+      expect(existsSync(astRes.ok ? astRes.path : "")).toBe(true);
+
+      const res1 = await importLocalAvatarFile(src1, "user", storageDir, { now: () => 2000 });
+      expect(res1).toEqual({ ok: true, path: path.join(storageDir, "avatars", "user-2000.png") });
+
+      const res2 = await importLocalAvatarFile(src2, "user", storageDir, { now: () => 3000 });
+      expect(res2).toEqual({ ok: true, path: path.join(storageDir, "avatars", "user-3000.jpg") });
+
+      const files = readdirSync(path.join(storageDir, "avatars")).sort();
+      expect(files).toEqual(["assistant-1000.png", "user-3000.jpg"]);
+
+      await cleanupStoredAvatars("user", storageDir);
+      expect(readdirSync(path.join(storageDir, "avatars"))).toEqual(["assistant-1000.png"]);
+
+      // Fallback when storageDir is undefined returns resolved source path.
+      const direct = await importLocalAvatarFile(src1, "user", undefined);
+      expect(direct).toEqual({ ok: true, path: path.resolve(src1) });
+    } finally {
+      rmSync(tmp, { recursive: true, force: true });
+    }
+  });
+
+  it("rejects unsupported extensions, oversized files, and missing files", async () => {
+    expect(await importLocalAvatarFile("/tmp/bad.txt", "user", "/tmp/store")).toMatchObject({ ok: false });
+    expect(
+      await importLocalAvatarFile("/tmp/huge.png", "user", "/tmp/store", {
+        stat: async () => ({ size: 3 * 1024 * 1024, isFile: () => true }),
+      }),
+    ).toMatchObject({ ok: false });
+    expect(
+      await importLocalAvatarFile("/tmp/missing.png", "user", "/tmp/store", {
+        stat: async () => {
+          throw new Error("ENOENT");
+        },
+      }),
+    ).toMatchObject({ ok: false });
+  });
+});
+
+describe("matchModelAvatarPreset & AvatarProvider", () => {
+  it("matches all 7 mascot families across direct and gateway model names", () => {
+    expect(matchModelAvatarPreset("auto/deepseek-v4.1-flash")).toBe("deepseek");
+    expect(matchModelAvatarPreset("deepseek-reasoner")).toBe("deepseek");
+    expect(matchModelAvatarPreset("openrouter/google/gemini-2.5-pro")).toBe("gemini");
+    expect(matchModelAvatarPreset("gemma-3-27b")).toBe("gemini");
+    expect(matchModelAvatarPreset("anthropic/claude-sonnet-4")).toBe("claude");
+    expect(matchModelAvatarPreset("x-ai/grok-3-mini")).toBe("grok");
+    expect(matchModelAvatarPreset("moonshot-v1-128k")).toBe("kimi");
+    expect(matchModelAvatarPreset("kimi-k2-instruct")).toBe("kimi");
+    expect(matchModelAvatarPreset("qwen2.5-coder-32b")).toBe("qwen");
+    expect(matchModelAvatarPreset("qwq-32b")).toBe("qwen");
+    expect(matchModelAvatarPreset("gpt-4.1-mini")).toBe("openai");
+    expect(matchModelAvatarPreset("openai/o3-mini")).toBe("openai");
+    expect(matchModelAvatarPreset(undefined, "Gemini 2.5 Flash")).toBe("gemini");
+    expect(matchModelAvatarPreset("custom-llama-3")).toBeUndefined();
+  });
+
+  it("resolves assistant avatar by active model when autoModelAvatar is on, and respects user overrides when off or unmatched", async () => {
+    const provider = new AvatarProvider(
+      { fsPath: "/ext" } as never,
+      { info() {}, warn() {}, error() {} },
+    );
+    const webview = {
+      asWebviewUri: (uri: { toString(): string }) => ({ toString: () => `webview:${uri.toString()}` }),
+    };
+
+    try {
+      const customUri = "data:image/png;base64,iVBORw0KGgo=";
+      mockConfig.values = {
+        autoModelAvatar: true,
+        assistantAvatarPreset: "kimi",
+        assistantAvatar: customUri,
+      };
+
+      expect(provider.setActiveModel("auto/deepseek-v4.1-flash", "deepseek")).toBe(true);
+      expect(provider.setActiveModel("auto/deepseek-v4.1-flash", "deepseek")).toBe(false);
+      expect(await provider.resolve(webview as never)).toEqual({
+        assistant: "webview:file:///ext/media/avatars/deepseek.png",
+      });
+
+      // Unrecognized model falls back to custom assistantAvatar, then assistantAvatarPreset.
+      expect(provider.setActiveModel("my-local-model")).toBe(true);
+      expect(await provider.resolve(webview as never)).toEqual({
+        assistant: customUri,
+      });
+
+      mockConfig.values.assistantAvatar = "";
+      expect(await provider.resolve(webview as never)).toEqual({
+        assistant: "webview:file:///ext/media/avatars/kimi.png",
+      });
+
+      // With autoModelAvatar disabled, active model is ignored.
+      expect(provider.setActiveModel("gemini-2.5-pro")).toBe(true);
+      mockConfig.values.autoModelAvatar = false;
+      mockConfig.values.assistantAvatar = customUri;
+      expect(await provider.resolve(webview as never)).toEqual({
+        assistant: customUri,
+      });
+
+      mockConfig.values.assistantAvatar = "";
+      mockConfig.values.assistantAvatarPreset = "qwen";
+      expect(await provider.resolve(webview as never)).toEqual({
+        assistant: "webview:file:///ext/media/avatars/qwen.png",
+      });
+    } finally {
+      mockConfig.values = {};
+      provider.dispose();
+    }
   });
 });

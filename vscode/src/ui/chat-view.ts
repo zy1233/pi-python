@@ -6,6 +6,7 @@ import { MAX_MENTIONS, type MentionAttachment } from "../core/mentions.js";
 import {
   isSafeLink,
   parseWebviewMessage,
+  type AvatarRole,
   type AvatarState,
   type HostMessage,
   type WebviewMessage,
@@ -44,6 +45,7 @@ export class ChatViewProvider implements vscode.WebviewViewProvider, vscode.Disp
       openGuide(): void;
       openAgentConfig(): void;
       resolveAvatars?: (webview: vscode.Webview) => Promise<AvatarState>;
+      pickAvatar?: (role: AvatarRole) => Promise<void> | void;
     },
   ) {
     this.subscription = controller.onMessage((message) => {
@@ -191,6 +193,9 @@ export class ChatViewProvider implements vscode.WebviewViewProvider, vscode.Disp
         return;
       case "openLink":
         if (isSafeLink(message.url)) await vscode.env.openExternal(vscode.Uri.parse(message.url, true));
+        return;
+      case "pickAvatar":
+        await this.actions.pickAvatar?.(message.role);
         return;
       case "showDiff": {
         const info = controller.diffFor(message.toolCallId);

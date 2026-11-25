@@ -659,6 +659,7 @@ describe("ChatViewProvider host clipboard & SessionsView timer polish", () => {
     } as unknown as ChatController;
 
     let call = 0;
+    const pickedRoles: string[] = [];
     const provider = new ChatViewProvider(makeUri("/ext") as never, controller, {
       showLog() {},
       async showDiff() {},
@@ -668,6 +669,9 @@ describe("ChatViewProvider host clipboard & SessionsView timer polish", () => {
       resolveAvatars: async () => {
         call++;
         return { user: `data:image/png;base64,U${call}`, assistant: `data:image/png;base64,A${call}` };
+      },
+      pickAvatar: (role) => {
+        pickedRoles.push(role);
       },
     });
 
@@ -708,6 +712,10 @@ describe("ChatViewProvider host clipboard & SessionsView timer polish", () => {
       type: "avatars",
       avatars: { user: "data:image/png;base64,U2", assistant: "data:image/png;base64,A2" },
     });
+
+    receiveMessage?.({ type: "pickAvatar", role: "user" });
+    await Promise.resolve();
+    expect(pickedRoles).toEqual(["user"]);
 
     provider.dispose();
   });

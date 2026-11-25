@@ -240,10 +240,31 @@ describe("manifest contributions", () => {
     const titleItems = manifest.contributes.menus["view/title"] as { command: string; alt?: string; when: string }[];
     const settingsItem = titleItems.find((item) => item.when === "view == zycode.chat" && item.command === "zycode.openSettings");
     expect(settingsItem?.alt).toBe("zycode.openAgentConfig");
-    expect(ignore).toContain("!media/zycode-avatar.png");
-    expect(existsSync(path.join(root, "media", "zycode-avatar.png"))).toBe(true);
+    expect(ignore).toContain("!media/avatars/**");
+    for (const preset of ["claude", "gemini", "deepseek", "openai", "grok", "kimi", "qwen"]) {
+      expect(existsSync(path.join(root, "media", "avatars", `${preset}.png`)), preset).toBe(true);
+    }
+    expect(manifest.contributes.configuration.properties["zycode.autoModelAvatar"].default).toBe(true);
+    expect(manifest.contributes.configuration.properties["zycode.assistantAvatarPreset"].enum).toEqual([
+      "claude",
+      "gemini",
+      "deepseek",
+      "openai",
+      "grok",
+      "kimi",
+      "qwen",
+    ]);
+    expect(manifest.contributes.configuration.properties["zycode.assistantAvatarPreset"].default).toBe("claude");
     expect(manifest.contributes.configuration.properties["zycode.userAvatar"].scope).toBe("application");
     expect(manifest.contributes.configuration.properties["zycode.assistantAvatar"].scope).toBe("application");
+
+    const declared = new Set<string>(manifest.contributes.commands.map((c: { command: string }) => c.command));
+    for (const key of ["zycode.userAvatar", "zycode.assistantAvatar"]) {
+      const desc = String(manifest.contributes.configuration.properties[key].markdownDescription);
+      const links = [...desc.matchAll(/command:(zycode\.[A-Za-z.]+)/g)].map((m) => m[1]!);
+      expect(links.length).toBeGreaterThanOrEqual(2);
+      for (const cmd of links) expect(declared.has(cmd), cmd).toBe(true);
+    }
   });
 
   it("has a walkthrough whose pages are in the package", () => {

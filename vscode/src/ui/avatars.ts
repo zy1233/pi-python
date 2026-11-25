@@ -1,11 +1,20 @@
-import { readFile, stat } from "node:fs/promises";
+import { mkdir, readdir, readFile, stat, unlink, writeFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 
 import * as vscode from "vscode";
 
 import type { Logger } from "../core/host.js";
-import type { AvatarState } from "../core/protocol.js";
+import { matchModelAvatarPreset, normalizeAvatarPreset, type AvatarPresetId } from "../core/avatar-presets.js";
+import type { AvatarRole, AvatarState } from "../core/protocol.js";
+
+export type { AvatarRole };
+
+export const AVATAR_IMAGE_EXTENSIONS = ["png", "jpg", "jpeg", "gif", "webp", "svg", "ico"] as const;
+export const AVATAR_SETTING_KEY: Record<AvatarRole, "userAvatar" | "assistantAvatar"> = {
+  user: "userAvatar",
+  assistant: "assistantAvatar",
+};
 
 const MAX_CUSTOM_AVATAR_BYTES = 2 * 1024 * 1024;
 const MAX_CUSTOM_DATA_URI_CHARS = 2_800_000;
@@ -252,16 +261,121 @@ export async function resolveVscodeAccountAvatar(deps: AccountAvatarDeps = {}): 
   return undefined;
 }
 
+export interface ImportAvatarDeps {
+  stat?: (filePath: string) => Promise<{ size: number; isFile(): boolean }>;
+  readFile?: (filePath: string) => Promise<Uint8Array>;
+  mkdir?: (dirPath: string, options: { recursive: boolean }) => Promise<unknown>;
+  writeFile?: (filePath: string, data: Uint8Array) => Promise<void>;
+  readdir?: (dirPath: string) => Promise<string[]>;
+  unlink?: (filePath: string) => Promise<void>;
+  now?: () => number;
+}
+
+/**
+ * Removes stored avatar files for `role` inside `<storageDir>/avatars`, keeping `keepName` if given.
+ * Silently ignores missing directories or unlink errors.
+ */
+export async function cleanupStoredAvatars(
+  role: AvatarRole,
+  storageDir: string | undefined,
+  deps: Pick<ImportAvatarDeps, "readdir" | "unlink"> = {},
+  keepName?: string,
+): Promise<void> {
+  if (!storageDir) return;
+  const avatarsDir = path.join(storageDir, "avatars");
+  const readdirFn = deps.readdir ?? readdir;
+  const unlinkFn = deps.unlink ?? unlink;
+  try {
+    const entries = await readdirFn(avatarsDir);
+    const prefix = `${role}-`;
+    await Promise.all(
+      entries
+        .filter((name) => name.startsWith(prefix) && name !== keepName)
+        .map((name) => unlinkFn(path.join(avatarsDir, name)).catch(() => undefined)),
+    );
+  } catch {
+    // Ignore missing directory or read errors during cleanup.
+  }
+}
+
+/**
+ * Validates a local image file and copies it into `<storageDir>/avatars/<role>-<ts><ext>` (when
+ * `storageDir` is provided), removing previous copies for the same role.
+ */
+export async function importLocalAvatarFile(
+  sourcePath: string,
+  role: AvatarRole,
+  storageDir: string | undefined,
+  deps: ImportAvatarDeps = {},
+): Promise<{ ok: true; path: string } | { ok: false; reason: string }> {
+  const resolvedSource = path.resolve(sourcePath);
+  const ext = path.extname(resolvedSource).toLowerCase();
+  if (!LOCAL_EXT_MIMES[ext]) {
+    return { ok: false, reason: "Unsupported image format. Choose PNG, JPG, GIF, WebP, SVG, or ICO." };
+  }
+
+  const statFn = deps.stat ?? stat;
+  const readFileFn = deps.readFile ?? readFile;
+  let data: Uint8Array;
+  try {
+    const info = await statFn(resolvedSource);
+    if (!info.isFile() || info.size <= 0 || info.size > MAX_CUSTOM_AVATAR_BYTES) {
+      return { ok: false, reason: "Image is empty, unreadable, or larger than 2 MB." };
+    }
+    data = await readFileFn(resolvedSource);
+    if (data.byteLength === 0 || data.byteLength > MAX_CUSTOM_AVATAR_BYTES) {
+      return { ok: false, reason: "Image is empty, unreadable, or larger than 2 MB." };
+    }
+  } catch {
+    return { ok: false, reason: "Could not read the selected image file." };
+  }
+
+  if (!storageDir) {
+    return { ok: true, path: resolvedSource };
+  }
+
+  const avatarsDir = path.join(storageDir, "avatars");
+  const mkdirFn = deps.mkdir ?? mkdir;
+  const writeFileFn = deps.writeFile ?? writeFile;
+  const nowFn = deps.now ?? Date.now;
+  const fileName = `${role}-${nowFn()}${ext}`;
+  const targetPath = path.join(avatarsDir, fileName);
+
+  await mkdirFn(avatarsDir, { recursive: true });
+  await writeFileFn(targetPath, data);
+  await cleanupStoredAvatars(role, storageDir, deps, fileName);
+  return { ok: true, path: targetPath };
+}
+
 /** Resolves and caches user and assistant avatars for the chat webview. */
 export class AvatarProvider implements vscode.Disposable {
   private customCache = new Map<string, string | undefined>();
   private accountCache: { resolved: boolean; value: string | undefined } | undefined;
   private accountPending: Promise<string | undefined> | undefined;
+  private activeModelIds: [string | undefined, string | undefined] = [undefined, undefined];
 
   constructor(
     private readonly extensionUri: vscode.Uri,
     private readonly log: Logger,
   ) {}
+
+  setActiveModel(modelId?: string, modelName?: string): boolean {
+    const nextId = modelId?.trim() || undefined;
+    const nextName = modelName?.trim() || undefined;
+    if (this.activeModelIds[0] === nextId && this.activeModelIds[1] === nextName) {
+      return false;
+    }
+    this.activeModelIds = [nextId, nextName];
+    return true;
+  }
+
+  private presetUri(webview: vscode.Webview, preset: AvatarPresetId): string {
+    return webview.asWebviewUri(vscode.Uri.joinPath(this.extensionUri, "media", "avatars", `${preset}.png`)).toString();
+  }
+
+  clearCustomCache(): void {
+    this.customCache.clear();
+  }
 
   clearAccountCache(): void {
     this.accountCache = undefined;
@@ -306,16 +420,20 @@ export class AvatarProvider implements vscode.Disposable {
     const config = vscode.workspace.getConfiguration("zycode");
     const rawUser = config.get<string>("userAvatar", "");
     const rawAssistant = config.get<string>("assistantAvatar", "");
+    const rawPreset = config.get<string>("assistantAvatarPreset", "claude");
+    const autoModelAvatar = config.get<boolean>("autoModelAvatar", true);
 
+    const matchedPreset = autoModelAvatar ? matchModelAvatarPreset(...this.activeModelIds) : undefined;
     const [customUser, customAssistant] = await Promise.all([
       this.resolveCustomCached(rawUser),
-      this.resolveCustomCached(rawAssistant),
+      matchedPreset === undefined ? this.resolveCustomCached(rawAssistant) : Promise.resolve(undefined),
     ]);
 
     const user = customUser ?? (await this.resolveAccountCached());
     const assistant =
-      customAssistant ??
-      webview.asWebviewUri(vscode.Uri.joinPath(this.extensionUri, "media", "zycode-avatar.png")).toString();
+      matchedPreset !== undefined
+        ? this.presetUri(webview, matchedPreset)
+        : customAssistant ?? this.presetUri(webview, normalizeAvatarPreset(rawPreset));
 
     return {
       ...(user ? { user } : {}),

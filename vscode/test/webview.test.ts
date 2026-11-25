@@ -568,7 +568,12 @@ describe.skipIf(!chrome || !built)("webview in headless Chrome", () => {
         agentSrc: agentAuthor.querySelector("img.avatar")?.getAttribute("src"),
       };
 
-      window.__result = { initialFallback, afterAvatars, afterError, afterSecondUpdate };`);
+      // Clicking either avatar button posts pickAvatar with its role.
+      userAuthor.querySelector("button.avatar-slot").click();
+      agentAuthor.querySelector("button.avatar-slot").click();
+      const pickedAvatars = window.__posted.filter((m) => m.type === "pickAvatar");
+
+      window.__result = { initialFallback, afterAvatars, afterError, afterSecondUpdate, pickedAvatars };`);
     expect(out).toMatchObject({
       ok: true,
       initialFallback: {
@@ -590,6 +595,10 @@ describe.skipIf(!chrome || !built)("webview in headless Chrome", () => {
         userSrc: "data:image/png;base64,AAAA",
         agentSrc: "data:image/png;base64,AAAA",
       },
+      pickedAvatars: [
+        { type: "pickAvatar", role: "user" },
+        { type: "pickAvatar", role: "assistant" },
+      ],
     });
   });
 });

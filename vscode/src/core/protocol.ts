@@ -102,6 +102,8 @@ export interface TurnState {
   lastMs?: number;
 }
 
+export type AvatarRole = "user" | "assistant";
+
 export interface AvatarState {
   user?: string;
   assistant?: string;
@@ -234,7 +236,8 @@ export type WebviewMessage =
   | { type: "saveAll" }
   | { type: "openFile"; path: string; line?: number }
   | { type: "copy"; text: string }
-  | { type: "openLink"; url: string };
+  | { type: "openLink"; url: string }
+  | { type: "pickAvatar"; role: AvatarRole };
 
 const MAX_PROMPT_CHARS = 200_000;
 const MAX_ID_CHARS = 512;
@@ -411,6 +414,9 @@ export function parseWebviewMessage(value: unknown): WebviewMessage | undefined 
     case "openLink":
       if (!shortString(value.url, MAX_URL_CHARS)) return undefined;
       return { type: "openLink", url: value.url };
+    case "pickAvatar":
+      if (value.role !== "user" && value.role !== "assistant") return undefined;
+      return { type: "pickAvatar", role: value.role };
     default:
       return undefined;
   }

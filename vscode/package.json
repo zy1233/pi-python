@@ -129,6 +129,31 @@
         "command": "zycode.addFileToChat",
         "title": "Add to chat context",
         "category": "zycode"
+      },
+      {
+        "command": "zycode.chooseUserAvatar",
+        "title": "Choose user avatar",
+        "category": "zycode"
+      },
+      {
+        "command": "zycode.chooseAssistantAvatar",
+        "title": "Choose zycode avatar",
+        "category": "zycode"
+      },
+      {
+        "command": "zycode.resetUserAvatar",
+        "title": "Reset user avatar to default",
+        "category": "zycode"
+      },
+      {
+        "command": "zycode.resetAssistantAvatar",
+        "title": "Reset zycode avatar to default",
+        "category": "zycode"
+      },
+      {
+        "command": "zycode.chooseAssistantPreset",
+        "title": "Choose built-in zycode avatar",
+        "category": "zycode"
       }
     ],
     "configuration": {
@@ -173,13 +198,52 @@
           "type": "string",
           "default": "",
           "scope": "application",
-          "markdownDescription": "Custom avatar for your messages (`You`). Accepts a local image file path (supports `~/`), an `https://` image URL, or a `data:image/...` URI. Leave empty to use your signed-in VS Code account avatar (with a built-in user icon fallback)."
+          "markdownDescription": "Custom avatar for your messages (`You`). Accepts a local image file path (supports `~/`), an `https://` image URL, or a `data:image/...` URI. Leave empty to use your signed-in VS Code account avatar (with a built-in user icon fallback).\n\n[Choose local image…](command:zycode.chooseUserAvatar) · [Reset to default](command:zycode.resetUserAvatar)"
+        },
+        "zycode.autoModelAvatar": {
+          "type": "boolean",
+          "default": true,
+          "scope": "application",
+          "markdownDescription": "Automatically switch the `zycode` avatar to match the active chat model (Gemini, DeepSeek, OpenAI/GPT, Claude, Grok, Kimi, Qwen). When off (or if the model does not match a built-in mascot), uses `#zycode.assistantAvatar#` or `#zycode.assistantAvatarPreset#`."
+        },
+        "zycode.assistantAvatarPreset": {
+          "type": "string",
+          "enum": [
+            "claude",
+            "gemini",
+            "deepseek",
+            "openai",
+            "grok",
+            "kimi",
+            "qwen"
+          ],
+          "enumItemLabels": [
+            "Claude (Claude娘)",
+            "Gemini (星辉双子娘)",
+            "DeepSeek (鲸鱼娘)",
+            "OpenAI (小龙娘)",
+            "Grok (Grok娘)",
+            "Kimi (月下星辰娘)",
+            "Qwen (通义千问娘)"
+          ],
+          "enumDescriptions": [
+            "Copper-orange hair, gold-rimmed glasses & orange daisy",
+            "Starlight sapphire-lavender hair & four-pointed star hairpin",
+            "Blue-haired chibi maid with whale ear fins",
+            "White-haired dragon girl with horns & knot ornaments",
+            "Blonde twin-tails, dark gothic dress & golden X emblem",
+            "Midnight-indigo hair & golden crescent-moon hairpin",
+            "Periwinkle-haired beret girl in indigo-white hanfu"
+          ],
+          "default": "claude",
+          "scope": "application",
+          "markdownDescription": "Built-in mascot avatar for `zycode`. Used when `#zycode.autoModelAvatar#` is off (or as fallback for unrecognized models), unless a custom `#zycode.assistantAvatar#` is set."
         },
         "zycode.assistantAvatar": {
           "type": "string",
           "default": "",
           "scope": "application",
-          "markdownDescription": "Custom avatar for `zycode` messages. Accepts a local image file path (supports `~/`), an `https://` image URL, or a `data:image/...` URI. Leave empty to use the bundled default avatar."
+          "markdownDescription": "Custom avatar for `zycode` messages. Accepts a local image file path (supports `~/`), an `https://` image URL, or a `data:image/...` URI. Overrides `#zycode.assistantAvatarPreset#` when `#zycode.autoModelAvatar#` is off (or as fallback for unrecognized models). Leave empty to use the selected built-in mascot.\n\n[Choose local image…](command:zycode.chooseAssistantAvatar) · [Choose built-in mascot…](command:zycode.chooseAssistantPreset) · [Reset to default](command:zycode.resetAssistantAvatar)"
         },
         "zycode.mcpServers": {
           "type": "array",

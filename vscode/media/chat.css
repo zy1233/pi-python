@@ -168,11 +168,19 @@ select:disabled { opacity: 0.6; }
   justify-content: center;
   inline-size: 20px;
   block-size: 20px;
+  padding: 0;
+  margin: 0;
   border-radius: 50%;
   overflow: hidden;
   flex: none;
+  cursor: pointer;
   background: var(--vscode-input-background);
   border: 1px solid color-mix(in srgb, var(--vscode-widget-border, #888) 55%, transparent);
+  transition: border-color 0.15s, transform 0.12s;
+}
+.avatar-slot:hover {
+  border-color: var(--vscode-focusBorder);
+  transform: scale(1.06);
 }
 img.avatar {
   inline-size: 100%;
