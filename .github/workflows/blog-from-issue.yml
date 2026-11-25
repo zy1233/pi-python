@@ -76,14 +76,15 @@ jobs:
         env:
           BLOG_MODE: ${{ github.event_name == 'issues' && 'issue' || 'dispatch' }}
           BLOG_TITLE: ${{ github.event_name == 'issues' && github.event.issue.title || inputs.title }}
-          BLOG_SLUG: ${{ github.event_name == 'issues' && '' || inputs.slug }}
-          BLOG_LANG: ${{ github.event_name == 'issues' && '' || inputs.lang }}
-          BLOG_DESCRIPTION: ${{ github.event_name == 'issues' && '' || inputs.description }}
-          BLOG_TAGS: ${{ github.event_name == 'issues' && '' || inputs.tags }}
-          BLOG_TRANSLATION: ${{ github.event_name == 'issues' && '' || inputs.translation }}
+          BLOG_SLUG: ${{ inputs.slug }}
+          BLOG_LANG: ${{ inputs.lang }}
+          BLOG_DESCRIPTION: ${{ inputs.description }}
+          BLOG_TAGS: ${{ inputs.tags }}
+          BLOG_TRANSLATION: ${{ inputs.translation }}
           BLOG_BODY: ${{ github.event_name == 'issues' && github.event.issue.body || inputs.body }}
-          BLOG_ISSUE_NUMBER: ${{ github.event_name == 'issues' && github.event.issue.number || '' }}
-        run: node web/scripts/issue-to-post.mjs
+          BLOG_ISSUE_NUMBER: ${{ github.event.issue.number }}
+        run: |
+          node web/scripts/issue-to-post.mjs
 
       - name: Commit post to branch and open PR
         id: pr
@@ -92,7 +93,7 @@ jobs:
           POST_SLUG: ${{ steps.post.outputs.slug }}
           POST_FILE: ${{ steps.post.outputs.file }}
           POST_TITLE: ${{ github.event_name == 'issues' && github.event.issue.title || inputs.title }}
-          ISSUE_NUMBER: ${{ github.event_name == 'issues' && github.event.issue.number || '' }}
+          ISSUE_NUMBER: ${{ github.event.issue.number }}
         run: |
           set -euo pipefail
           branch="blog/${POST_SLUG}"
@@ -126,4 +127,5 @@ jobs:
           GH_TOKEN: ${{ github.token }}
           ISSUE_NUMBER: ${{ github.event.issue.number }}
           PR_URL: ${{ steps.pr.outputs.url }}
-        run: gh issue comment "${ISSUE_NUMBER}" --body "Blog post PR is ready: ${PR_URL}"
+        run: |
+          gh issue comment "${ISSUE_NUMBER}" --body "Blog post PR is ready: ${PR_URL}"
