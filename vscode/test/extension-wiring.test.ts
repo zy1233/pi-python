@@ -2,6 +2,8 @@ import { describe, expect, it, vi } from "vitest";
 
 const registered = vi.hoisted(() => ({
   views: [] as { id: string; options: unknown }[],
+  commands: new Map<string, (...args: unknown[]) => unknown>(),
+  executedCommands: [] as unknown[][],
 }));
 
 vi.mock("vscode", () => {
@@ -46,7 +48,17 @@ vi.mock("vscode", () => {
       onDidGrantWorkspaceTrust: event,
       getConfiguration: () => ({ get: (_key: string, fallback?: unknown) => fallback }),
     }),
-    commands: section({ registerCommand: () => ({ dispose() {} }), executeCommand: async () => undefined }),
+    commands: section({
+      registerCommand: (id: string, cb: (...args: unknown[]) => unknown) => {
+        registered.commands.set(id, cb);
+        return { dispose() {} };
+      },
+      executeCommand: async (...args: unknown[]) => {
+        registered.executedCommands.push(args);
+        return undefined;
+      },
+    }),
+    authentication: section({ onDidChangeSessions: event, getSession: async () => undefined }),
     env: section({}),
   };
 });
@@ -68,6 +80,10 @@ describe("extension wiring", () => {
       expect(registered.views).toHaveLength(1);
       expect(registered.views[0]?.id).toBe(CHAT_VIEW_ID);
       expect(registered.views[0]?.options).toEqual({ webviewOptions: { retainContextWhenHidden: true } });
+
+      registered.executedCommands.length = 0;
+      await registered.commands.get("zycode.openSettings")?.();
+      expect(registered.executedCommands).toEqual([["workbench.action.openSettings", "@ext:zycode.zycode"]]);
     } finally {
       await deactivate?.();
     }

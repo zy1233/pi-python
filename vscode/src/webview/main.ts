@@ -28,6 +28,7 @@ import {
   ALLOWED_IMAGE_MIMES,
   MAX_IMAGES,
   MAX_IMAGE_DATA_CHARS,
+  type AvatarState,
   type HostMessage,
   type ImageAttachment,
   type ImageMimeType,
@@ -39,7 +40,7 @@ import {
   type TranscriptItem,
   type WebviewMessage,
 } from "../core/protocol.js";
-import { describeContext, folderName, formatCost, formatDuration } from "../core/status-row.js";
+import { autoModeNoticeTitle, describeContext, folderName, formatCost, formatDuration } from "../core/status-row.js";
 import { throttle, type Scheduler, type Throttled } from "../core/throttle.js";
 import { copyButton, el, highlightedText, renderBlocks } from "./dom.js";
 
@@ -150,8 +151,10 @@ type MessageEntry = {
   id: string;
   root: HTMLElement;
   text: HTMLElement;
+  thoughtWrap: HTMLElement;
   thoughtDetails: HTMLDetailsElement;
   thought: HTMLElement;
+  thoughtDurationEl: HTMLElement;
   copyBtn: HTMLButtonElement;
   raw: { text: string; thought: string };
   /** The text that `text` shows now. */
@@ -163,6 +166,13 @@ type MessageEntry = {
   /** Draws `raw.thought` into `thought`. */
   drawThought: Throttled;
   expectedThoughtOpen: boolean;
+  thoughtUserToggled: boolean;
+  thoughtStreaming: boolean;
+  thoughtStartedAt: number | undefined;
+  thoughtMs: number | undefined;
+  autoNoticeDetails: HTMLDetailsElement | undefined;
+  autoNoticeSummary: HTMLElement | undefined;
+  expectedAutoNoticeOpen: boolean;
 };
 
 type ToolEntry = {
@@ -191,6 +201,8 @@ type ToolEntry = {
 const MAX_PERSISTED_OPEN_DETAILS = 500;
 
 let state: StateMessage = { type: "state", status: "stopped", canRestart: true };
+let avatars: AvatarState = {};
+let thoughtClockTimer: number | undefined;
 const messageEls = new Map<string, MessageEntry>();
 const toolEntries = new Map<string, ToolEntry>();
 const permissionEls = new Map<string, HTMLElement>();
@@ -678,11 +690,116 @@ function renderComposer(): void {
   if (!canType) closePopover();
 }
 
+function fillAvatarSlot(slot: HTMLElement, role: "user" | "assistant"): void {
+  const src = role === "user" ? avatars.user : avatars.assistant;
+  if (src) {
+    const img = el("img", { class: "avatar" });
+    img.alt = "";
+    img.setAttribute("aria-hidden", "true");
+    img.addEventListener("error", () => {
+      slot.replaceChildren(el("span", { class: `avatar-fallback avatar-fallback-${role}`, ariaHidden: true }));
+    });
+    img.src = src;
+    slot.replaceChildren(img);
+  } else {
+    slot.replaceChildren(el("span", { class: `avatar-fallback avatar-fallback-${role}`, ariaHidden: true }));
+  }
+}
+
+function createAvatarEl(role: "user" | "assistant"): HTMLElement {
+  const slot = el("span", { class: "avatar-slot", ariaHidden: true, dataset: { role } });
+  fillAvatarSlot(slot, role);
+  return slot;
+}
+
+function applyAvatars(next: AvatarState): void {
+  avatars = next;
+  for (const slot of Array.from(transcript.querySelectorAll<HTMLElement>(".avatar-slot[data-role]"))) {
+    const role = slot.dataset.role;
+    if (role === "user" || role === "assistant") fillAvatarSlot(slot, role);
+  }
+}
+
+function setThoughtOpen(entry: MessageEntry, open: boolean): void {
+  entry.expectedThoughtOpen = open;
+  entry.thoughtDetails.open = open;
+}
+
+function syncThoughtVisibilityAndDuration(entry: MessageEntry): void {
+  const hideThought = entry.raw.thought === "" || state.showThinking === false;
+  entry.thoughtWrap.hidden = hideThought;
+  entry.thoughtDetails.hidden = hideThought;
+  entry.thoughtDetails.classList.toggle("streaming", entry.thoughtStreaming);
+  if (entry.thoughtStreaming && entry.thoughtStartedAt !== undefined) {
+    const elapsed = Math.max(0, performance.now() - entry.thoughtStartedAt);
+    entry.thoughtMs = elapsed;
+    entry.thoughtDurationEl.textContent = `Thinking · ${formatDuration(elapsed)}`;
+    entry.thoughtDurationEl.hidden = hideThought;
+  } else if (entry.thoughtMs !== undefined) {
+    entry.thoughtDurationEl.textContent = `Thought for ${formatDuration(entry.thoughtMs, true)}`;
+    entry.thoughtDurationEl.hidden = hideThought;
+  } else {
+    entry.thoughtDurationEl.textContent = "";
+    entry.thoughtDurationEl.hidden = true;
+  }
+}
+
+function stopThoughtClock(): void {
+  if (thoughtClockTimer !== undefined) {
+    window.clearInterval(thoughtClockTimer);
+    thoughtClockTimer = undefined;
+  }
+}
+
+function tickThoughtClocks(): void {
+  let anyStreaming = false;
+  for (const entry of messageEls.values()) {
+    if (entry.thoughtStreaming) {
+      anyStreaming = true;
+      syncThoughtVisibilityAndDuration(entry);
+    }
+  }
+  if (!anyStreaming) stopThoughtClock();
+}
+
+function startThoughtStream(entry: MessageEntry, initialElapsedMs = 0): void {
+  if (entry.thoughtStreaming) return;
+  entry.thoughtStreaming = true;
+  entry.thoughtStartedAt = performance.now() - initialElapsedMs;
+  entry.thoughtMs = initialElapsedMs;
+  if (!entry.thoughtUserToggled) setThoughtOpen(entry, true);
+  thoughtClockTimer ??= window.setInterval(tickThoughtClocks, 500);
+  syncThoughtVisibilityAndDuration(entry);
+}
+
+function finishThoughtStream(entry: MessageEntry, durationMs?: number): void {
+  if (!entry.thoughtStreaming && durationMs === undefined) return;
+  const finalMs =
+    durationMs ??
+    (entry.thoughtStartedAt !== undefined ? Math.max(0, performance.now() - entry.thoughtStartedAt) : entry.thoughtMs);
+  entry.thoughtStreaming = false;
+  entry.thoughtStartedAt = undefined;
+  if (finalMs !== undefined) entry.thoughtMs = finalMs;
+  if (!entry.thoughtUserToggled) setThoughtOpen(entry, false);
+  syncThoughtVisibilityAndDuration(entry);
+  if (![...messageEls.values()].some((e) => e.thoughtStreaming)) {
+    stopThoughtClock();
+  }
+}
+
+function finishAllStreamingThoughts(): void {
+  for (const entry of messageEls.values()) {
+    if (entry.thoughtStreaming) finishThoughtStream(entry);
+  }
+}
+
 function applyState(next: StateMessage): void {
   state = next;
+  if (next.status !== "busy" && next.status !== "cancelling") {
+    finishAllStreamingThoughts();
+  }
   for (const entry of messageEls.values()) {
-    entry.thoughtDetails.hidden = entry.raw.thought === "" || state.showThinking === false;
-    entry.thoughtDetails.classList.toggle("streaming", state.status === "busy" && entry.raw.text === "" && entry.raw.thought !== "");
+    syncThoughtVisibilityAndDuration(entry);
   }
   renderHeader();
   renderBanner();
@@ -697,7 +814,8 @@ function fill(node: HTMLElement, text: string): void {
 }
 
 function addUser(id: string, text: string): void {
-  const head = el("div", { class: "msg-head" }, el("div", { class: "who", text: "You" }), copyButton(text, "Copy message", "msg-copy", "Copy"));
+  const author = el("div", { class: "msg-author" }, createAvatarEl("user"), el("div", { class: "who", text: "You" }));
+  const head = el("div", { class: "msg-head" }, author, copyButton(text, "Copy message", "msg-copy", "Copy"));
   transcript.append(el("article", { class: "msg user" }, head, el("div", { class: "body", text })));
   messageEls.delete(id);
 }
@@ -721,34 +839,48 @@ function agentMessage(id: string): MessageEntry {
   let entry = messageEls.get(id);
   if (!entry) {
     const thought = el("details", { class: "thought" }, el("summary", { text: "Thinking" }));
-    const savedOpen = openDetails.get(`thought:${id}`) === true;
-    if (savedOpen) thought.open = true;
+    const savedOpen = openDetails.get(`thought:${id}`);
+    const initialOpen = savedOpen ?? false;
+    if (initialOpen) thought.open = true;
     const thoughtBody = el("div", { class: "thought-body" });
     thought.append(thoughtBody);
     thought.hidden = true;
+    const thoughtDurationEl = el("div", { class: "thought-duration", hidden: true });
+    const thoughtWrap = el("div", { class: "thought-wrap", hidden: true }, thought, thoughtDurationEl);
     const text = el("div", { class: "body" });
     const copyBtn = copyButton("", "Copy message", "msg-copy", "Copy");
     copyBtn.hidden = true;
-    const head = el("div", { class: "msg-head" }, el("div", { class: "who", text: "zycode" }), copyBtn);
-    const rootEl = el("article", { class: "msg agent" }, head, thought, text);
+    const author = el("div", { class: "msg-author" }, createAvatarEl("assistant"), el("div", { class: "who", text: "zycode" }));
+    const head = el("div", { class: "msg-head" }, author, copyBtn);
+    const rootEl = el("article", { class: "msg agent" }, head, thoughtWrap, text);
     transcript.append(rootEl);
     const created: MessageEntry = {
       id,
       root: rootEl,
       text,
+      thoughtWrap,
       thoughtDetails: thought,
       thought: thoughtBody,
+      thoughtDurationEl,
       copyBtn,
       raw: { text: "", thought: "" },
       drawn: "",
       drawnThought: "",
       draw: throttle(() => drawText(created), DRAW_INTERVAL_MS, scheduler),
       drawThought: throttle(() => drawThoughtText(created), DRAW_INTERVAL_MS, scheduler),
-      expectedThoughtOpen: savedOpen,
+      expectedThoughtOpen: initialOpen,
+      thoughtUserToggled: savedOpen !== undefined,
+      thoughtStreaming: false,
+      thoughtStartedAt: undefined,
+      thoughtMs: undefined,
+      autoNoticeDetails: undefined,
+      autoNoticeSummary: undefined,
+      expectedAutoNoticeOpen: false,
     };
     thought.addEventListener("toggle", () => {
       if (thought.open === created.expectedThoughtOpen) return;
       created.expectedThoughtOpen = thought.open;
+      created.thoughtUserToggled = true;
       openDetails.set(`thought:${id}`, thought.open);
       saveWebviewState();
     });
@@ -764,9 +896,37 @@ function setAgentText(id: string, text: string, thought: string): void {
   entry.raw.thought = thought;
   entry.copyBtn.dataset.copy = text;
   entry.copyBtn.hidden = text === "";
+  const noticeTitle = thought === "" ? autoModeNoticeTitle(text) : undefined;
+  if (noticeTitle !== undefined) {
+    entry.root.classList.add("auto-notice-msg");
+    if (!entry.autoNoticeDetails) {
+      const summary = el("summary", { text: noticeTitle });
+      const details = el("details", { class: "auto-notice" }, summary, entry.text);
+      const savedOpen = openDetails.get(`auto:${id}`) === true;
+      details.open = savedOpen;
+      entry.expectedAutoNoticeOpen = savedOpen;
+      details.addEventListener("toggle", () => {
+        if (details.open === entry.expectedAutoNoticeOpen) return;
+        entry.expectedAutoNoticeOpen = details.open;
+        openDetails.set(`auto:${id}`, details.open);
+        saveWebviewState();
+      });
+      entry.autoNoticeDetails = details;
+      entry.autoNoticeSummary = summary;
+      entry.root.append(details);
+    } else if (entry.autoNoticeSummary && entry.autoNoticeSummary.textContent !== noticeTitle) {
+      entry.autoNoticeSummary.textContent = noticeTitle;
+    }
+  } else if (entry.autoNoticeDetails) {
+    entry.root.classList.remove("auto-notice-msg");
+    entry.root.append(entry.text);
+    entry.autoNoticeDetails.remove();
+    entry.autoNoticeDetails = undefined;
+    entry.autoNoticeSummary = undefined;
+    entry.expectedAutoNoticeOpen = false;
+  }
   entry.draw.request();
-  entry.thoughtDetails.hidden = thought === "" || state.showThinking === false;
-  entry.thoughtDetails.classList.toggle("streaming", state.status === "busy" && text === "" && thought !== "");
+  syncThoughtVisibilityAndDuration(entry);
   if (text !== "" && entry.drawnThought !== thought) {
     entry.drawThought.cancel();
     drawThoughtText(entry);
@@ -1049,9 +1209,19 @@ function renderItem(item: TranscriptItem): void {
     case "user":
       addUser(item.id, item.text);
       return;
-    case "agent":
+    case "agent": {
       setAgentText(item.id, item.text, item.thought);
+      const entry = messageEls.get(item.id);
+      if (entry) {
+        if (item.thoughtActive) {
+          startThoughtStream(entry, item.thoughtMs ?? 0);
+        } else if (item.thoughtMs !== undefined) {
+          entry.thoughtMs = item.thoughtMs;
+          syncThoughtVisibilityAndDuration(entry);
+        }
+      }
       return;
+    }
     case "tool":
       upsertTool(item.toolCall);
       return;
@@ -1067,6 +1237,7 @@ function renderItem(item: TranscriptItem): void {
 function resetTranscript(items: TranscriptItem[]): void {
   const isInitial = awaitingInitialReset;
   awaitingInitialReset = false;
+  stopThoughtClock();
   transcript.replaceChildren();
   for (const entry of messageEls.values()) {
     entry.draw.cancel();
@@ -1089,8 +1260,12 @@ function resetTranscript(items: TranscriptItem[]): void {
   } else {
     const validDetailKeys = new Set<string>();
     for (const item of items) {
-      if (item.type === "agent") validDetailKeys.add(`thought:${item.id}`);
-      else if (item.type === "tool") validDetailKeys.add(`tool:${item.toolCall.id}`);
+      if (item.type === "agent") {
+        validDetailKeys.add(`thought:${item.id}`);
+        validDetailKeys.add(`auto:${item.id}`);
+      } else if (item.type === "tool") {
+        validDetailKeys.add(`tool:${item.toolCall.id}`);
+      }
     }
     for (const key of [...openDetails.keys()]) {
       if (!validDetailKeys.has(key)) openDetails.delete(key);
@@ -1132,10 +1307,25 @@ function onHostMessage(message: HostMessage): void {
       const entry = agentMessage(message.messageId);
       const text = message.type === "agentText" ? entry.raw.text + message.text : entry.raw.text;
       const thought = message.type === "agentThought" ? entry.raw.thought + message.text : entry.raw.thought;
+      if (message.type === "agentText" && entry.thoughtStreaming) {
+        finishThoughtStream(entry);
+      }
       setAgentText(message.messageId, text, thought);
+      if (message.type === "agentThought" && state.status === "busy" && entry.raw.text === "") {
+        startThoughtStream(entry, 0);
+      }
       break;
     }
+    case "agentThoughtEnd": {
+      const entry = messageEls.get(message.messageId);
+      if (entry) finishThoughtStream(entry, message.durationMs);
+      break;
+    }
+    case "avatars":
+      applyAvatars(message.avatars);
+      return;
     case "toolCall":
+      finishAllStreamingThoughts();
       upsertTool(message.toolCall);
       break;
     case "toolCallOutput":
@@ -1155,6 +1345,7 @@ function onHostMessage(message: HostMessage): void {
       addNotice(message.level, message.text, message.actions);
       break;
     case "turnEnd":
+      finishAllStreamingThoughts();
       for (const entry of messageEls.values()) {
         entry.draw.cancel();
         drawText(entry);

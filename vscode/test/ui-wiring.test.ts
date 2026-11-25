@@ -647,4 +647,68 @@ describe("ChatViewProvider host clipboard & SessionsView timer polish", () => {
 
     provider.dispose();
   });
+
+  it("includes cspSource in img-src CSP and posts avatars on ready and refreshAvatars", async () => {
+    let receiveMessage: ((raw: unknown) => void) | undefined;
+    const posted: HostMessage[] = [];
+    const controller = {
+      onMessage: () => ({ dispose() {} }),
+      stateMessage: () => ({ type: "state", status: "ready", canRestart: true }) as StateMessage,
+      transcript: () => [],
+      currentStatus: "ready",
+    } as unknown as ChatController;
+
+    let call = 0;
+    const provider = new ChatViewProvider(makeUri("/ext") as never, controller, {
+      showLog() {},
+      async showDiff() {},
+      notify() {},
+      openGuide() {},
+      openAgentConfig() {},
+      resolveAvatars: async () => {
+        call++;
+        return { user: `data:image/png;base64,U${call}`, assistant: `data:image/png;base64,A${call}` };
+      },
+    });
+
+    const fakeView = {
+      visible: true,
+      show: vi.fn(),
+      webview: {
+        options: {},
+        html: "",
+        cspSource: "vscode-webview://unit-test",
+        asWebviewUri: (u: unknown) => u,
+        postMessage: vi.fn(async (msg: HostMessage) => {
+          posted.push(msg);
+          return true;
+        }),
+        onDidReceiveMessage: (fn: (raw: unknown) => void) => {
+          receiveMessage = fn;
+          return { dispose() {} };
+        },
+      },
+      onDidDispose: () => ({ dispose() {} }),
+    };
+
+    provider.resolveWebviewView(fakeView as never);
+    expect(fakeView.webview.html).toContain("img-src vscode-webview://unit-test data:");
+
+    receiveMessage?.({ type: "ready" });
+    await Promise.resolve();
+    await Promise.resolve();
+    expect(posted.at(-1)).toEqual({
+      type: "avatars",
+      avatars: { user: "data:image/png;base64,U1", assistant: "data:image/png;base64,A1" },
+    });
+
+    provider.refreshAvatars();
+    await Promise.resolve();
+    expect(posted.at(-1)).toEqual({
+      type: "avatars",
+      avatars: { user: "data:image/png;base64,U2", assistant: "data:image/png;base64,A2" },
+    });
+
+    provider.dispose();
+  });
 });

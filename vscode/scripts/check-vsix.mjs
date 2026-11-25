@@ -30,7 +30,7 @@ export function checkVsix(file, expectedTarget) {
   for (const other of ["zycode-agent", "zycode-agent.exe"]) {
     if (other !== target.program && byName.has(`extension/bin/${other}`)) problems.push(`extension/bin/${other} is in the wrong platform package`);
   }
-  for (const name of ["extension/LICENSE.txt", "extension/THIRD-PARTY-NOTICES", "extension/readme.md", "extension/changelog.md", "extension/package.json", "extension/dist/extension.js", "extension/dist/webview.js", "extension/media/chat.css", "extension/media/icon.png", "extension/media/zycode.svg"]) {
+  for (const name of ["extension/LICENSE.txt", "extension/THIRD-PARTY-NOTICES", "extension/readme.md", "extension/changelog.md", "extension/package.json", "extension/dist/extension.js", "extension/dist/webview.js", "extension/media/chat.css", "extension/media/icon.png", "extension/media/zycode.svg", "extension/media/zycode-avatar.png"]) {
     need(name);
   }
   for (const walkthrough of manifest.contributes?.walkthroughs ?? []) {

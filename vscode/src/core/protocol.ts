@@ -102,6 +102,11 @@ export interface TurnState {
   lastMs?: number;
 }
 
+export interface AvatarState {
+  user?: string;
+  assistant?: string;
+}
+
 export interface StateMessage {
   type: "state";
   status: Status;
@@ -185,7 +190,7 @@ export interface NoticeAction {
 
 export type TranscriptItem =
   | { type: "user"; id: string; text: string }
-  | { type: "agent"; id: string; text: string; thought: string }
+  | { type: "agent"; id: string; text: string; thought: string; thoughtMs?: number; thoughtActive?: boolean }
   | { type: "tool"; toolCall: ToolCallView }
   | { type: "permission"; request: PermissionRequestView; done?: { outcome: PermissionOutcome; optionId?: string } }
   | { type: "notice"; level: NoticeLevel; text: string; actions?: NoticeAction[] };
@@ -198,6 +203,8 @@ export type HostMessage =
   | { type: "userMessage"; id: string; text: string }
   | { type: "agentText"; messageId: string; text: string }
   | { type: "agentThought"; messageId: string; text: string }
+  | { type: "agentThoughtEnd"; messageId: string; durationMs: number }
+  | { type: "avatars"; avatars: AvatarState }
   | { type: "toolCall"; toolCall: ToolCallView }
   | { type: "toolCallOutput"; id: string; delta: string; status: ToolStatus }
   | ({ type: "permission" } & PermissionRequestView)

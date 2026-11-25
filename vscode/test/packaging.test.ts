@@ -221,7 +221,12 @@ describe("manifest contributions", () => {
   it("declares every command that a menu or the guide uses", () => {
     const declared = new Set<string>(manifest.contributes.commands.map((c: { command: string }) => c.command));
     const used: string[] = [];
-    for (const items of Object.values(manifest.contributes.menus) as { command: string }[][]) for (const item of items) used.push(item.command);
+    for (const items of Object.values(manifest.contributes.menus) as { command: string; alt?: string }[][]) {
+      for (const item of items) {
+        used.push(item.command);
+        if (item.alt) used.push(item.alt);
+      }
+    }
     for (const walkthrough of manifest.contributes.walkthroughs) {
       for (const step of walkthrough.steps) for (const m of step.description.matchAll(/command:(zycode\.[A-Za-z.]+)/g)) used.push(m[1]!);
     }
@@ -229,6 +234,16 @@ describe("manifest contributions", () => {
       if (command === "zycode.sessions.focus") continue;
       expect(declared.has(command), command).toBe(true);
     }
+  });
+
+  it("opens extension settings on gear click and agent.toml on Alt+click, and bundles the default avatar", () => {
+    const titleItems = manifest.contributes.menus["view/title"] as { command: string; alt?: string; when: string }[];
+    const settingsItem = titleItems.find((item) => item.when === "view == zycode.chat" && item.command === "zycode.openSettings");
+    expect(settingsItem?.alt).toBe("zycode.openAgentConfig");
+    expect(ignore).toContain("!media/zycode-avatar.png");
+    expect(existsSync(path.join(root, "media", "zycode-avatar.png"))).toBe(true);
+    expect(manifest.contributes.configuration.properties["zycode.userAvatar"].scope).toBe("application");
+    expect(manifest.contributes.configuration.properties["zycode.assistantAvatar"].scope).toBe("application");
   });
 
   it("has a walkthrough whose pages are in the package", () => {

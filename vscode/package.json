@@ -87,10 +87,16 @@
         "category": "zycode"
       },
       {
+        "command": "zycode.openSettings",
+        "title": "Open settings",
+        "category": "zycode",
+        "icon": "$(gear)"
+      },
+      {
         "command": "zycode.openAgentConfig",
         "title": "Open agent.toml",
         "category": "zycode",
-        "icon": "$(gear)"
+        "icon": "$(file-code)"
       },
       {
         "command": "zycode.showLog",
@@ -161,7 +167,19 @@
           "type": "boolean",
           "default": true,
           "scope": "window",
-          "description": "Show the thinking blocks of the model in the chat (collapsed)."
+          "description": "Show the thinking blocks of the model in the chat (expanded while thinking, collapsed when done)."
+        },
+        "zycode.userAvatar": {
+          "type": "string",
+          "default": "",
+          "scope": "application",
+          "markdownDescription": "Custom avatar for your messages (`You`). Accepts a local image file path (supports `~/`), an `https://` image URL, or a `data:image/...` URI. Leave empty to use your signed-in VS Code account avatar (with a built-in user icon fallback)."
+        },
+        "zycode.assistantAvatar": {
+          "type": "string",
+          "default": "",
+          "scope": "application",
+          "markdownDescription": "Custom avatar for `zycode` messages. Accepts a local image file path (supports `~/`), an `https://` image URL, or a `data:image/...` URI. Leave empty to use the bundled default avatar."
         },
         "zycode.mcpServers": {
           "type": "array",
@@ -232,7 +250,8 @@
           "group": "navigation@2"
         },
         {
-          "command": "zycode.openAgentConfig",
+          "command": "zycode.openSettings",
+          "alt": "zycode.openAgentConfig",
           "when": "view == zycode.chat",
           "group": "navigation@3"
         },

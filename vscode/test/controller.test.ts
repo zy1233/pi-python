@@ -10,10 +10,10 @@ const hosts: TestHost[] = [];
 const controllers: ChatController[] = [];
 const dirs: string[] = [];
 
-function setup(options: ConstructorParameters<typeof TestHost>[0] = {}) {
+function setup(options: ConstructorParameters<typeof TestHost>[0] = {}, extra: Parameters<typeof newController>[1] = {}) {
   const host = new TestHost(options);
   hosts.push(host);
-  const made = newController(host);
+  const made = newController(host, extra);
   controllers.push(made.controller);
   return { host, ...made };
 }
@@ -587,5 +587,53 @@ describe("stop", () => {
     await turn;
     expect(controller.currentStatus).toBe("stopped");
     expect(ofType(messages, "notice").filter((n) => n.level === "error")).toEqual([]);
+  });
+});
+
+describe("thinking duration tracking", () => {
+  it("emits agentThoughtEnd with elapsed duration and persists thoughtMs and thoughtActive in transcript", async () => {
+    let clock = 10_000;
+    const { controller, messages } = setup({}, { now: () => clock });
+    await controller.start();
+
+    const feed = (update: Record<string, unknown>) =>
+      (controller as unknown as { onUpdate(n: unknown): void }).onUpdate({
+        sessionId: "fake-1",
+        update,
+      });
+
+    feed({ sessionUpdate: "agent_thought_chunk", content: { type: "text", text: "Thinking..." } });
+    clock = 12_345;
+    const midTranscript = controller.transcript();
+    expect(midTranscript[0]).toMatchObject({
+      type: "agent",
+      thought: "Thinking...",
+      thoughtMs: 2345,
+      thoughtActive: true,
+    });
+
+    feed({ sessionUpdate: "agent_message_chunk", content: { type: "text", text: "Answer." } });
+    expect(ofType(messages, "agentThoughtEnd")).toEqual([{ type: "agentThoughtEnd", messageId: "agent-1", durationMs: 2345 }]);
+
+    const afterTranscript = controller.transcript();
+    expect(afterTranscript[0]).toMatchObject({
+      type: "agent",
+      text: "Answer.",
+      thought: "Thinking...",
+      thoughtMs: 2345,
+    });
+    expect((afterTranscript[0] as { thoughtActive?: boolean }).thoughtActive).toBeUndefined();
+
+    // Tool call starts a new segment and also closes active thinking.
+    feed({ sessionUpdate: "tool_call", toolCallId: "tc-0", title: "ls", kind: "execute", status: "completed" });
+    clock = 20_000;
+    feed({ sessionUpdate: "agent_thought_chunk", content: { type: "text", text: "Next thought" } });
+    clock = 21_500;
+    feed({ sessionUpdate: "tool_call", toolCallId: "tc-1", title: "read a.ts", kind: "read", status: "in_progress" });
+    expect(ofType(messages, "agentThoughtEnd").at(-1)).toEqual({
+      type: "agentThoughtEnd",
+      messageId: "agent-2",
+      durationMs: 1500,
+    });
   });
 });

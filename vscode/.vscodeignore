@@ -6,6 +6,7 @@
 !media/walkthrough/**
 !media/icon.png
 !media/zycode.svg
+!media/zycode-avatar.png
 !package.json
 !README.md
 !CHANGELOG.md

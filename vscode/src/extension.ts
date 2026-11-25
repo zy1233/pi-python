@@ -8,6 +8,7 @@ import { agentConfigPath } from "./core/first-run.js";
 import { normalizeRelativePath } from "./core/mentions.js";
 import type { SessionRow } from "./core/session-list.js";
 import { CHAT_VIEW_ID, ChatViewProvider } from "./ui/chat-view.js";
+import { AvatarProvider } from "./ui/avatars.js";
 import { DIFF_SCHEME, DiffDocuments } from "./ui/diff-documents.js";
 import { SessionsView } from "./ui/sessions-view.js";
 import { StatusBar } from "./ui/status-bar.js";
@@ -50,15 +51,18 @@ export function activate(context: vscode.ExtensionContext): void {
   context.subscriptions.push(host, channel, status);
 
   const diffs = new DiffDocuments(() => chat.diffStore);
+  const avatars = new AvatarProvider(context.extensionUri, host.log);
   const view = new ChatViewProvider(context.extensionUri, chat, {
     showLog: () => host.showLog(),
     showDiff: (info) => diffs.open(info),
     notify: (text) => host.notify("info", text),
     openGuide,
     openAgentConfig: () => void openAgentConfig(chat),
+    resolveAvatars: (webview) => avatars.resolve(webview),
   });
   const sessions = new SessionsView(chat);
   context.subscriptions.push(
+    avatars,
     view,
     sessions,
     diffs,
@@ -91,6 +95,9 @@ export function activate(context: vscode.ExtensionContext): void {
     vscode.commands.registerCommand("zycode.showLog", () => host.showLog()),
     vscode.commands.registerCommand("zycode.runSetup", () => chat.runSetup()),
     vscode.commands.registerCommand("zycode.openGuide", openGuide),
+    vscode.commands.registerCommand("zycode.openSettings", () =>
+      vscode.commands.executeCommand("workbench.action.openSettings", "@ext:zycode.zycode"),
+    ),
     vscode.commands.registerCommand("zycode.openAgentConfig", () => openAgentConfig(chat)),
     vscode.commands.registerCommand("zycode.refreshSessions", () => chat.refreshSessions()),
     vscode.commands.registerCommand("zycode.openSession", async (id: unknown) => {
@@ -152,6 +159,9 @@ export function activate(context: vscode.ExtensionContext): void {
         void chat.applyPermissionMode(host.settings().permissionMode);
       }
       if (event.affectsConfiguration("zycode.showThinking")) chat.refreshSettings();
+      if (event.affectsConfiguration("zycode.userAvatar") || event.affectsConfiguration("zycode.assistantAvatar")) {
+        view.refreshAvatars();
+      }
       if (event.affectsConfiguration("zycode.agentPath") || event.affectsConfiguration("zycode.agentArgs")) {
         void vscode.window
           .showInformationMessage("zycode: the agent program changed. Restart the agent to use it.", "Restart agent")
@@ -159,6 +169,15 @@ export function activate(context: vscode.ExtensionContext): void {
       }
     }),
   );
+
+  if (vscode.authentication?.onDidChangeSessions) {
+    context.subscriptions.push(
+      vscode.authentication.onDidChangeSessions(() => {
+        avatars.clearAccountCache();
+        view.refreshAvatars();
+      }),
+    );
+  }
 
   void chat.start();
 }

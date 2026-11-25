@@ -3,6 +3,7 @@ import { describe, expect, it } from "vitest";
 import {
   approvalStatusText,
   approvalTooltipLine,
+  autoModeNoticeTitle,
   contextBadge,
   contextLevel,
   describeContext,
@@ -254,5 +255,19 @@ describe("the status bar item", () => {
     expect(approvalTooltipLine(0)).toBeUndefined();
     expect(approvalTooltipLine(1)).toBe("Waiting for your approval in the zycode chat.");
     expect(approvalTooltipLine(2)).toBe("Waiting for your approval on 2 requests in the zycode chat.");
+  });
+
+  it("identifies Auto mode notices for collapsed rendering and leaves normal text undefined", () => {
+    const entry =
+      "Auto mode is on. These run with no question: tools that only read, edits inside the project folder, and shell commands that only read. Auto does not guard what tools that only read can read (read, grep, find, ls, fetch_url, web_search). A sandbox is the boundary, not Auto. /auto-log shows what Auto decided.";
+    expect(autoModeNoticeTitle(entry)).toBe("Auto mode is on");
+    expect(autoModeNoticeTitle(`${entry}\n\nAuto cannot check this session safely.`)).toBe("Auto mode is on (warning)");
+    expect(autoModeNoticeTitle('Auto mode is on. The model that [auto] names, "bad", is not the id of a model in [model] or [[models]]: /auto-log')).toBe(
+      "Auto mode is on (warning)",
+    );
+    expect(autoModeNoticeTitle("Auto cannot check this session safely. It asks about every call.")).toBe("Auto mode warning");
+    expect(autoModeNoticeTitle("Settings in agent.toml that Auto cannot work with.")).toBe("Auto mode settings warning");
+    expect(autoModeNoticeTitle("Auto mode is great for coding.")).toBeUndefined();
+    expect(autoModeNoticeTitle("Here is the answer you asked for.")).toBeUndefined();
   });
 });
