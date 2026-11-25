@@ -1,5 +1,24 @@
 # Changelog
 
+## 1.12.0 (2026-11-25)
+
+Stable release. It follows 1.10.0 and bundles the same agent (1.1.0). A user of 1.10.0 gets it as an update.
+
+### New
+
+- **Avatars.** Each message in the chat has an avatar. The `zycode` side shows a mascot that matches the model of the chat (Claude, Gemini, DeepSeek, OpenAI/GPT, Grok, Kimi or Qwen), and a mascot of your choice for another model. Your side shows a plain icon. A click on an avatar opens a menu. There you can choose a built-in mascot, choose an image file from your disk, switch the matching by model on or off, or go back to the default. The Command Palette has the same actions (**Choose user avatar**, **Choose zycode avatar**, **Choose built-in zycode avatar** and two **Reset … avatar** commands). A file that you choose is copied to the storage folder of the extension.
+- **Account picture (opt-in).** The command **Use account picture as avatar** shows the picture of your GitHub or Microsoft account as your avatar. It is off until you run it. VS Code then asks you to sign in, or to allow zycode to use the account. If you say no, nothing changes. After that, zycode gets the picture in the background and sends your sign-in token to `api.github.com` or `graph.microsoft.com` only. A value that you write by hand in `settings.json` (`zycode.accountAvatar`) sends nothing when VS Code has no permission for the account. An image of your own (`zycode.userAvatar`) wins over the picture.
+- **Settings button.** The gear button in the title of the chat opens the settings of zycode. **Alt+click** (Option+click on macOS) opens `agent.toml`, as the button did in 1.10.0. **Open agent.toml** is also in the `…` menu of the title.
+- New settings: `zycode.autoModelAvatar`, `zycode.assistantAvatarPreset`, `zycode.assistantAvatar`, `zycode.userAvatar` and `zycode.accountAvatar`.
+
+### Changed
+
+- A thinking block is open while the model thinks, and it closes when the model is done. It shows how long the model thought.
+- The Auto mode notice is folded in the chat by default.
+- `zycode.userAvatar`, `zycode.assistantAvatar` and `zycode.accountAvatar` are per machine. VS Code does not sync them and a folder cannot set them, because a file path is valid on one machine only.
+- The avatar buttons are not in the Tab order. In a long chat, Tab goes to the message box and does not stop on every avatar.
+- The README, the description of the extension and the notices say that zycode is not affiliated with any maker of an AI model. The mascots are not logos. They are community illustrations.
+
 ## 1.10.0 (2026-11-25)
 
 Stable release. It follows 1.8.0 and bundles agent 1.1.0 (1.8.0 had 1.0.1). A user of 1.8.0 gets it as an update.
