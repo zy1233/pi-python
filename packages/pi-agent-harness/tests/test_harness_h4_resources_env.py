@@ -200,6 +200,48 @@ async def test_agent_harness_prompt_expands_skill_slash_command():
 
 
 @pytest.mark.asyncio
+async def test_agent_harness_extension_command_wins_over_skill_slash_command():
+    seen: list[str] = []
+    ran: list[str] = []
+
+    async def recording_stream(model, context, options=None):
+        seen.extend(_user_text(m) for m in context.messages if getattr(m, "role", None) == "user")
+        return await mock_text_stream(model, context, options)
+
+    def activate(pi) -> None:
+        def handler(args: str) -> None:
+            ran.append(args)
+            pi.send_message("from ext")
+
+        pi.register_command("skill:writer", description="Extension override", handler=handler)
+
+    skill = Skill(
+        name="writer",
+        description="Write polished text",
+        content="Use concise prose.",
+        filePath="/skills/writer/SKILL.md",
+    )
+    session = await _session()
+    harness = AgentHarness(
+        session=session,
+        model=_model(),
+        stream_fn=recording_stream,
+        resources=AgentHarnessResources(skills=[skill]),
+        extensions=[activate],
+    )
+
+    reply = await harness.prompt("/skill:writer Answer in Chinese.")
+    await harness.wait_for_idle()
+
+    assert ran == ["Answer in Chinese."]
+    assert reply.content[0]["text"] == "from ext"
+    assert seen == []  # the command answered: no model call, and the skill was not expanded
+    # The chat keeps what the user typed, not the text of the skill.
+    context = await session.build_context()
+    assert _user_text(context.messages[0]) == "/skill:writer Answer in Chinese."
+
+
+@pytest.mark.asyncio
 async def test_prompt_templates_load_substitute_and_prompt():
     seen: list[str] = []
 

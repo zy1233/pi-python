@@ -1725,13 +1725,15 @@ class AgentHarness:
             raise AgentHarnessError("busy", "AgentHarness is busy")
         await self._ensure_extensions_loaded()
 
-        text = self._expand_skill_command(text)
-
-        # Slash command dispatch — skip the LLM turn entirely when matched.
+        # Slash command dispatch — skip the LLM turn entirely when matched. This runs
+        # before the skill expansion, so an extension command named ``skill:<name>`` wins
+        # over the skill of that name when it runs, as it does in the command list (the
+        # same order as upstream pi: extension commands first, then ``/skill:`` expansion).
         dispatched = await self._try_slash_dispatch(text, images)
         if dispatched is not None:
             return dispatched
 
+        text = self._expand_skill_command(text)
         return await self._run_turn(text, images)
 
     async def _run_turn(

@@ -908,8 +908,8 @@ async def test_skills_advertised_and_expanded_via_acp(tmp_path):
 
 
 @pytest.mark.asyncio
-async def test_extension_command_precedence_over_skill_advertisement(tmp_path):
-    """An extension command named skill:<name> is not overwritten by a skill."""
+async def test_extension_command_wins_over_a_skill_of_the_same_name(tmp_path):
+    """An extension command named skill:<name> wins over the skill, in the list and when it runs."""
     skills_dir = tmp_path / "skills"
     demo_dir = skills_dir / "demo"
     demo_dir.mkdir(parents=True)
@@ -918,15 +918,22 @@ async def test_extension_command_precedence_over_skill_advertisement(tmp_path):
         encoding="utf-8",
     )
 
+    ran: list[str] = []
+    model_calls: list[str] = []
+
     def _override_ext(pi):
-        pi.register_command(
-            "skill:demo",
-            description="Extension override",
-            handler=lambda _args: pi.send_message("from ext"),
-        )
+        def handler(args):
+            ran.append(args)
+            pi.send_message("from ext")
+
+        pi.register_command("skill:demo", description="Extension override", handler=handler)
+
+    async def counting_stream(model, context, options=None):
+        model_calls.append("called")
+        return await mock_text_stream(model, context, options)
 
     agent = PiAcpAgent(
-        stream_fn=mock_text_stream,
+        stream_fn=counting_stream,
         home=tmp_path / "home",
         config=CliConfig(
             permission="always-approve",
@@ -939,7 +946,7 @@ async def test_extension_command_precedence_over_skill_advertisement(tmp_path):
     )
     client = FakeClient()
     agent.on_connect(client)
-    await agent.new_session(cwd=str(tmp_path.resolve()))
+    created = await agent.new_session(cwd=str(tmp_path.resolve()))
     await asyncio.sleep(0)
     await asyncio.sleep(0)
 
@@ -952,6 +959,20 @@ async def test_extension_command_precedence_over_skill_advertisement(tmp_path):
     matches = [c for c in acu[0].available_commands if c.name == "skill:demo"]
     assert len(matches) == 1
     assert matches[0].description == "Extension override"
+
+    # The list is not enough: the command must also be the one that runs.
+    result = await agent.prompt(
+        session_id=created.session_id,
+        prompt=[text_block("/skill:demo focus on tests")],
+    )
+    assert result.stop_reason == "end_turn"
+    assert ran == ["focus on tests"]
+    assert model_calls == []  # the handler answered, and the skill went nowhere near the model
+    chunks = [
+        u for _, u in client.updates if getattr(u, "session_update", None) == "agent_message_chunk"
+    ]
+    texts = [getattr(getattr(u, "content", None), "text", None) or "" for u in chunks]
+    assert "from ext" in "".join(texts)
 
 
 # ---------------------------------------------------------------------------
