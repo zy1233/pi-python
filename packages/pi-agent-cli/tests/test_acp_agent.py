@@ -908,6 +908,49 @@ async def test_skills_advertised_and_expanded_via_acp(tmp_path):
 
 
 @pytest.mark.asyncio
+async def test_a_skill_prompt_shows_as_the_typed_line_in_the_list_and_in_the_replay(tmp_path):
+    """The chat stores the text of the skill, but a client shows the line the user typed."""
+    skills_dir = tmp_path / "skills"
+    demo_dir = skills_dir / "demo"
+    demo_dir.mkdir(parents=True)
+    (demo_dir / "SKILL.md").write_text(
+        "---\nname: demo\ndescription: Demo skill for testing.\n---\n\nFollow demo instructions.\n",
+        encoding="utf-8",
+    )
+    agent = PiAcpAgent(
+        stream_fn=mock_text_stream,
+        home=tmp_path / "home",
+        config=CliConfig(
+            permission="always-approve",
+            provider="mock",
+            model_id="mock",
+            include_builtin_skills=False,
+            skills_dirs=(str(skills_dir),),
+        ),
+    )
+    client = FakeClient()
+    agent.on_connect(client)
+    cwd = str(tmp_path.resolve())
+    created = await agent.new_session(cwd=cwd)
+    await agent.prompt(
+        session_id=created.session_id, prompt=[text_block("/skill:demo focus  on tests")]
+    )
+    await agent.close_session(session_id=created.session_id)
+
+    listed = {s.session_id: s for s in (await agent.list_sessions()).sessions}
+    assert listed[created.session_id].title == "/skill:demo focus on tests"
+
+    client.updates.clear()
+    await agent.load_session(cwd=cwd, session_id=created.session_id)
+    replayed = [
+        getattr(getattr(update, "content", None), "text", "")
+        for _, update in client.updates
+        if getattr(update, "session_update", None) == "user_message_chunk"
+    ]
+    assert replayed == ["/skill:demo focus  on tests"]
+
+
+@pytest.mark.asyncio
 async def test_extension_command_wins_over_a_skill_of_the_same_name(tmp_path):
     """An extension command named skill:<name> wins over the skill, in the list and when it runs."""
     skills_dir = tmp_path / "skills"

@@ -25,6 +25,7 @@ from acp.schema import (
 )
 
 from pi_agent_core.types import AgentEvent
+from pi_agent_harness.skills import skill_invocation_command
 
 _KIND: dict[str, str] = {
     "read": "read",
@@ -323,8 +324,10 @@ def project_message_replay(message: Any) -> Iterator[SessionUpdate]:
                     parts.append(str(getattr(item, "text", "")))
             text = "".join(parts)
         if text:
+            # A prompt that ran a skill is stored with the text of the skill. The replay
+            # shows the line that the user typed, as the client showed it the first time.
             chunk = UserMessageChunk(
-                content=text_block(text),
+                content=text_block(skill_invocation_command(text) or text),
                 session_update="user_message_chunk",
                 field_meta=replay_meta,
             )

@@ -27,6 +27,7 @@ from pi_agent_harness.skills import (
     format_skills_for_system_prompt,
     load_skills,
     load_sourced_skills,
+    skill_invocation_command,
 )
 from pi_agent_harness.system_prompt import build_harness_system_prompt
 from pi_agent_harness.types import (
@@ -128,6 +129,7 @@ __all__ = [
     "load_skills",
     "load_sourced_skills",
     "parse_command_args",
+    "skill_invocation_command",
     "substitute_args",
     "uuid7",
 ]

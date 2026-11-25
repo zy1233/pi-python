@@ -24,6 +24,7 @@ from pi_agent_harness.skills import (
     format_skills_for_system_prompt,
     load_skills,
     load_sourced_skills,
+    skill_invocation_command,
 )
 from pi_agent_harness.types import (
     AgentHarnessResources,
@@ -135,6 +136,43 @@ def test_format_skills_for_system_prompt_and_invocation():
     assert "hidden" not in system_prompt
     assert "Use concise prose." in invocation
     assert "Use Chinese." in invocation
+
+
+def test_skill_invocation_command_reads_back_what_format_skill_invocation_wrote():
+    skill = Skill(
+        name="writer",
+        description="Write polished text",
+        content="Use concise prose.\n\nKeep it short.",
+        filePath="/skills/writer/SKILL.md",
+    )
+    assert skill_invocation_command(format_skill_invocation(skill)) == "/skill:writer"
+    assert (
+        skill_invocation_command(format_skill_invocation(skill, "Answer in Chinese."))
+        == "/skill:writer Answer in Chinese."
+    )
+    # The arguments keep their own lines.
+    assert (
+        skill_invocation_command(format_skill_invocation(skill, "one\ntwo"))
+        == "/skill:writer one\ntwo"
+    )
+
+    # A skill with no text, a folder name with a space, and a Windows path all read back.
+    for path in ("/my skills/bare/SKILL.md", "C:\\Users\\me\\skills\\bare\\SKILL.md"):
+        bare = Skill(name="bare", description="x", content="", filePath=path)
+        assert skill_invocation_command(format_skill_invocation(bare)) == "/skill:bare"
+        assert skill_invocation_command(format_skill_invocation(bare, "go")) == "/skill:bare go"
+
+
+def test_skill_invocation_command_ignores_text_that_is_not_an_invocation():
+    for text in (
+        "",
+        "hello",
+        "/skill:writer hi",  # what the user types, not what the chat stores
+        "Use skill `writer`.",  # no "References" line
+        "Use skill `writer`.\nsome other line\n\nbody",
+        "Please. Use skill `writer`.\nReferences are relative to /s.\n\nbody",
+    ):
+        assert skill_invocation_command(text) is None
 
 
 @pytest.mark.asyncio

@@ -2,9 +2,10 @@
 cursor that pages the list.
 
 The title follows pi's session selector: the first user message of the session, with
-whitespace collapsed and a length cap. Only a bounded prefix of each session file is read,
-so listing stays proportional to the number of sessions, not to their size. The last
-activity is the session file's modification time (every entry is an append).
+whitespace collapsed and a length cap. A message that ran a skill (``/skill:<name>``) shows
+the line that the user typed, not the text of the skill. Only a bounded prefix of each
+session file is read, so listing stays proportional to the number of sessions, not to their
+size. The last activity is the session file's modification time (every entry is an append).
 
 A page holds ``SESSION_LIST_PAGE_SIZE`` sessions, newest first (by creation, as the harness
 lists them). ``nextCursor`` is opaque to the client; here it carries the file name the next
@@ -22,6 +23,8 @@ from dataclasses import dataclass
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
+
+from pi_agent_harness.skills import skill_invocation_command
 
 # Sessions per ``session/list`` response. A page costs the files it looks at (the harness
 # reads a header only when the page gets that far), so this bounds the work of one request
@@ -105,7 +108,10 @@ def _title_of_entry(line: str) -> str | None:
     message = entry.get("message")
     if not isinstance(message, dict) or message.get("role") != "user":
         return None
-    return _normalize_title(_user_text(message)) or None
+    text = _user_text(message)
+    # A prompt that ran a skill is stored with the text of the skill. The title shows
+    # the line that the user typed (``/skill:<name> args``).
+    return _normalize_title(skill_invocation_command(text) or text) or None
 
 
 def _user_text(message: dict[str, Any]) -> str:

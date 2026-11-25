@@ -15,6 +15,8 @@ from pi_agent_cli.session_list import (
     read_session_preview,
     read_session_previews,
 )
+from pi_agent_harness.skills import format_skill_invocation
+from pi_agent_harness.types import Skill
 
 CREATED_AT = "2026-01-01T00:00:00.000Z"
 HEADER = {"type": "session", "version": 3, "id": "s1", "timestamp": CREATED_AT, "cwd": "/w"}
@@ -70,6 +72,24 @@ def test_assistant_and_other_entries_do_not_name_the_session(tmp_path):
         _message("user", _text("the real prompt")),
     )
     assert read_session_preview(path, CREATED_AT).title == "the real prompt"
+
+
+def test_title_of_a_prompt_that_ran_a_skill_is_the_line_the_user_typed(tmp_path):
+    # The chat stores the whole text of the skill. A long skill must not name the session.
+    skill = Skill(
+        name="review",
+        description="Review a change",
+        content="Read the diff.\n\n" + "A long body. " * 50,
+        filePath="/skills/review/SKILL.md",
+    )
+    with_args = _write(
+        tmp_path / "args.jsonl",
+        _message("user", _text(format_skill_invocation(skill, "the  auth\nchange"))),
+    )
+    assert read_session_preview(with_args, CREATED_AT).title == "/skill:review the auth change"
+
+    bare = _write(tmp_path / "bare.jsonl", _message("user", _text(format_skill_invocation(skill))))
+    assert read_session_preview(bare, CREATED_AT).title == "/skill:review"
 
 
 def test_long_titles_are_capped_with_an_ellipsis(tmp_path):
