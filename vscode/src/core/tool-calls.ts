@@ -124,10 +124,17 @@ export class ToolCallStore {
   }
 }
 
-/** What the permission card shows under the title: the whole command, or the path. */
+/**
+ * What the permission card shows under the title, whole and never cut: the command of `bash`, the
+ * script of `codemode` (`code`) or of `workflow` (`script`), or the path of `read`, `write` and
+ * `edit`. The card scrolls a long text (`.perm-summary` in `media/chat.css`), and the Allow and
+ * Reject buttons stay outside the scroll area.
+ */
 export function summarizeInput(rawInput: unknown): string {
   if (!isRecord(rawInput)) return "";
-  if (typeof rawInput.command === "string") return rawInput.command;
-  if (typeof rawInput.path === "string") return rawInput.path;
+  for (const key of ["command", "path", "code", "script"]) {
+    const value = rawInput[key];
+    if (typeof value === "string") return value;
+  }
   return "";
 }

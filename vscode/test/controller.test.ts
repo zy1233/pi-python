@@ -254,6 +254,26 @@ describe("chat", () => {
     expect(controller.stateMessage().pendingPermissions).toBeUndefined();
   });
 
+  it("shows the whole script of a codemode call and of a workflow call on the card", async () => {
+    for (const [prompt, title, last] of [
+      ["tool:codemode", "codemode", "echo LAST-LINE"],
+      ["tool:workflow", "workflow", "WORKFLOW-LAST-LINE"],
+    ] as const) {
+      const { controller, messages } = setup();
+      await controller.start();
+      const turn = controller.send(prompt);
+      await waitFor(() => ofType(messages, "permission").length === 1, "the permission card");
+      const card = ofType(messages, "permission")[0]!;
+      expect(card).toMatchObject({ kind: "tool", title });
+      expect(card.summary.split("\n").length).toBeGreaterThan(80);
+      expect(card.summary).toContain(last);
+      expect(card.summary.startsWith(title === "codemode" ? "r0 = " : "async def main():")).toBe(true);
+      expect(controller.answerPermission(card.requestId, "reject-once")).toBe(true);
+      await turn;
+      expect(agentText(messages)).toBe("denied");
+    }
+  });
+
   it("asks for a write, and sends the choice that the user made", async () => {
     const { controller, messages } = setup();
     await controller.start();

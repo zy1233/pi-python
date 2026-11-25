@@ -137,6 +137,40 @@ describe.skipIf(!chrome || !built)("webview in headless Chrome", () => {
     });
   });
 
+  it("shows a long script whole in a scroll area on the card, and keeps the buttons outside it", () => {
+    const script = Array.from({ length: 150 }, (_, i) => `line_${i} = await tools.read(path="f${i}.txt")`).join("\n") + "\nawait tools.bash(command='echo LAST')";
+    const out = run(`${state}
+      state({});
+      host({ type: "permission", requestId: "p1", kind: "tool", title: "codemode", summary: ${lit(script)}, canDiff: false, options: [{ id: "allow-once", name: "Allow once", kind: "allow_once" }, { id: "reject-once", name: "Reject", kind: "reject_once" }] });
+      const summary = document.querySelector(".perm-summary");
+      const card = document.querySelector(".permission");
+      const allow = [...card.querySelectorAll("button")][0];
+      const style = getComputedStyle(summary);
+      const summaryRect = summary.getBoundingClientRect();
+      const allowRect = allow.getBoundingClientRect();
+      window.__result = {
+        text: summary.textContent,
+        overflowY: style.overflowY,
+        scrolls: summary.scrollHeight > summary.clientHeight,
+        shorterThanText: summaryRect.height < summary.scrollHeight,
+        buttonsInSummary: summary.querySelectorAll("button").length,
+        buttonBelowSummary: allowRect.top >= summaryRect.bottom,
+        buttonInsideCard: allowRect.bottom <= card.getBoundingClientRect().bottom,
+        buttonSize: allowRect.height > 0 && allowRect.width > 0,
+      };`);
+    expect(out).toMatchObject({
+      ok: true,
+      text: script,
+      overflowY: "auto",
+      scrolls: true,
+      shorterThanText: true,
+      buttonsInSummary: 0,
+      buttonBelowSummary: true,
+      buttonInsideCard: true,
+      buttonSize: true,
+    });
+  });
+
   it("shows the setup button, the error detail, and the mode switch only when the agent has a mode option", () => {
     const out = run(`${state}
       state({ status: "needs-setup", detail: "zycode needs a model and an API key. Run the setup in a terminal." });

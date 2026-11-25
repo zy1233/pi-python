@@ -26,6 +26,10 @@ import path from "node:path";
 import { Readable, Writable } from "node:stream";
 import * as acp from "@agentclientprotocol/sdk";
 
+// Long on purpose: the card must show all of it. The last line is the one a cut would lose.
+const CODEMODE_SCRIPT = [...Array.from({ length: 120 }, (_, i) => `r${i} = await tools.read(path="file${i}.txt")`), "await tools.bash(command='echo LAST-LINE')"].join("\n");
+const WORKFLOW_SCRIPT = ["async def main():", ...Array.from({ length: 80 }, (_, i) => `    await agent("task ${i}")`), "    result('WORKFLOW-LAST-LINE')", ""].join("\n");
+
 const env = process.env;
 if (env.FAKE_EXIT_AT_START) {
   process.stderr.write("fake agent: cannot start\nTraceback (most recent call last):\n  boom\n");
@@ -159,6 +163,17 @@ async function runPrompt(ctx, sessionId, prompt) {
     await notify({ sessionId, update: { sessionUpdate: "tool_call_update", toolCallId: "call_bs", status: "in_progress", content: [{ type: "terminal", terminalId: "call_bs" }, { type: "content", content: { type: "text", text: "chunk1\nchunk2\n" } }], _meta: { terminal_output: { terminal_id: "call_bs", data: "chunk2\n" } } } });
     await notify({ sessionId, update: { sessionUpdate: "tool_call_update", toolCallId: "call_bs", status: "in_progress", content: [{ type: "terminal", terminalId: "call_bs" }, { type: "content", content: { type: "text", text: "chunk1\nchunk2\nchunk3\n" } }], _meta: { terminal_output: { terminal_id: "call_bs", data: "chunk3\n" } } } });
     await notify({ sessionId, update: { sessionUpdate: "tool_call_update", toolCallId: "call_bs", status: "completed", content: [{ type: "terminal", terminalId: "call_bs" }, { type: "content", content: { type: "text", text: "chunk1\nchunk2\nchunk3\n" } }], _meta: { terminal_exit: { terminal_id: "call_bs", exit_code: 0 } } } });
+    return "end_turn";
+  }
+  if (prompt === "tool:codemode" || prompt === "tool:workflow") {
+    const isCode = prompt === "tool:codemode";
+    const rawInput = isCode ? { code: CODEMODE_SCRIPT, timeout_ms: 5000 } : { script: WORKFLOW_SCRIPT, max_agents: 2 };
+    const name = isCode ? "codemode" : "workflow";
+    await notify({ sessionId, update: { sessionUpdate: "tool_call", toolCallId: "call_s", title: name, kind: "other", status: "pending", rawInput } });
+    const outcome = await ask(ctx, sessionId, { toolCallId: "call_s", kind: "other", status: "pending", title: name, rawInput }, allowReject);
+    const allowed = outcome.outcome === "selected" && outcome.optionId === "allow-once";
+    await notify({ sessionId, update: { sessionUpdate: "tool_call_update", toolCallId: "call_s", status: allowed ? "completed" : "failed", content: [{ type: "content", content: { type: "text", text: allowed ? "ran" : "Permission denied" } }] } });
+    await notify(text(sessionId, "agent_message_chunk", allowed ? "ran" : "denied"));
     return "end_turn";
   }
   if (prompt === "tool:write") {

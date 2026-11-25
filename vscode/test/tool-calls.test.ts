@@ -101,4 +101,21 @@ describe("lastTextBlock and summarizeInput", () => {
     expect(summarizeInput({ path: "a.txt" })).toBe("a.txt");
     expect(summarizeInput(null)).toBe("");
   });
+
+  it("shows the whole script of a codemode call (code) and of a workflow call (script)", () => {
+    const code = Array.from({ length: 200 }, (_, i) => `result_${i} = await tools.read(path="f${i}.txt")`).join("\n");
+    expect(summarizeInput({ code, timeout_ms: 5000 })).toBe(code);
+    const script = `async def main():\n    await agent("review ${"x".repeat(2000)}")\n`;
+    expect(summarizeInput({ script, max_agents: 3, args: { a: 1 } })).toBe(script);
+  });
+
+  it("reads the command first, then the path, then the code, then the script, and skips values that are not text", () => {
+    expect(summarizeInput({ code: "c", script: "s" })).toBe("c");
+    expect(summarizeInput({ path: "p", code: "c" })).toBe("p");
+    expect(summarizeInput({ command: 1, path: "p" })).toBe("p");
+    expect(summarizeInput({ code: null, script: "s" })).toBe("s");
+    expect(summarizeInput({ name: "review", args: {} })).toBe("");
+    expect(summarizeInput({ query: "x" })).toBe("");
+    expect(summarizeInput([{ code: "c" }])).toBe("");
+  });
 });
