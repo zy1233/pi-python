@@ -841,6 +841,119 @@ async def test_slash_command_unknown_falls_through_via_acp(tmp_path):
     assert "Hello from mock" in "".join(texts)
 
 
+@pytest.mark.asyncio
+async def test_skills_advertised_and_expanded_via_acp(tmp_path):
+    """Loaded skills are advertised as skill:<name> even with zero extension commands."""
+    skills_dir = tmp_path / "skills"
+    demo_dir = skills_dir / "demo"
+    demo_dir.mkdir(parents=True)
+    (demo_dir / "SKILL.md").write_text(
+        "---\nname: demo\ndescription: Demo skill for testing.\n---\n\nFollow demo instructions.\n",
+        encoding="utf-8",
+    )
+
+    seen_prompts: list[str] = []
+
+    async def recording_stream(model, context, options=None):
+        for msg in context.messages:
+            if getattr(msg, "role", None) == "user":
+                content = msg.content
+                if isinstance(content, str):
+                    seen_prompts.append(content)
+                elif isinstance(content, list):
+                    seen_prompts.append(
+                        "".join(b.get("text", "") for b in content if isinstance(b, dict))
+                    )
+        return await mock_text_stream(model, context, options)
+
+    agent = PiAcpAgent(
+        stream_fn=recording_stream,
+        home=tmp_path / "home",
+        config=CliConfig(
+            permission="always-approve",
+            provider="mock",
+            model_id="mock",
+            include_builtin_skills=False,
+            skills_dirs=(str(skills_dir),),
+        ),
+    )
+    client = FakeClient()
+    agent.on_connect(client)
+    cwd = str(tmp_path.resolve())
+    created = await agent.new_session(cwd=cwd)
+    await asyncio.sleep(0)
+    await asyncio.sleep(0)
+
+    acu = [
+        u
+        for _, u in client.updates
+        if getattr(u, "session_update", None) == "available_commands_update"
+    ]
+    assert len(acu) == 1
+    by_name = {c.name: c for c in acu[0].available_commands}
+    assert "skill:demo" in by_name
+    assert by_name["skill:demo"].description == "Demo skill for testing."
+
+    result = await agent.prompt(
+        session_id=created.session_id,
+        prompt=[text_block("/skill:demo focus on tests")],
+    )
+    assert result.stop_reason == "end_turn"
+    assert any(
+        "Use skill `demo`." in p
+        and "Follow demo instructions." in p
+        and "Additional instructions:\nfocus on tests" in p
+        for p in seen_prompts
+    )
+
+
+@pytest.mark.asyncio
+async def test_extension_command_precedence_over_skill_advertisement(tmp_path):
+    """An extension command named skill:<name> is not overwritten by a skill."""
+    skills_dir = tmp_path / "skills"
+    demo_dir = skills_dir / "demo"
+    demo_dir.mkdir(parents=True)
+    (demo_dir / "SKILL.md").write_text(
+        "---\nname: demo\ndescription: Skill description.\n---\n\nBody.\n",
+        encoding="utf-8",
+    )
+
+    def _override_ext(pi):
+        pi.register_command(
+            "skill:demo",
+            description="Extension override",
+            handler=lambda _args: pi.send_message("from ext"),
+        )
+
+    agent = PiAcpAgent(
+        stream_fn=mock_text_stream,
+        home=tmp_path / "home",
+        config=CliConfig(
+            permission="always-approve",
+            provider="mock",
+            model_id="mock",
+            include_builtin_skills=False,
+            skills_dirs=(str(skills_dir),),
+        ),
+        extensions=[_override_ext],
+    )
+    client = FakeClient()
+    agent.on_connect(client)
+    await agent.new_session(cwd=str(tmp_path.resolve()))
+    await asyncio.sleep(0)
+    await asyncio.sleep(0)
+
+    acu = [
+        u
+        for _, u in client.updates
+        if getattr(u, "session_update", None) == "available_commands_update"
+    ]
+    assert len(acu) == 1
+    matches = [c for c in acu[0].available_commands if c.name == "skill:demo"]
+    assert len(matches) == 1
+    assert matches[0].description == "Extension override"
+
+
 # ---------------------------------------------------------------------------
 # Workflow sub-agents obey the session's permission policy (audit P7-01)
 # ---------------------------------------------------------------------------

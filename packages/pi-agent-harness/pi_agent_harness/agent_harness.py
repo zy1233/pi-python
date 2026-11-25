@@ -1124,6 +1124,25 @@ class AgentHarness:
 
         return assistant_msg
 
+    def _expand_skill_command(self, text: str) -> str:
+        """Expand ``/skill:<name> [args]`` into the matching skill's prompt."""
+        stripped = text.strip()
+        if not stripped.startswith("/skill:"):
+            return text
+        without_prefix = stripped[len("/skill:") :]
+        parts = without_prefix.split(None, 1)
+        name = parts[0] if parts else ""
+        if not name:
+            return text
+        args = parts[1].strip() if len(parts) > 1 else ""
+        skill = next(
+            (s for s in self.resources.skills or [] if s.name == name),
+            None,
+        )
+        if skill is None:
+            return text
+        return format_skill_invocation(skill, args or None)
+
     def load_extension(self, activate: ActivateFn, *, name: str | None = None) -> None:
         """Manually load an extension after construction.
 
@@ -1705,6 +1724,8 @@ class AgentHarness:
         if self.phase != "idle":
             raise AgentHarnessError("busy", "AgentHarness is busy")
         await self._ensure_extensions_loaded()
+
+        text = self._expand_skill_command(text)
 
         # Slash command dispatch — skip the LLM turn entirely when matched.
         dispatched = await self._try_slash_dispatch(text, images)

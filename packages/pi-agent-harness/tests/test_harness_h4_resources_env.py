@@ -169,6 +169,37 @@ async def test_agent_harness_injects_skills_and_runs_skill_prompt():
 
 
 @pytest.mark.asyncio
+async def test_agent_harness_prompt_expands_skill_slash_command():
+    seen: list[str] = []
+
+    async def recording_stream(model, context, options=None):
+        seen.extend(_user_text(m) for m in context.messages if getattr(m, "role", None) == "user")
+        return await mock_text_stream(model, context, options)
+
+    skill = Skill(
+        name="writer",
+        description="Write polished text",
+        content="Use concise prose.",
+        filePath="/skills/writer/SKILL.md",
+    )
+    harness = AgentHarness(
+        session=await _session(),
+        model=_model(),
+        stream_fn=recording_stream,
+        resources=AgentHarnessResources(skills=[skill]),
+    )
+
+    await harness.prompt("/skill:writer Answer in Chinese.")
+    assert "Use skill `writer`." in seen[-1]
+    assert "Use concise prose." in seen[-1]
+    assert "Additional instructions:" in seen[-1]
+    assert "Answer in Chinese." in seen[-1]
+
+    await harness.prompt("/skill:nope hi")
+    assert seen[-1] == "/skill:nope hi"
+
+
+@pytest.mark.asyncio
 async def test_prompt_templates_load_substitute_and_prompt():
     seen: list[str] = []
 
