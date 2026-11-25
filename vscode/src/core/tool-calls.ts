@@ -125,16 +125,29 @@ export class ToolCallStore {
 }
 
 /**
- * What the permission card shows under the title, whole and never cut: the command of `bash`, the
- * script of `codemode` (`code`) or of `workflow` (`script`), or the path of `read`, `write` and
- * `edit`. The card scrolls a long text (`.perm-summary` in `media/chat.css`), and the Allow and
- * Reject buttons stay outside the scroll area.
+ * What the permission card shows under the title, whole and never cut. It shows what the agent runs:
+ * the command of `bash`, the path of `read`, `write` and `edit`, the script of `codemode` (`code`),
+ * and for `workflow` either the built-in workflow or the script. The agent runs the built-in
+ * workflow when `name` is a non-empty string and ignores `script` then, so the card shows the name,
+ * the whole `args` as JSON, and a line that says that `script` is ignored. With no usable `name` it
+ * shows `script`. The card scrolls a long text (`.perm-summary` in `media/chat.css`), and the Allow
+ * and Reject buttons stay outside the scroll area.
  */
 export function summarizeInput(rawInput: unknown): string {
   if (!isRecord(rawInput)) return "";
-  for (const key of ["command", "path", "code", "script"]) {
+  for (const key of ["command", "path", "code"]) {
     const value = rawInput[key];
     if (typeof value === "string") return value;
   }
+  if (typeof rawInput.name === "string" && rawInput.name !== "") {
+    const lines = [`built-in workflow: ${rawInput.name}`];
+    if (rawInput.args !== undefined && rawInput.args !== null) {
+      const args = JSON.stringify(rawInput.args);
+      if (args !== undefined) lines.push(`args: ${args}`);
+    }
+    if (typeof rawInput.script === "string") lines.push("The agent ignores `script` when `name` is set.");
+    return lines.join("\n");
+  }
+  if (typeof rawInput.script === "string") return rawInput.script;
   return "";
 }

@@ -109,12 +109,36 @@ describe("lastTextBlock and summarizeInput", () => {
     expect(summarizeInput({ script, max_agents: 3, args: { a: 1 } })).toBe(script);
   });
 
+  it("shows the built-in workflow that runs, and not the script that the agent ignores", () => {
+    const script = "async def main():\n    await agent('x')\n";
+    const ignored = "The agent ignores `script` when `name` is set.";
+    expect(summarizeInput({ name: "deep-research", script })).toBe(`built-in workflow: deep-research\n${ignored}`);
+    expect(summarizeInput({ name: "deep-research", script })).not.toContain("async def");
+    expect(summarizeInput({ name: "deep-research", args: { question: "q" } })).toBe(
+      'built-in workflow: deep-research\nargs: {"question":"q"}',
+    );
+    expect(summarizeInput({ name: "deep-research" })).toBe("built-in workflow: deep-research");
+    expect(summarizeInput({ name: "deep-research", args: { question: "q" }, script })).toBe(
+      `built-in workflow: deep-research\nargs: {"question":"q"}\n${ignored}`,
+    );
+    const question = "why ".repeat(5000);
+    expect(summarizeInput({ name: "w", args: { question, list: [1, { a: null }] } })).toBe(
+      `built-in workflow: w\nargs: ${JSON.stringify({ question, list: [1, { a: null }] })}`,
+    );
+    expect(summarizeInput({ name: "w", args: null })).toBe("built-in workflow: w");
+    expect(summarizeInput({ script })).toBe(script);
+    expect(summarizeInput({ name: "", script })).toBe(script);
+    expect(summarizeInput({ name: 5, script })).toBe(script);
+    expect(summarizeInput({ name: "", args: { a: 1 } })).toBe("");
+  });
+
   it("reads the command first, then the path, then the code, then the script, and skips values that are not text", () => {
     expect(summarizeInput({ code: "c", script: "s" })).toBe("c");
+    expect(summarizeInput({ name: "n", code: "c" })).toBe("c");
     expect(summarizeInput({ path: "p", code: "c" })).toBe("p");
     expect(summarizeInput({ command: 1, path: "p" })).toBe("p");
     expect(summarizeInput({ code: null, script: "s" })).toBe("s");
-    expect(summarizeInput({ name: "review", args: {} })).toBe("");
+    expect(summarizeInput({ args: {}, timeout_ms: 5 })).toBe("");
     expect(summarizeInput({ query: "x" })).toBe("");
     expect(summarizeInput([{ code: "c" }])).toBe("");
   });
