@@ -57,7 +57,7 @@ web/
 │   │                  dev/ (the sources of pictures; these pages exist only in `npm run dev`)
 │   ├── scripts/       main.ts: the theme switch and the reveal effect
 │   └── styles/        global.css: colors, type, and layout rules for the whole site
-├── scripts/           new-post.mjs (local blog scaffolder), issue-to-post.mjs (CI helper)
+├── scripts/           new-post.mjs (local blog post scaffolder)
 ├── BLOG.md            How to write and publish blog posts without editing web code
 ├── astro.config.mjs   Astro settings: site address, languages, fonts
 └── wrangler.jsonc     Cloudflare Workers settings

@@ -12,7 +12,7 @@ Both `/blog/` and `/zh/blog/` list all published posts and let readers filter by
 
 ---
 
-## Three ways to publish
+## Two ways to publish
 
 ### 1. Local CLI + Git (best for longer posts & local preview)
 
@@ -37,22 +37,13 @@ Then:
 
 1. Edit the generated file `web/src/content/blog/<slug>.md`.
 2. Preview locally with `npm run dev` (`http://localhost:4321/blog/`).
-3. Commit and push to `main` (or open a PR and merge) — Cloudflare deploys automatically.
+3. Commit and push to `main` (or open a PR and merge) — `Web CI` checks types and build, and Cloudflare deploys automatically.
 
 ### 2. GitHub Web UI (zero local tools)
 
 1. Open `web/src/content/blog/` on GitHub.
 2. Click **Add file → Create new file**, name it `<slug>.md` (use `_template.md` as a reference).
-3. Commit directly to `main` (or create a PR). `Web CI` checks the frontmatter and build, and merging to `main` auto-deploys.
-
-### 3. GitHub Issue or Actions Form → Auto PR (publish from browser/phone)
-
-- **Via GitHub Issue**: Open a new issue using the **Blog Post** template, write your Markdown, and add the `publish-blog` label. (Only issues created and labeled by the repository owner trigger the workflow.)
-- **Via Actions tab**: Open **Actions → Publish Blog Post → Run workflow**, fill in the fields, and run.
-
-The workflow `.github/workflows/blog-from-issue.yml` generates `web/src/content/blog/<slug>.md` and opens a Pull Request automatically. Review the `Web CI` check and click **Merge** to publish.
-
-> **One-time GitHub repo setting:** For GitHub Actions to open PRs automatically, enable **Settings → Actions → General → Workflow permissions → Allow GitHub Actions to create and approve pull requests**.
+3. Commit directly to `main` (or open a PR). `Web CI` checks the frontmatter and build, and merging to `main` auto-deploys.
 
 ---
 
