@@ -1,3 +1,4 @@
+import { readFileSync } from "node:fs";
 import { describe, expect, it } from "vitest";
 
 import {
@@ -269,5 +270,35 @@ describe("the status bar item", () => {
     expect(autoModeNoticeTitle("Settings in agent.toml that Auto cannot work with.")).toBe("Auto mode settings warning");
     expect(autoModeNoticeTitle("Auto mode is great for coding.")).toBeUndefined();
     expect(autoModeNoticeTitle("Here is the answer you asked for.")).toBeUndefined();
+  });
+
+  it("folds each Auto notice that the agent really writes", () => {
+    // The texts come from `auto_mode.py`. `test_vscode_auto_notices.py` (pytest) fails when the agent
+    // writes anything else, so this test and the agent cannot drift apart without a failure.
+    const notices = JSON.parse(readFileSync(new URL("./fixtures/auto-notices.json", import.meta.url), "utf8")) as Record<
+      string,
+      string
+    >;
+    const notice = (name: string): string => {
+      const text = notices[name];
+      if (text === undefined) throw new Error(`auto-notices.json has no "${name}"`);
+      return text;
+    };
+    expect(Object.keys(notices).sort()).toEqual([
+      "configProblems",
+      "entry",
+      "entryFromConfig",
+      "entryRules",
+      "entryUnknownModel",
+      "entryWithProblems",
+      "problems",
+    ]);
+    expect(autoModeNoticeTitle(notice("entry"))).toBe("Auto mode is on");
+    expect(autoModeNoticeTitle(notice("entryRules"))).toBe("Auto mode is on");
+    expect(autoModeNoticeTitle(notice("entryFromConfig"))).toBe("Auto mode is on");
+    expect(autoModeNoticeTitle(notice("entryUnknownModel"))).toBe("Auto mode is on (warning)");
+    expect(autoModeNoticeTitle(notice("entryWithProblems"))).toBe("Auto mode is on (warning)");
+    expect(autoModeNoticeTitle(notice("problems"))).toBe("Auto mode warning");
+    expect(autoModeNoticeTitle(notice("configProblems"))).toBe("Auto mode settings warning");
   });
 });

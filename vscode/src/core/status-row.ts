@@ -176,6 +176,11 @@ export function approvalTooltipLine(pendingCount: number | undefined): string | 
 /**
  * Title for an Auto mode notice sent as an out-of-turn agent message (`entry_message`,
  * `problems_message`, or `config_problems_message`), or `undefined` for normal agent messages.
+ *
+ * The match reads the words of `auto_mode.py` in the agent. If the agent changes a text, the match can
+ * stop finding it, and the chat then shows the notice as a plain answer. `test/fixtures/auto-notices.json`
+ * holds the real texts: `packages/pi-agent-cli/tests/test_vscode_auto_notices.py` checks that the agent
+ * still writes them, and `test/status-row.test.ts` checks that this match finds them.
  */
 export function autoModeNoticeTitle(text: string): string | undefined {
   const trimmed = text.trimStart();
