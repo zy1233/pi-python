@@ -5,17 +5,43 @@ import { links, repo } from '../data/site';
 import { homePath, messages, otherLocale, type Locale } from '../i18n';
 import { isPreview } from '../lib/preview';
 
+interface Alternates {
+  en?: string;
+  zh?: string;
+  xDefault?: string;
+}
+
 interface Props {
   locale: Locale;
-  /** Path of the page, with a leading slash. It gives the canonical link and the language links. */
+  /** Path of the page, with a leading slash. It gives the canonical link. */
   path?: string;
+  /** Language alternate paths (`hreflang`). Home pages default to `/` and `/zh/`. */
+  alternates?: Alternates;
   title?: string;
   description?: string;
+  /** Open Graph type (`website` for landing/index pages, `article` for blog posts). */
+  ogType?: 'website' | 'article';
+  /** ISO date strings for `article:published_time` / `article:modified_time`. */
+  publishedTime?: string;
+  modifiedTime?: string;
+  /** Custom JSON-LD object. Omit on home pages to use the default site + software graph. */
+  jsonLd?: Record<string, unknown>;
   /** Tell search engines to skip this page. */
   noindex?: boolean;
 }
 
-const { locale, path, title, description, noindex = false } = Astro.props;
+const {
+  locale,
+  path,
+  alternates,
+  title,
+  description,
+  ogType = 'website',
+  publishedTime,
+  modifiedTime,
+  jsonLd,
+  noindex = false,
+} = Astro.props;
 const t = messages[locale];
 const other = otherLocale(locale);
 const site = Astro.site!;
@@ -28,6 +54,11 @@ const pageTitle = title ?? t.meta.title;
 const pageDescription = description ?? t.meta.description;
 const canonical = path ? absolute(path) : undefined;
 const image = absolute('/og.png');
+const rssUrl = absolute('/blog/rss.xml');
+
+const isHome = path === homePath.en || path === homePath.zh;
+const resolvedAlternates: Alternates | undefined =
+  alternates ?? (isHome ? { en: homePath.en, zh: homePath.zh, xDefault: homePath.en } : undefined);
 
 // The handle of the project on X. It comes from the link in data/site.ts.
 const xHandle = `@${new URL(links.x).pathname.split('/').filter(Boolean)[0]}`;
@@ -36,36 +67,37 @@ const xHandle = `@${new URL(links.x).pathname.split('/').filter(Boolean)[0]}`;
 // page, the links in data/site.ts, and the licenses in README.md. Add no rating, no review,
 // and no claim that the site does not show. A preview address gets no data: it is not the real site.
 const home = absolute(homePath.en);
-const structuredData =
-  canonical && !hideFromSearch
-    ? {
-        '@context': 'https://schema.org',
-        '@graph': [
-          {
-            '@type': 'WebSite',
-            '@id': `${home}#website`,
-            url: home,
-            name: 'zycode',
-            alternateName: 'zycode.dev',
-            description: t.meta.description,
-            inLanguage: [messages.en.hreflang, messages.zh.hreflang],
-          },
-          {
-            '@type': 'SoftwareSourceCode',
-            '@id': `${home}#software`,
-            name: 'zycode',
-            description: t.meta.description,
-            url: home,
-            codeRepository: repo,
-            programmingLanguage: ['Python', 'Rust'],
-            license: ['https://opensource.org/licenses/MIT', 'https://www.apache.org/licenses/LICENSE-2.0'],
-            isAccessibleForFree: true,
-            keywords: ['coding agent', 'ACP', 'Agent Client Protocol', 'LangChain', 'terminal UI'],
-            sameAs: [repo, links.pypi, links.x],
-          },
-        ],
-      }
-    : undefined;
+const defaultStructuredData = isHome
+  ? {
+      '@context': 'https://schema.org',
+      '@graph': [
+        {
+          '@type': 'WebSite',
+          '@id': `${home}#website`,
+          url: home,
+          name: 'zycode',
+          alternateName: 'zycode.dev',
+          description: t.meta.description,
+          inLanguage: [messages.en.hreflang, messages.zh.hreflang],
+        },
+        {
+          '@type': 'SoftwareSourceCode',
+          '@id': `${home}#software`,
+          name: 'zycode',
+          description: t.meta.description,
+          url: home,
+          codeRepository: repo,
+          programmingLanguage: ['Python', 'Rust'],
+          license: ['https://opensource.org/licenses/MIT', 'https://www.apache.org/licenses/LICENSE-2.0'],
+          isAccessibleForFree: true,
+          keywords: ['coding agent', 'ACP', 'Agent Client Protocol', 'LangChain', 'terminal UI'],
+          sameAs: [repo, links.pypi, links.x],
+        },
+      ],
+    }
+  : undefined;
+
+const structuredData = canonical && !hideFromSearch ? (jsonLd ?? defaultStructuredData) : undefined;
 // `set:html` does not escape the text. Write `<` as \u003c, so no string can close the script tag.
 const structuredDataJson = structuredData && JSON.stringify(structuredData).replace(/</g, '\\u003c');
 ---
@@ -80,14 +112,15 @@ const structuredDataJson = structuredData && JSON.stringify(structuredData).repl
     {hideFromSearch && <meta name="robots" content="noindex" />}
     {canonical && <link rel="canonical" href={canonical} />}
     {
-      canonical && (
+      canonical && resolvedAlternates && (
         <>
-          <link rel="alternate" hreflang={messages.en.hreflang} href={absolute(homePath.en)} />
-          <link rel="alternate" hreflang={messages.zh.hreflang} href={absolute(homePath.zh)} />
-          <link rel="alternate" hreflang="x-default" href={absolute(homePath.en)} />
+          {resolvedAlternates.en && <link rel="alternate" hreflang={messages.en.hreflang} href={absolute(resolvedAlternates.en)} />}
+          {resolvedAlternates.zh && <link rel="alternate" hreflang={messages.zh.hreflang} href={absolute(resolvedAlternates.zh)} />}
+          {resolvedAlternates.xDefault && <link rel="alternate" hreflang="x-default" href={absolute(resolvedAlternates.xDefault)} />}
         </>
       )
     }
+    <link rel="alternate" type="application/rss+xml" title={t.blog.rssTitle} href={rssUrl} />
 
     <meta name="color-scheme" content="light dark" />
     <meta name="theme-color" content="#f3f0e7" media="(prefers-color-scheme: light)" />
@@ -97,10 +130,12 @@ const structuredDataJson = structuredData && JSON.stringify(structuredData).repl
     <link rel="apple-touch-icon" href="/apple-touch-icon.png" />
 
     <meta property="og:site_name" content="zycode" />
-    <meta property="og:type" content="website" />
+    <meta property="og:type" content={ogType} />
     <meta property="og:title" content={pageTitle} />
     <meta property="og:description" content={pageDescription} />
     {canonical && <meta property="og:url" content={canonical} />}
+    {ogType === 'article' && publishedTime && <meta property="article:published_time" content={publishedTime} />}
+    {ogType === 'article' && modifiedTime && <meta property="article:modified_time" content={modifiedTime} />}
     <meta property="og:image" content={image} />
     <meta property="og:image:width" content="1200" />
     <meta property="og:image:height" content="630" />

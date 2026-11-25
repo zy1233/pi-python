@@ -13,6 +13,7 @@
     "build": "astro build",
     "preview": "astro preview",
     "check": "astro check",
+    "post:new": "node scripts/new-post.mjs",
     "deploy:dry": "npm run build && wrangler deploy --dry-run",
     "deploy": "npm run build && wrangler deploy"
   },

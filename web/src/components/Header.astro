@@ -1,18 +1,24 @@
 ---
 import { links } from '../data/site';
 import { homePath, messages, otherLocale, type Locale } from '../i18n';
+import { blogPath } from '../lib/blog';
 import Icon from './Icon.astro';
 
 interface Props {
   locale: Locale;
-  /** Show the links to the sections of the home page. */
+  /** Show the links in the top navigation bar. */
   showNav?: boolean;
+  /** Highlight the Blog item when on a blog page. */
+  activeNav?: 'blog';
+  /** Target URL for the language switch pill. Defaults to the other home page. */
+  switchHref?: string;
 }
 
-const { locale, showNav = true } = Astro.props;
+const { locale, showNav = true, activeNav, switchHref } = Astro.props;
 const t = messages[locale];
 const home = homePath[locale];
 const other = otherLocale(locale);
+const langTarget = switchHref ?? homePath[other];
 const sections = [
   ['why', t.nav.why],
   ['contract', t.nav.contract],
@@ -38,6 +44,15 @@ const sections = [
                 <a href={`${home}#${id}`}>{label}</a>
               </li>
             ))}
+            <li>
+              <a
+                href={blogPath[locale]}
+                class:list={[{ 'is-active': activeNav === 'blog' }]}
+                aria-current={activeNav === 'blog' ? 'page' : undefined}
+              >
+                {t.nav.blog}
+              </a>
+            </li>
           </ul>
         </nav>
       )
@@ -46,7 +61,7 @@ const sections = [
     <div class="site-header__actions">
       <a
         class="pill"
-        href={homePath[other]}
+        href={langTarget}
         hreflang={messages[other].hreflang}
         lang={messages[other].lang}
         aria-label={t.ui.langSwitchLabel}>{t.ui.langSwitchText}</a
@@ -114,24 +129,36 @@ const sections = [
 
   .site-nav ul {
     display: flex;
-    gap: 1.6rem;
+    gap: 1.5rem;
     margin: 0;
     padding: 0;
     list-style: none;
   }
 
+  .site-nav li {
+    flex: none;
+    white-space: nowrap;
+  }
+
   .site-nav a {
+    display: inline-block;
     font-size: 0.88rem;
     font-weight: 500;
     color: var(--ink-2);
     text-decoration: none;
+    white-space: nowrap;
     padding-block: 0.4rem;
-    border-bottom: 1px solid transparent;
+    border-bottom: 2px solid transparent;
   }
 
-  .site-nav a:hover {
+  .site-nav a:hover,
+  .site-nav a.is-active {
     color: var(--ink);
     border-bottom-color: var(--signal);
+  }
+
+  .site-nav a.is-active {
+    font-weight: 600;
   }
 
   .site-header__actions {
@@ -145,9 +172,9 @@ const sections = [
     margin-left: 0;
   }
 
-  /* The brand, the six links, and the five controls need about 1010 pixels in English.
-     Below 1060 pixels the links get their own row. */
-  @media (max-width: 1060px) {
+  /* The brand, the seven links, and the five controls need about 1080 pixels in English.
+     Below 1120 pixels the links get their own row. */
+  @media (max-width: 1120px) {
     .site-nav {
       order: 3;
       flex: 1 0 100%;

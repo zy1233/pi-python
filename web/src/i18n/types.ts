@@ -21,6 +21,7 @@ export type WhereId = 'pypi' | 'releases' | 'marketplace' | 'openVsx';
 export type TabId = 'tui' | 'vscode' | 'zed' | 'headless' | 'python';
 export type FooterLinkId =
   | 'github'
+  | 'blog'
   | 'releases'
   | 'changelog'
   | 'issues'
@@ -67,6 +68,7 @@ export interface Messages {
     features: string;
     install: string;
     status: string;
+    blog: string;
   };
   ui: {
     github: string;
@@ -180,6 +182,35 @@ export interface Messages {
     links: Record<FooterLinkId, string>;
     legal: string;
     built: string;
+  };
+  blog: {
+    metaTitle: string;
+    metaDescription: string;
+    eyebrow: string;
+    title: string;
+    lead: string;
+    rss: string;
+    rssTitle: string;
+    filterLabel: string;
+    filterAll: string;
+    filterEn: string;
+    filterZh: string;
+    langBadgeEn: string;
+    langBadgeZh: string;
+    draftBadge: string;
+    emptyAll: string;
+    emptyFiltered: string;
+    countAnnouncement: string;
+    readMinutes: string;
+    updatedLabel: string;
+    readOtherLang: string;
+    backToBlog: string;
+    breadcrumbLabel: string;
+    breadcrumbHome: string;
+    breadcrumbBlog: string;
+    prevPost: string;
+    nextPost: string;
+    postNavLabel: string;
   };
   notFound: { title: string; body: string; back: string };
 }

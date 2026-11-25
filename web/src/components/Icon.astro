@@ -1,7 +1,19 @@
 ---
 // Small inline icons. They carry no meaning alone: the text next to them says it.
 interface Props {
-  name: 'github' | 'x' | 'package' | 'copy' | 'check' | 'sun' | 'moon' | 'arrow' | 'replay' | 'external';
+  name:
+    | 'github'
+    | 'x'
+    | 'package'
+    | 'copy'
+    | 'check'
+    | 'sun'
+    | 'moon'
+    | 'arrow'
+    | 'arrow-left'
+    | 'replay'
+    | 'external'
+    | 'rss';
   size?: number;
   class?: string;
 }
@@ -61,6 +73,16 @@ const filled = name === 'github' || name === 'x';
   }
   {name === 'moon' && <path d="M20 14.5A8 8 0 0 1 9.5 4a8 8 0 1 0 10.5 10.5z" />}
   {name === 'arrow' && <path d="M5 12h14M13 6l6 6-6 6" />}
+  {name === 'arrow-left' && <path d="M19 12H5M11 6l-6 6 6 6" />}
+  {
+    name === 'rss' && (
+      <>
+        <path d="M4 11a9 9 0 0 1 9 9" />
+        <path d="M4 4a16 16 0 0 1 16 16" />
+        <circle cx="5" cy="19" r="1" fill="currentColor" />
+      </>
+    )
+  }
   {
     name === 'replay' && (
       <>

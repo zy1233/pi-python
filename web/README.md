@@ -28,6 +28,7 @@ Run all commands in this folder (`web/`).
 | `npm install`        | Installs the packages.                                           |
 | `npm run dev`        | Starts the development server at `http://localhost:4321`.        |
 | `npm run check`      | Checks the types in the `.astro` and `.ts` files.                |
+| `npm run post:new`   | Creates a new Markdown blog post under `src/content/blog/`.      |
 | `npm run build`      | Builds the site into `dist/`.                                    |
 | `npm run preview`    | Serves `dist/` on your computer.                                 |
 | `npm run deploy:dry` | Builds the site and shows what `wrangler` would upload.          |
@@ -44,15 +45,20 @@ web/
 ├── brand/             Pictures that the site does not serve: the avatar and the header for X
 ├── public/            Files that are copied without a change: icons, social card, _headers
 ├── src/
-│   ├── components/    One file for each part of the page
+│   ├── components/    One file for each part of the page (including BlogIndex.astro)
+│   ├── content/blog/  Markdown blog posts (see BLOG.md for publishing workflows)
+│   ├── content.config.ts Astro content collection schema for blog posts
 │   ├── data/site.ts   The links and the list of packages
 │   ├── i18n/          The text of the page: en.ts, zh.ts, types.ts
 │   ├── layouts/       Base.astro: the <head> tags and the page frame
-│   ├── lib/           highlight.ts (code colors, made at build time), preview.ts
-│   ├── pages/         index.astro, zh/index.astro, 404.astro, robots.txt.ts, sitemap.xml.ts,
+│   ├── lib/           blog.ts, highlight.ts (code colors, made at build time), preview.ts
+│   ├── pages/         index.astro, zh/index.astro, blog/, zh/blog/, 404.astro,
+│   │                  robots.txt.ts, sitemap.xml.ts,
 │   │                  dev/ (the sources of pictures; these pages exist only in `npm run dev`)
 │   ├── scripts/       main.ts: the theme switch and the reveal effect
 │   └── styles/        global.css: colors, type, and layout rules for the whole site
+├── scripts/           new-post.mjs (local blog scaffolder), issue-to-post.mjs (CI helper)
+├── BLOG.md            How to write and publish blog posts without editing web code
 ├── astro.config.mjs   Astro settings: site address, languages, fonts
 └── wrangler.jsonc     Cloudflare Workers settings
 ```
@@ -120,9 +126,10 @@ The `<head>` in `src/layouts/Base.astro` holds what a search engine reads:
   (`twitter:site` comes from the X link in `src/data/site.ts`);
 - JSON-LD data (schema.org) with two nodes: `WebSite` and `SoftwareSourceCode`.
 
-The files `src/pages/robots.txt.ts` and `src/pages/sitemap.xml.ts` make `robots.txt` and
-`sitemap.xml`. The sitemap lists the two home pages. It has no `lastmod` date, because the
-build cannot know when the text changed.
+The files `src/pages/robots.txt.ts`, `src/pages/sitemap.xml.ts`, and `src/pages/blog/rss.xml.ts`
+make `robots.txt`, `sitemap.xml`, and the RSS feed at `/blog/rss.xml`. The sitemap lists the two
+home pages, the two blog indexes (`/blog/` and `/zh/blog/`), and every published blog post (with
+`lastmod` from each post's frontmatter date).
 
 Obey these rules for the JSON-LD:
 

@@ -1,0 +1,440 @@
+---
+import { homePath, messages, otherLocale, type Locale } from '../i18n';
+import { blogPath, estimateReadingMinutes, formatDate, getPublishedPosts, isoDate, postPath } from '../lib/blog';
+import Base from '../layouts/Base.astro';
+import Footer from './Footer.astro';
+import Header from './Header.astro';
+import Icon from './Icon.astro';
+
+interface Props {
+  locale: Locale;
+}
+
+const { locale } = Astro.props;
+const t = messages[locale];
+const other = otherLocale(locale);
+const posts = await getPublishedPosts();
+const enCount = posts.filter((post) => post.data.lang === 'en').length;
+const zhCount = posts.filter((post) => post.data.lang === 'zh').length;
+
+const site = Astro.site!;
+const absolute = (value: string) => new URL(value, site).href;
+const canonicalPath = blogPath[locale];
+
+const blogJsonLd = {
+  '@context': 'https://schema.org',
+  '@type': 'Blog',
+  '@id': `${absolute(canonicalPath)}#blog`,
+  url: absolute(canonicalPath),
+  name: t.blog.metaTitle,
+  description: t.blog.metaDescription,
+  inLanguage: t.hreflang,
+  isPartOf: { '@id': `${absolute(homePath.en)}#website` },
+};
+
+const filterButtons =
+  locale === 'zh'
+    ? ([
+        ['all', t.blog.filterAll, posts.length],
+        ['zh', t.blog.filterZh, zhCount],
+        ['en', t.blog.filterEn, enCount],
+      ] as const)
+    : ([
+        ['all', t.blog.filterAll, posts.length],
+        ['en', t.blog.filterEn, enCount],
+        ['zh', t.blog.filterZh, zhCount],
+      ] as const);
+---
+
+<Base
+  locale={locale}
+  path={canonicalPath}
+  alternates={{ en: blogPath.en, zh: blogPath.zh, xDefault: blogPath.en }}
+  title={t.blog.metaTitle}
+  description={t.blog.metaDescription}
+  jsonLd={blogJsonLd}
+>
+  <Header locale={locale} activeNav="blog" switchHref={blogPath[other]} />
+
+  <main id="main">
+    <section class="blog-hero">
+      <div class="wrap blog-hero__inner">
+        <p class="eyebrow">
+          <span class="eyebrow__n">00</span>
+          <span class="eyebrow__rule" aria-hidden="true"></span>
+          <span>{t.blog.eyebrow}</span>
+        </p>
+        <div class="blog-hero__row">
+          <div class="blog-hero__copy">
+            <h1 class="blog-hero__title">{t.blog.title}</h1>
+            <p class="lead">{t.blog.lead}</p>
+          </div>
+          <a class="btn btn--small btn--ghost blog-hero__rss" href="/blog/rss.xml">
+            <Icon name="rss" size={15} />
+            <span>{t.blog.rss}</span>
+          </a>
+        </div>
+      </div>
+    </section>
+
+    <section class="block blog-feed" data-blog-feed data-announcement={t.blog.countAnnouncement}>
+      <div class="wrap blog-feed__inner">
+        {
+          posts.length > 0 && (
+            <search class="blog-filter" aria-label={t.blog.filterLabel}>
+              {filterButtons.map(([value, label, count], index) => (
+                <button
+                  type="button"
+                  class="filter-btn"
+                  data-filter={value}
+                  aria-pressed={index === 0 ? 'true' : 'false'}
+                >
+                  <span>{label}</span>
+                  <span class="filter-btn__count">{count}</span>
+                </button>
+              ))}
+            </search>
+          )
+        }
+
+        {
+          posts.length === 0 ? (
+            <p class="blog-empty">{t.blog.emptyAll}</p>
+          ) : (
+            <>
+              <ul class="post-list" role="list">
+                {posts.map((post) => {
+                  const readingMinutes = estimateReadingMinutes(post.body);
+                  const postLangAttr = post.data.lang === 'zh' ? 'zh-Hans' : 'en';
+                  const langBadge = post.data.lang === 'zh' ? t.blog.langBadgeZh : t.blog.langBadgeEn;
+                  return (
+                    <li class="post-list__item" data-post-lang={post.data.lang}>
+                      <article class="post-row" lang={postLangAttr}>
+                        <div class="post-row__aside">
+                          <time class="post-row__date" datetime={isoDate(post.data.date)}>
+                            {isoDate(post.data.date)}
+                          </time>
+                          <div class="post-row__badges">
+                            <span class="lang-tag">{langBadge}</span>
+                            {post.data.draft && <span class="lang-tag lang-tag--draft">{t.blog.draftBadge}</span>}
+                          </div>
+                        </div>
+
+                        <div class="post-row__body">
+                          <h2 class="post-row__title">
+                            <a href={postPath(post.id)}>{post.data.title}</a>
+                          </h2>
+                          <p class="post-row__desc">{post.data.description}</p>
+                          <div class="post-row__meta">
+                            <span class="post-row__readable-date">{formatDate(post.data.date, locale)}</span>
+                            <span aria-hidden="true">·</span>
+                            <span>{t.blog.readMinutes.replace('{min}', String(readingMinutes))}</span>
+                            {post.data.tags.length > 0 && (
+                              <>
+                                <span aria-hidden="true">·</span>
+                                <span class="post-row__tags">
+                                  {post.data.tags.map((tag) => (
+                                    <span class="tag-chip">#{tag}</span>
+                                  ))}
+                                </span>
+                              </>
+                            )}
+                          </div>
+                        </div>
+                      </article>
+                    </li>
+                  );
+                })}
+              </ul>
+              <p class="blog-empty" data-blog-empty hidden>
+                {t.blog.emptyFiltered}
+              </p>
+            </>
+          )
+        }
+      </div>
+    </section>
+  </main>
+
+  <Footer locale={locale} />
+</Base>
+
+<script>
+  document.querySelectorAll<HTMLElement>('[data-blog-feed]').forEach((root) => {
+    const buttons = Array.from(root.querySelectorAll<HTMLButtonElement>('[data-filter]'));
+    const items = Array.from(root.querySelectorAll<HTMLElement>('[data-post-lang]'));
+    const empty = root.querySelector<HTMLElement>('[data-blog-empty]');
+    const live = document.getElementById('live');
+    const template = root.dataset.announcement ?? '';
+    if (buttons.length === 0 || items.length === 0) return;
+
+    const valid = new Set(buttons.map((b) => b.dataset.filter ?? 'all'));
+
+    const applyFilter = (lang: string, announce: boolean, updateUrl: boolean) => {
+      const next = valid.has(lang) ? lang : 'all';
+      let visible = 0;
+      items.forEach((item) => {
+        const show = next === 'all' || item.dataset.postLang === next;
+        item.hidden = !show;
+        if (show) visible += 1;
+      });
+      buttons.forEach((btn) => {
+        btn.setAttribute('aria-pressed', String(btn.dataset.filter === next));
+      });
+      if (empty) empty.hidden = visible > 0;
+      if (updateUrl) {
+        const url = new URL(window.location.href);
+        if (next === 'all') url.searchParams.delete('lang');
+        else url.searchParams.set('lang', next);
+        window.history.replaceState(null, '', url);
+      }
+      if (announce && live && template) {
+        live.textContent = template.replace('{count}', String(visible));
+      }
+    };
+
+    buttons.forEach((btn) => {
+      btn.addEventListener('click', () => {
+        applyFilter(btn.dataset.filter ?? 'all', true, true);
+      });
+    });
+
+    const initial = new URLSearchParams(window.location.search).get('lang');
+    if (initial && valid.has(initial)) {
+      applyFilter(initial, false, false);
+    }
+  });
+</script>
+
+<style>
+  .blog-hero {
+    position: relative;
+    padding-block: clamp(2.5rem, 6vw, 4.5rem) clamp(2.5rem, 5vw, 3.75rem);
+    overflow: clip;
+  }
+
+  .blog-hero::before {
+    content: '';
+    position: absolute;
+    inset: 0;
+    background-image:
+      linear-gradient(var(--rule) 1px, transparent 1px), linear-gradient(90deg, var(--rule) 1px, transparent 1px);
+    background-size: 72px 72px;
+    -webkit-mask-image: radial-gradient(ellipse 80% 75% at 75% 25%, #000 10%, transparent 72%);
+    mask-image: radial-gradient(ellipse 80% 75% at 75% 25%, #000 10%, transparent 72%);
+    pointer-events: none;
+  }
+
+  .blog-hero__inner {
+    position: relative;
+  }
+
+  .blog-hero__row {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: flex-end;
+    justify-content: space-between;
+    gap: 1.5rem 2rem;
+  }
+
+  .blog-hero__copy {
+    display: grid;
+    gap: 1rem;
+    max-width: 44rem;
+    min-width: 0;
+  }
+
+  .blog-hero__title {
+    font-size: var(--step-3);
+    font-weight: 750;
+    line-height: 1.05;
+    letter-spacing: -0.035em;
+  }
+
+  :global(:lang(zh-Hans)) .blog-hero__title {
+    font-size: clamp(2rem, 1.4rem + 2.2vw, 3rem);
+    line-height: 1.16;
+    letter-spacing: 0;
+  }
+
+  .blog-hero__rss {
+    flex: none;
+  }
+
+  .blog-feed {
+    padding-block: clamp(2.5rem, 5vw, 4rem) clamp(4rem, 8vw, 6.5rem);
+  }
+
+  .blog-feed__inner {
+    display: grid;
+    gap: 2rem;
+  }
+
+  .blog-filter {
+    display: none;
+    flex-wrap: wrap;
+    gap: 0.55rem;
+  }
+
+  :global(:root.js) .blog-filter {
+    display: flex;
+  }
+
+  .filter-btn {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.5rem;
+    min-block-size: 2.25rem;
+    padding: 0.42rem 0.9rem;
+    border: 1px solid var(--rule-2);
+    border-radius: 999px;
+    background: transparent;
+    color: var(--ink-2);
+    font: 600 0.85rem/1.2 var(--font-sans);
+    cursor: pointer;
+    transition:
+      background-color 0.15s ease,
+      color 0.15s ease,
+      border-color 0.15s ease;
+  }
+
+  .filter-btn:hover {
+    color: var(--ink);
+    border-color: var(--ink);
+  }
+
+  .filter-btn[aria-pressed='true'] {
+    background: var(--ink);
+    border-color: var(--ink);
+    color: var(--paper);
+  }
+
+  .filter-btn__count {
+    font: 500 0.76rem/1 var(--font-mono);
+    opacity: 0.78;
+  }
+
+  .post-list {
+    margin: 0;
+    padding: 0;
+    list-style: none;
+    border-top: 1px solid var(--rule-2);
+  }
+
+  .post-list__item {
+    border-bottom: 1px solid var(--rule-2);
+  }
+
+  .post-row {
+    display: grid;
+    gap: 0.85rem 2.25rem;
+    padding-block: clamp(1.5rem, 3vw, 2.25rem);
+  }
+
+  @media (min-width: 760px) {
+    .post-row {
+      grid-template-columns: 11.5rem minmax(0, 1fr);
+      align-items: baseline;
+    }
+  }
+
+  .post-row__aside {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 0.55rem 0.75rem;
+  }
+
+  @media (min-width: 760px) {
+    .post-row__aside {
+      flex-direction: column;
+      align-items: flex-start;
+      gap: 0.55rem;
+    }
+  }
+
+  .post-row__date {
+    font: 500 0.82rem/1.2 var(--font-mono);
+    letter-spacing: 0.04em;
+    color: var(--ink-3);
+  }
+
+  .post-row__badges {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.4rem;
+  }
+
+  .lang-tag {
+    display: inline-flex;
+    align-items: center;
+    padding: 0.2rem 0.52rem;
+    border: 1px solid var(--rule-2);
+    border-radius: 4px;
+    font: 600 0.72rem/1.2 var(--font-mono);
+    letter-spacing: 0.04em;
+    color: var(--ink-2);
+    background: var(--paper-2);
+  }
+
+  .lang-tag--draft {
+    border-color: var(--warn);
+    color: var(--warn);
+  }
+
+  .post-row__body {
+    display: grid;
+    gap: 0.6rem;
+    min-width: 0;
+  }
+
+  .post-row__title {
+    font-size: var(--step-2);
+    font-weight: 700;
+    line-height: 1.2;
+    letter-spacing: -0.025em;
+  }
+
+  .post-row__title a {
+    text-decoration-line: none;
+    overflow-wrap: break-word;
+  }
+
+  .post-row__title a:hover,
+  .post-row__title a:focus-visible {
+    color: var(--signal-text);
+    text-decoration-line: underline;
+  }
+
+  .post-row__desc {
+    max-width: 58ch;
+    color: var(--ink-2);
+    overflow-wrap: break-word;
+  }
+
+  .post-row__meta {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 0.35rem 0.6rem;
+    margin-top: 0.2rem;
+    font: 500 0.8rem/1.4 var(--font-mono);
+    color: var(--ink-3);
+  }
+
+  .post-row__tags {
+    display: inline-flex;
+    flex-wrap: wrap;
+    gap: 0.45rem;
+  }
+
+  .tag-chip {
+    color: var(--ink-2);
+  }
+
+  .blog-empty {
+    padding-block: 2.5rem;
+    color: var(--ink-2);
+    font-size: var(--step-1);
+  }
+</style>
