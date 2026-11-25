@@ -544,6 +544,9 @@ describe.skipIf(!chrome || !built)("webview in headless Chrome", () => {
         agentHasFallback: agentAuthor.querySelector(".avatar-fallback-assistant") !== null,
         userWho: userAuthor.querySelector(".who").textContent,
         agentWho: agentAuthor.querySelector(".who").textContent,
+        // A long chat has an avatar button on every message: none of them may be a Tab stop.
+        userTabIndex: userAuthor.querySelector("button.avatar-slot").getAttribute("tabindex"),
+        agentTabIndex: agentAuthor.querySelector("button.avatar-slot").getAttribute("tabindex"),
       };
 
       host({ type: "avatars", avatars: { user: ${lit(pngUri)}, assistant: ${lit(pngUri)} } });
@@ -582,6 +585,8 @@ describe.skipIf(!chrome || !built)("webview in headless Chrome", () => {
         agentHasFallback: true,
         userWho: "You",
         agentWho: "zycode",
+        userTabIndex: "-1",
+        agentTabIndex: "-1",
       },
       afterAvatars: {
         userSrc: pngUri,

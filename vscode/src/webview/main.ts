@@ -715,6 +715,9 @@ function createAvatarEl(role: "user" | "assistant"): HTMLElement {
     ariaLabel: label,
     dataset: { role },
   });
+  // Out of the Tab order: a long chat has one such button on every message. The mouse and the
+  // commands "zycode: Choose user avatar" and "zycode: Choose zycode avatar" still change an avatar.
+  slot.tabIndex = -1;
   fillAvatarSlot(slot, role);
   return slot;
 }
