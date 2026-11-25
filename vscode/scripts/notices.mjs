@@ -115,7 +115,7 @@ export function buildNotices() {
   const parts = [
     "THIRD-PARTY NOTICES for the zycode VS Code extension",
     "",
-    "Unofficial; not affiliated with pi or Microsoft. The extension is MIT licensed (LICENSE).",
+    "Unofficial; not affiliated with pi, Microsoft, or any model vendor. The extension is MIT licensed (LICENSE).",
     "",
     rule,
     `PART 1. The agent program in bin/ (zycode-agent ${assets.version}, a PyInstaller build)`,

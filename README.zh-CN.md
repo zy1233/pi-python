@@ -11,7 +11,7 @@
 
 官网：[zycode.dev/zh/](https://zycode.dev/zh/)（[English](https://zycode.dev)）
 
-> 非官方项目：本仓库与官方 [pi](https://github.com/earendil-works/pi) 项目及其维护者没有任何隶属关系，也未获其认可或维护。
+> 非官方项目：本仓库与官方 [pi](https://github.com/earendil-works/pi) 项目及其维护者没有任何隶属关系，也未获其认可或维护。本项目与各 AI 模型厂商（例如 OpenAI、Anthropic、Google、DeepSeek、xAI、月之暗面、阿里云）同样无关：没有隶属、认可或赞助关系。文中的模型名称和公司名称只用来说明可以连接哪些模型，其权利归各自所有者。
 
 ## 架构概览
 
@@ -128,7 +128,7 @@ cd tui && cargo build --profile release-dist -p pi-pager-bin
 
 ### VS Code 扩展
 
-扩展 `zycode.zycode`（[`vscode/README.md`](vscode/README.md)）将 zycode 集成到 VS Code 的聊天视图中，并自带智能体二进制，无需预先安装 Python 智能体。本扩展为非官方项目，与 pi 及 Microsoft 无隶属关系。
+扩展 `zycode.zycode`（[`vscode/README.md`](vscode/README.md)）将 zycode 集成到 VS Code 的聊天视图中，并自带智能体二进制，无需预先安装 Python 智能体。本扩展为非官方项目，与 pi、Microsoft 及各模型厂商均无隶属关系。聊天中的吉祥物头像是社区用 AI 工具创作并公开分享的插画，不是任何公司的标志。
 
 - **VS Code：** 前往 [Visual Studio Marketplace](https://marketplace.visualstudio.com/items?itemName=zycode.zycode) 安装，或执行 `code --install-extension zycode.zycode`。
 - **VSCodium / Open VSX：** 前往 [Open VSX](https://open-vsx.org/extension/zycode/zycode) 安装。
