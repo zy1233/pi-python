@@ -218,6 +218,11 @@ pub enum Action {
     },
     /// Cancel the currently running turn.
     CancelTurn,
+    /// Cancel an in-flight `/btw` side-chat request (`pi/session/btw_cancel`).
+    CancelBtw {
+        session_id: acp::SessionId,
+        btw_id: String,
+    },
     /// Cycle session mode (Shift+Tab): Normal → Plan → Auto → Always-Approve →
     /// Normal (Auto skipped when the feature gate is off).
     /// Plan mode sends a signal to the shell; always-approve is local.
@@ -1009,6 +1014,27 @@ pub enum Effect {
     PreparePromptImagePreview {
         preparation: crate::prompt_images::PromptImagePreviewPreparation,
     },
+    /// Send a mid-turn steering instruction (`pi/session/steer`).
+    SteerSession {
+        agent_id: AgentId,
+        session_id: acp::SessionId,
+        steer_id: String,
+        prompt_blocks: Vec<acp::ContentBlock>,
+        display_text: String,
+    },
+    /// Send an ephemeral `/btw` side question (`pi/session/btw`).
+    SendBtw {
+        agent_id: AgentId,
+        session_id: acp::SessionId,
+        btw_id: String,
+        question: String,
+        history: Vec<pi_acp_lib::extensions::btw::BtwHistoryTurn>,
+    },
+    /// Cancel an in-flight `/btw` side question (`pi/session/btw_cancel`).
+    CancelBtw {
+        session_id: acp::SessionId,
+        btw_id: String,
+    },
 }
 /// Result from a completed async [`Effect`].
 ///
@@ -1197,6 +1223,21 @@ pub enum TaskResult {
     },
     /// Shared prompt-image preview state was resolved off-thread.
     PromptImagePreviewPrepared,
+    /// Result of `Effect::SteerSession`.
+    SteerSessionComplete {
+        agent_id: AgentId,
+        steer_id: String,
+        display_text: String,
+        result: Result<pi_acp_lib::extensions::steer::SteerSessionResponse, String>,
+    },
+    /// Result of `Effect::SendBtw`.
+    BtwComplete {
+        agent_id: AgentId,
+        btw_id: String,
+        result: Result<pi_acp_lib::extensions::btw::BtwResponse, String>,
+    },
+    /// Result of `Effect::CancelBtw` (fire-and-forget).
+    BtwCancelComplete,
 }
 #[cfg(test)]
 mod tests {

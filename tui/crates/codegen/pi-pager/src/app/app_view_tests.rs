@@ -230,6 +230,7 @@ pub(crate) fn test_app() -> AppView {
         session_picker_grouped: false,
         scheduler_background_loops_seed: true,
         cancel_rewind_enabled: true,
+        pi_capabilities: Default::default(),
         keyboard_normalizer: KeyboardNormalizer::from_terminal_context(),
         voice_mode_enabled: false,
         voice_ui_active: false,

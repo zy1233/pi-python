@@ -100,6 +100,8 @@ pub struct AcpConnection {
     pub auth_meta: Option<serde_json::Value>,
     /// Whether cancel-rewind is enabled (resolved by shell from config layers).
     pub cancel_rewind_enabled: bool,
+    /// Optional `pi/*` capabilities advertised in `InitializeResponse._meta["pi/capabilities"]`.
+    pub pi_capabilities: pi_acp_lib::extensions::steer::PiCapabilities,
     /// `AuthManager` for pager-side authenticated channels (voice STT/TTS).
     ///
     /// Built off the local `auth.json`; resolves a fresh bearer per request via
@@ -215,6 +217,7 @@ pub async fn connect(cancel: &CancellationToken, flags: ConnectFlags) -> Result<
         default_auth_method_id,
         available_commands,
         cancel_rewind_enabled,
+        pi_capabilities,
     ) = match initialize(&tx, &flags).await {
         Ok(initialized) => initialized,
         // What `initialize` saw is a closed channel; the bridge knows why it closed.
@@ -257,6 +260,7 @@ pub async fn connect(cancel: &CancellationToken, flags: ConnectFlags) -> Result<
         auth_start_mode,
         auth_meta,
         cancel_rewind_enabled,
+        pi_capabilities,
         auth_manager,
     })
 }
@@ -340,6 +344,7 @@ async fn initialize(
     Option<acp::AuthMethodId>,
     Vec<acp::AvailableCommand>,
     bool,
+    pi_acp_lib::extensions::steer::PiCapabilities,
 )> {
     let req = acp::InitializeRequest::new(acp::ProtocolVersion::V1)
         .client_capabilities(
@@ -381,6 +386,9 @@ async fn initialize(
         .and_then(|v| v.as_bool())
         .unwrap_or(true);
 
+    let pi_capabilities =
+        pi_acp_lib::extensions::steer::PiCapabilities::from_meta(resp.meta.as_ref());
+
     let default_auth_method_id = parse_default_auth_method_id(resp.meta.as_ref());
 
     Ok((
@@ -390,6 +398,7 @@ async fn initialize(
         default_auth_method_id,
         available_commands,
         cancel_rewind_enabled,
+        pi_capabilities,
     ))
 }
 

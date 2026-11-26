@@ -360,5 +360,90 @@ pub(super) fn dispatch_task_result(result: TaskResult, app: &mut AppView) -> Vec
             app.show_toast(&format!("\u{2717} Could not save {key}: {scrubbed}"));
             vec![]
         }
+        TaskResult::SteerSessionComplete {
+            agent_id,
+            steer_id,
+            display_text,
+            result,
+        } => {
+            let Some(agent) = app.agents.get_mut(&agent_id) else {
+                return vec![];
+            };
+            match result {
+                Ok(resp) if resp.queued => vec![],
+                Ok(resp) if resp.reason.as_deref() == Some("idle") => {
+                    agent.pending_steers.retain(|(id, _)| id != &steer_id);
+                    let skill_token_ranges = agent
+                        .prompt
+                        .slash_controller
+                        .recognized_token_ranges(&display_text, &agent.session.models);
+                    agent
+                        .session
+                        .enqueue_prompt_with_skill_tokens(display_text, skill_token_ranges);
+                    super::queue::maybe_drain_queue(agent).effects
+                }
+                Ok(resp) => {
+                    agent.pending_steers.retain(|(id, _)| id != &steer_id);
+                    if agent.prompt.text().trim().is_empty() {
+                        agent.prompt.set_text(&display_text);
+                    }
+                    let reason = resp.reason.unwrap_or_else(|| "rejected".to_string());
+                    app.show_toast(&format!("Steer not queued: {reason}"));
+                    vec![]
+                }
+                Err(error) => {
+                    agent.pending_steers.retain(|(id, _)| id != &steer_id);
+                    if agent.prompt.text().trim().is_empty() {
+                        agent.prompt.set_text(&display_text);
+                    }
+                    app.show_toast(&format!("Steer failed: {error}"));
+                    vec![]
+                }
+            }
+        }
+        TaskResult::BtwComplete {
+            agent_id,
+            btw_id,
+            result,
+        } => {
+            let Some(agent) = app.agents.get_mut(&agent_id) else {
+                return vec![];
+            };
+            if agent.active_btw_id.as_deref() != Some(btw_id.as_str()) {
+                return vec![];
+            }
+            let question = agent
+                .active_btw_question
+                .take()
+                .unwrap_or_else(|| "Side question".to_string());
+            agent.active_btw_id = None;
+            match result {
+                Ok(resp) if resp.error.is_some() => {
+                    agent.active_btw_answer.clear();
+                    agent.btw_state = Some(crate::views::btw_overlay::BtwOverlayState::Error {
+                        question,
+                        error: resp.error.unwrap_or_else(|| "BTW failed".to_string()),
+                    });
+                    agent.btw_focused = false;
+                }
+                Ok(_) => {
+                    let answer = std::mem::take(&mut agent.active_btw_answer);
+                    agent.btw_state = Some(crate::views::btw_overlay::BtwOverlayState::done(
+                        question, answer,
+                    ));
+                    agent.btw_focused = true;
+                }
+                Err(error) => {
+                    agent.active_btw_answer.clear();
+                    agent.btw_state = Some(crate::views::btw_overlay::BtwOverlayState::Error {
+                        question,
+                        error,
+                    });
+                    agent.btw_focused = false;
+                }
+            }
+            vec![]
+        }
+        TaskResult::BtwCancelComplete => vec![],
     }
 }
