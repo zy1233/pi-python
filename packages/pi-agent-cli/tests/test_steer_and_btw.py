@@ -9,6 +9,7 @@ from typing import Any
 import pytest
 from acp import RequestError
 from acp.helpers import text_block
+from acp.schema import ClientCapabilities
 
 from pi_agent_cli.agent import PiAcpAgent
 from pi_agent_cli.btw import (
@@ -30,6 +31,7 @@ from pi_agent_core.messages import (
 )
 from pi_agent_core.types import (
     DoneEvent,
+    ErrorEvent,
     Model,
     StartEvent,
     TextDeltaEvent,
@@ -132,18 +134,71 @@ async def test_initialize_advertises_steer_and_btw_capabilities(tmp_path: Path):
 
 
 @pytest.mark.asyncio
-async def test_advertise_commands_includes_btw(tmp_path: Path):
-    client = _RecordingClient()
-    agent = _make_agent(tmp_path, lambda m, c, o=None: _text_stream(m, "ok"))
-    agent.on_connect(client)
-    await agent.new_session(cwd=str(tmp_path))
+async def test_advertise_commands_btw_only_for_opt_in_clients(tmp_path: Path):
+    # Standard third-party client without pi/capabilities.btw opt-in must NOT receive /btw.
+    client_plain = _RecordingClient()
+    agent_plain = _make_agent(tmp_path / "plain", lambda m, c, o=None: _text_stream(m, "ok"))
+    agent_plain.on_connect(client_plain)
+    await agent_plain.initialize(protocol_version=1, client_capabilities=ClientCapabilities())
+    await agent_plain.new_session(cwd=str(tmp_path))
     await asyncio.sleep(0)
     await asyncio.sleep(0)
-    command_names: set[str] = set()
-    for _, update in client.updates:
+    plain_names: set[str] = set()
+    for _, update in client_plain.updates:
         if getattr(update, "session_update", None) == "available_commands_update":
-            command_names.update(c.name for c in update.available_commands)
-    assert "btw" in command_names
+            plain_names.update(c.name for c in update.available_commands)
+    assert "btw" not in plain_names
+
+    # Opt-in client advertising clientCapabilities._meta["pi/capabilities"]["btw"] = True gets /btw.
+    client_opt_in = _RecordingClient()
+    agent_opt_in = _make_agent(tmp_path / "optin", lambda m, c, o=None: _text_stream(m, "ok"))
+    agent_opt_in.on_connect(client_opt_in)
+    await agent_opt_in.initialize(
+        protocol_version=1,
+        client_capabilities=ClientCapabilities(field_meta={"pi/capabilities": {"btw": True}}),
+    )
+    await agent_opt_in.new_session(cwd=str(tmp_path))
+    await asyncio.sleep(0)
+    await asyncio.sleep(0)
+    opt_in_names: set[str] = set()
+    for _, update in client_opt_in.updates:
+        if getattr(update, "session_update", None) == "available_commands_update":
+            opt_in_names.update(c.name for c in update.available_commands)
+    assert "btw" in opt_in_names
+
+
+@pytest.mark.asyncio
+async def test_literal_btw_prompt_returns_notice_without_turn_or_jsonl(tmp_path: Path):
+    llm_calls = 0
+
+    def stream_fn(model: Model, context: Any, options: Any = None):
+        nonlocal llm_calls
+        llm_calls += 1
+        return _text_stream(model, "should not run")
+
+    client = _RecordingClient()
+    agent = _make_agent(tmp_path, stream_fn)
+    agent.on_connect(client)
+    created = await agent.new_session(cwd=str(tmp_path))
+
+    res = await agent.prompt(
+        session_id=created.session_id, prompt=[text_block("/btw what is exit 137?")]
+    )
+    assert res.stop_reason == "end_turn"
+    assert llm_calls == 0
+
+    harness = agent._harnesses[created.session_id]
+    storage = harness.session.get_storage()
+    assert isinstance(storage, DeferredJsonlSessionStorage)
+    assert storage.written is False
+    assert list((tmp_path / "sessions").glob("*.jsonl")) == []
+
+    agent_texts = [
+        u.content.text
+        for _, u in client.updates
+        if getattr(u, "session_update", None) == "agent_message_chunk"
+    ]
+    assert any("pi/session/btw" in t for t in agent_texts)
 
 
 def test_btw_config_parsing(tmp_path: Path):
@@ -400,6 +455,186 @@ async def test_steer_auto_safety_cancelled_steer_not_noted_but_injected_is(tmp_p
     release_tool.set()
     await asyncio.wait_for(prompt_task2, timeout=5.0)
     assert "allow running pytest" in noted
+
+
+@pytest.mark.asyncio
+async def test_steer_cleared_when_turn_ends_with_error_and_not_leaked_to_next_prompt(
+    tmp_path: Path,
+):
+    """Undelivered steer on an error-stopped turn is cleared and never leaks to the next prompt."""
+    stream_started = asyncio.Event()
+    fail_stream = asyncio.Event()
+    second_call_user_texts: list[str] = []
+    bg_tasks: list[asyncio.Task[Any]] = []
+    call_count = 0
+
+    async def stream_fn(model: Model, context: Any, options: Any = None):
+        nonlocal call_count
+        call_count += 1
+        if call_count == 1:
+            stream = AssistantMessageEventStream()
+            partial = _assistant_msg(model, [], stop_reason="error")
+            stream.push(StartEvent(partial=partial.model_copy(deep=True)))
+
+            async def _finish_with_error() -> None:
+                stream_started.set()
+                await fail_stream.wait()
+                err_msg = _assistant_msg(model, [], stop_reason="error")
+                err_msg.errorMessage = "upstream 500"
+                stream.push(
+                    ErrorEvent(partial=err_msg, reason="error", error_message="upstream 500")
+                )
+                stream.set_final_message(err_msg)
+                stream.end()
+
+            bg_tasks.append(asyncio.create_task(_finish_with_error()))
+            return stream
+
+        for m in context.messages:
+            if getattr(m, "role", None) == "user":
+                second_call_user_texts.append(
+                    "".join(
+                        b.get("text", "") if isinstance(b, dict) else getattr(b, "text", "")
+                        for b in (m.content if isinstance(m.content, list) else [])
+                    )
+                )
+        return _text_stream(model, "fresh answer")
+
+    client = _RecordingClient()
+    agent = _make_agent(tmp_path, stream_fn)
+    agent.on_connect(client)
+    created = await agent.new_session(cwd=str(tmp_path))
+
+    prompt_task = asyncio.create_task(
+        agent.prompt(session_id=created.session_id, prompt=[text_block("failing turn")])
+    )
+    await asyncio.wait_for(stream_started.wait(), timeout=5.0)
+
+    steer_res = await agent.ext_method(
+        "pi/session/steer",
+        {
+            "sessionId": created.session_id,
+            "steerId": "s-err-1",
+            "prompt": [{"type": "text", "text": "stranded steer that must not leak"}],
+        },
+    )
+    assert steer_res == {
+        "sessionId": created.session_id,
+        "steerId": "s-err-1",
+        "queued": True,
+        "queueLength": 1,
+    }
+
+    fail_stream.set()
+    await asyncio.wait_for(prompt_task, timeout=5.0)
+    await asyncio.gather(*bg_tasks)
+
+    harness = agent._harnesses[created.session_id]
+    assert harness.phase == "idle"
+    assert harness.steer_queue == []
+
+    cleared_notifs = [
+        p
+        for m, p in client.ext_notifications
+        if m == "pi/queue_update" and p.get("clearedByAbort") is True
+    ]
+    assert cleared_notifs
+    assert cleared_notifs[-1]["steer"] == []
+    assert cleared_notifs[-1].get("clearedSteerIds") == ["s-err-1"]
+
+    # A subsequent unrelated prompt must NOT receive the old steer.
+    res2 = await agent.prompt(
+        session_id=created.session_id, prompt=[text_block("new unrelated prompt")]
+    )
+    assert res2.stop_reason == "end_turn"
+    assert all("stranded steer that must not leak" not in t for t in second_call_user_texts)
+    assert any("new unrelated prompt" in t for t in second_call_user_texts)
+
+
+@pytest.mark.asyncio
+async def test_steer_rejected_after_cancel_while_turn_unwinding(tmp_path: Path):
+    """Steer arriving after session/cancel is rejected with reason='aborting' and never leaks."""
+    tool_started = asyncio.Event()
+    release_tool = asyncio.Event()
+    second_call_user_texts: list[str] = []
+    call_count = 0
+
+    def ext(pi: Any) -> None:
+        async def hold_tool(
+            tool_call_id: str, params: Any, signal: Any = None, on_update: Any = None
+        ):
+            tool_started.set()
+            await release_tool.wait()
+            return {"content": [{"type": "text", "text": "done"}]}
+
+        pi.register_tool(
+            ToolDefinition(
+                name="cancel_hold_probe",
+                description="waits",
+                parameters={"type": "object", "properties": {}},
+                execute=hold_tool,
+                annotations=ToolAnnotations(readOnlyHint=True),
+            )
+        )
+
+    async def stream_fn(model: Model, context: Any, options: Any = None):
+        nonlocal call_count
+        call_count += 1
+        if call_count == 1:
+            return _tool_call_stream(model, "call_cancel_hold", "cancel_hold_probe", {})
+        for m in context.messages:
+            if getattr(m, "role", None) == "user":
+                second_call_user_texts.append(
+                    "".join(
+                        b.get("text", "") if isinstance(b, dict) else getattr(b, "text", "")
+                        for b in (m.content if isinstance(m.content, list) else [])
+                    )
+                )
+        return _text_stream(model, "clean next turn")
+
+    client = _RecordingClient()
+    agent = _make_agent(tmp_path, stream_fn, extensions=[ext])
+    agent.on_connect(client)
+    created = await agent.new_session(cwd=str(tmp_path))
+
+    prompt_task = asyncio.create_task(
+        agent.prompt(session_id=created.session_id, prompt=[text_block("turn to cancel")])
+    )
+    await asyncio.wait_for(tool_started.wait(), timeout=5.0)
+
+    # Cancel and immediately send a steer BEFORE releasing the tool or awaiting abort tasks.
+    await agent.cancel(session_id=created.session_id)
+    steer_res = await agent.ext_method(
+        "pi/session/steer",
+        {
+            "sessionId": created.session_id,
+            "steerId": "s-after-cancel",
+            "prompt": [{"type": "text", "text": "late steer after cancel"}],
+        },
+    )
+    assert steer_res == {
+        "sessionId": created.session_id,
+        "steerId": "s-after-cancel",
+        "queued": False,
+        "reason": "aborting",
+    }
+
+    release_tool.set()
+    await asyncio.wait_for(prompt_task, timeout=5.0)
+    if agent._abort_tasks:
+        await asyncio.gather(*list(agent._abort_tasks), return_exceptions=True)
+
+    harness = agent._harnesses[created.session_id]
+    assert harness.phase == "idle"
+    assert harness.steer_queue == []
+
+    # Subsequent prompt must NOT see the rejected steer.
+    res2 = await agent.prompt(
+        session_id=created.session_id, prompt=[text_block("follow-up after cancel")]
+    )
+    assert res2.stop_reason == "end_turn"
+    assert all("late steer after cancel" not in t for t in second_call_user_texts)
+    assert any("follow-up after cancel" in t for t in second_call_user_texts)
 
 
 # ---------------------------------------------------------------------------

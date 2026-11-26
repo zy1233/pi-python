@@ -331,6 +331,8 @@ class AgentHarness:
         self._subscribers: list[Callable[[AgentHarnessEvent, Any | None], Any]] = []
         self._hooks: dict[str, list[Callable[[Any], Any]]] = {}
         self._run_abort_controller: _AbortController | None = None
+        self._abort_depth: int = 0
+        self._queue_drain_rolled_back: bool = False
         self._cached_system_prompt: str | None = None
 
         # Phase 7: Extension API
@@ -1356,14 +1358,36 @@ class AgentHarness:
                 current = result.payload
         return current
 
-    async def _emit_queue_update(self) -> None:
+    async def _emit_queue_update(
+        self, *, undelivered_steer: list[AgentMessage] | None = None
+    ) -> None:
         await self._emit_any(
             QueueUpdateEvent(
                 steer=list(self.steer_queue),
                 followUp=list(self.follow_up_queue),
                 nextTurn=list(self.next_turn_queue),
+                undeliveredSteer=list(undelivered_steer) if undelivered_steer else [],
             )
         )
+
+    async def _clear_undelivered_steers(self) -> list[AgentMessage]:
+        """Drop any user-steered messages still sitting in ``steer_queue`` when a run ends.
+
+        Preserves non-steered custom messages (e.g. background ``trigger_message`` items whose
+        identities are not in ``_steer_ids``). Emits a ``queue_update`` carrying
+        ``undeliveredSteer`` before removing their ``_steer_ids`` entries so subscribers can
+        correlate ``clearedSteerIds`` and restore drafts on the client.
+        """
+        undelivered = [msg for msg in self.steer_queue if id(msg) in self._steer_ids]
+        if not undelivered:
+            return []
+        self.steer_queue = [msg for msg in self.steer_queue if id(msg) not in self._steer_ids]
+        try:
+            await self._emit_queue_update(undelivered_steer=undelivered)
+        finally:
+            for msg in undelivered:
+                self._steer_ids.pop(id(msg), None)
+        return undelivered
 
     async def _compute_system_prompt(self, active_tools: list[AgentTool]) -> str:
         system_prompt = "You are a helpful assistant."
@@ -1457,6 +1481,8 @@ class AgentHarness:
                 await self._emit_queue_update()
             except Exception:
                 queue[:0] = messages
+                if queue is self.steer_queue:
+                    self._queue_drain_rolled_back = True
                 raise
         return messages
 
@@ -1713,10 +1739,11 @@ class AgentHarness:
                     messages.extend(extra)
                 system_prompt = getattr(before_result, "system_prompt", system_prompt)
 
+        self._queue_drain_rolled_back = False
         controller = _AbortController()
         self._run_abort_controller = controller
-        if self._closed:
-            # close() ran while this turn was still being set up, so it found no run to abort.
+        if self._closed or self._abort_depth > 0:
+            # close() or begin_abort() ran while this turn was still being set up.
             controller.abort()
 
         def get_turn_state() -> _TurnState:
@@ -1756,6 +1783,8 @@ class AgentHarness:
         finally:
             self._run_abort_controller = None
             await self._flush_pending_session_writes()
+            if not self._queue_drain_rolled_back:
+                await self._clear_undelivered_steers()
 
         for message in reversed(new_messages):
             if getattr(message, "role", None) == "assistant":
@@ -1787,6 +1816,7 @@ class AgentHarness:
         *,
         message: AgentMessage | None = None,
     ) -> AssistantMessage:
+        self._queue_drain_rolled_back = False
         self._set_phase("turn")
         try:
             # Before the tool list is built: what an extension still sets up in the background
@@ -1795,6 +1825,7 @@ class AgentHarness:
             await self.wait_turn_barriers()
         except asyncio.CancelledError:
             self._set_phase("idle")
+            await self._clear_undelivered_steers()
             raise
         try:
             return await self._execute_turn(
@@ -1802,10 +1833,31 @@ class AgentHarness:
             )
         except AgentHarnessError:
             self._set_phase("idle")
+            if not self._queue_drain_rolled_back:
+                await self._clear_undelivered_steers()
             raise
         except Exception as e:
             self._set_phase("idle")
+            if not self._queue_drain_rolled_back:
+                await self._clear_undelivered_steers()
             raise normalize_harness_error(e, "unknown") from e
+
+    @property
+    def is_aborting(self) -> bool:
+        """Whether an abort is currently in progress for this harness."""
+        return self._abort_depth > 0 or (
+            self._run_abort_controller is not None and self._run_abort_controller.signal.aborted
+        )
+
+    def begin_abort(self) -> None:
+        """Synchronously mark the harness as aborting before spawning ``abort()``.
+
+        Closes the window where a concurrent ``steer()`` could be accepted after ``session/cancel``
+        arrives but before the scheduled ``abort()`` task starts executing.
+        """
+        self._abort_depth += 1
+        if self._run_abort_controller is not None:
+            self._run_abort_controller.abort()
 
     async def steer(
         self,
@@ -1814,8 +1866,8 @@ class AgentHarness:
         *,
         steer_id: str | None = None,
     ) -> str:
-        if self.phase == "idle":
-            raise AgentHarnessError("invalid_state", "Cannot steer while idle")
+        if self._closed or self.phase == "idle" or self.is_aborting:
+            raise AgentHarnessError("invalid_state", "Cannot steer while idle or aborting")
         message = _create_user_message(text, images)
         sid = steer_id or str(uuid.uuid4())
         self._steer_ids[id(message)] = sid
@@ -1933,15 +1985,15 @@ class AgentHarness:
     async def wait_for_idle(self) -> None:
         await self._idle_event.wait()
 
-    async def abort(self) -> dict[str, list[AgentMessage]]:
+    async def abort(self, *, _from_begin: bool = False) -> dict[str, list[AgentMessage]]:
         from pi_agent_harness.types import AbortEvent
 
+        if not _from_begin:
+            self.begin_abort()
         cleared_steer = list(self.steer_queue)
         cleared_follow_up = list(self.follow_up_queue)
         self.steer_queue.clear()
         self.follow_up_queue.clear()
-        if self._run_abort_controller:
-            self._run_abort_controller.abort()
 
         errors: list[Exception] = []
         try:
@@ -1959,6 +2011,7 @@ class AgentHarness:
         finally:
             for message in cleared_steer:
                 self._steer_ids.pop(id(message), None)
+            self._abort_depth = max(0, self._abort_depth - 1)
         self._raise_hook_errors(errors)
         return {"cleared_steer": cleared_steer, "cleared_follow_up": cleared_follow_up}
 

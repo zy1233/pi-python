@@ -152,26 +152,26 @@ Paths of the pager are relative to `tui/crates/codegen/pi-pager/src/`. Paths of 
 
 ### X9. `pi/session/steer` (mid-turn steering)
 
-- **Capability.** Announced by the agent in `initialize` response `_meta["pi/capabilities"]["steer"] = true`.
+- **Capability.** Announced by the agent in `initialize` response `_meta["pi/capabilities"]["steer"] = true`. Opt-in clients (`zypi`, `zycode` VS Code extension) also declare `clientCapabilities._meta["pi/capabilities"]["steer"] = true`.
 - **Wire.**
-  - Request, client to agent: `pi/session/steer` (wire `_pi/session/steer`). Params: `{"sessionId": string, "steerId"?: string, "prompt": ContentBlock[]}`. Result: `{"sessionId": string, "steerId": string, "queued": true, "queueLength": number}` or `{"sessionId": string, "steerId": string, "queued": false, "reason": "idle" | "waiting_for_trust" | "waiting_for_barriers"}`.
+  - Request, client to agent: `pi/session/steer` (wire `_pi/session/steer`). Params: `{"sessionId": string, "steerId"?: string, "prompt": ContentBlock[]}`. Result: `{"sessionId": string, "steerId": string, "queued": true, "queueLength": number}` or `{"sessionId": string, "steerId": string, "queued": false, "reason": "idle" | "aborting" | "waiting_for_trust" | "waiting_for_barriers"}`.
   - Notification, agent to client: `pi/queue_update` (wire `_pi/queue_update`). Params: `{"sessionId": string, "steer": [{"steerId": string, "preview": string}], "clearedByAbort": boolean, "clearedSteerIds"?: string[]}`.
   - Live injection confirmation: standard `session/update` `user_message_chunk` with `_meta["pi/steered"] = true` and optional `_meta["pi/steerId"]`.
-- **Effect.** Enqueues a user steering message onto `AgentHarness.steer_queue` to be drained at the next turn boundary without interrupting in-flight tools. `AutoSession.note_user_message` is called only when the steered message is actually injected (`message_start`), never if cleared by `session/cancel`.
+- **Effect.** Enqueues a user steering message onto `AgentHarness.steer_queue` to be drained at the next turn boundary without interrupting in-flight tools. Steers arriving after `session/cancel` are rejected with `reason: "aborting"`. Any steered messages still in `steer_queue` when a run ends (stream error, `max_turns`, stop hook, or abort) are cleared before the session returns to idle and announced via `pi/queue_update` with `clearedByAbort: true` and `clearedSteerIds` so clients can restore drafts and nothing leaks into a later unrelated `session/prompt`. `AutoSession.note_user_message` is called only when the steered message is actually injected (`message_start`), never if cleared.
 - **Sent by / Read by.** Agent: `PiAcpAgent._handle_steer` and `_emit_queue_update` in `agent.py`, `project_steered_user_message` in `events.py`. VS Code: `AcpConnection.steerSession` and `ChatController`. Rust types: `pi-acp-lib/src/extensions/steer.rs`.
-- **Tests.** `test_steer_and_btw.py`, `vscode/test/steer-and-btw.test.ts`, `pi-acp-lib` unit tests.
+- **Tests.** `test_steer_and_btw.py`, `vscode/test/steer-and-btw.test.ts`, `pi-acp-lib` unit tests, `python_agent_e2e.rs`.
 - **Status.** In use (`docs/specs/2026-11-26-pre-refactor-steer-and-btw-design.md`). Meets all five admission rules.
 
 ### X10. `pi/session/btw` (ephemeral side chat)
 
-- **Capability.** Announced by the agent in `initialize` response `_meta["pi/capabilities"]["btw"] = true`; also advertised as `/btw` in `available_commands_update`.
+- **Capability.** Announced by the agent in `initialize` response `_meta["pi/capabilities"]["btw"] = true`. Advertised as `/btw` in `available_commands_update` **only** to clients that opt in via `clientCapabilities._meta["pi/capabilities"]["btw"] = true` (`zypi`, `zycode` VS Code extension), so third-party ACP clients without a `pi/session/btw` handler are not shown a slash command they cannot route. If a client sends literal `/btw ...` over `session/prompt` (and no extension registered a `btw` command), the agent replies with a short notice and runs no LLM turn and writes nothing to JSONL.
 - **Wire.**
   - Request, client to agent: `pi/session/btw` (wire `_pi/session/btw`). Params: `{"sessionId": string, "btwId": string, "prompt": ContentBlock[], "history"?: [{"role": "user"|"assistant", "text": string}]}`. Result: `{"sessionId": string, "btwId": string, "stopReason": "end_turn" | "cancelled" | "error", "error": string | null}`.
   - Notification, agent to client: `pi/btw_update` (wire `_pi/btw_update`). Params: `{"sessionId": string, "btwId": string, "kind": "thought_delta" | "text_delta" | "done" | "error", "delta": string, "error": string | null, "stopReason"?: string}`.
   - Request, client to agent: `pi/session/btw_cancel` (wire `_pi/session/btw_cancel`). Params: `{"sessionId": string, "btwId": string}`. Result: `{"sessionId": string, "btwId": string, "cancelled": true}` (idempotent).
 - **Effect.** Takes a lock-free read-only snapshot (`AgentHarness.snapshot_context_for_btw`), repairs dangling in-flight tool calls, projects tool history into tool-free text, and streams a side answer with `tools=[]` in parallel with any active main turn without modifying the main session JSONL.
 - **Sent by / Read by.** Agent: `PiAcpAgent._handle_btw` / `_handle_btw_cancel` in `agent.py`, `btw.py`. VS Code: `AcpConnection.askBtw` / `cancelBtw` and `ChatController`. Rust types: `pi-acp-lib/src/extensions/btw.rs`.
-- **Tests.** `test_steer_and_btw.py`, `vscode/test/steer-and-btw.test.ts`, `pi-acp-lib` unit tests.
+- **Tests.** `test_steer_and_btw.py`, `vscode/test/steer-and-btw.test.ts`, `pi-acp-lib` unit tests, `python_agent_e2e.rs`.
 - **Status.** In use (`docs/specs/2026-11-26-pre-refactor-steer-and-btw-design.md`). Meets all five admission rules.
 
 ## 4. The admission check

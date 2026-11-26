@@ -191,7 +191,10 @@ export class AcpConnection {
   initialize(clientVersion: string): Promise<acp.InitializeResponse> {
     return this.connection.agent.request(acp.methods.agent.initialize, {
       protocolVersion: acp.PROTOCOL_VERSION,
-      clientCapabilities: { auth: { terminal: true } },
+      clientCapabilities: {
+        auth: { terminal: true },
+        _meta: { "pi/capabilities": { steer: true, btw: true } },
+      },
       clientInfo: { name: "zycode-vscode", title: "zycode for VS Code", version: clientVersion },
     });
   }

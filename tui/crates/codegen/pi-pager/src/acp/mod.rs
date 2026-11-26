@@ -317,10 +317,15 @@ fn build_initialize_meta(flags: &ConnectFlags) -> serde_json::Value {
 
 /// Build `client_capabilities.meta`.
 ///
-/// Phase 4: do not advertise grok `legacy ext RPC` capabilities. Python is standard-ACP
-/// only and ignores vendor `_meta`.
+/// Advertises the documented `pi/capabilities` extension flags supported by `zypi`
+/// (X9 `steer`, X10 `btw`) while omitting legacy vendor `x.ai/*` keys.
 fn client_capabilities_meta(_flags: &ConnectFlags) -> serde_json::Value {
-    serde_json::json!({})
+    serde_json::json!({
+        "pi/capabilities": {
+            "steer": true,
+            "btw": true,
+        }
+    })
 }
 
 /// Parse `defaultAuthMethodId` from `InitializeResponse.meta`.
@@ -849,7 +854,10 @@ mod tests {
     #[test]
     fn client_capabilities_meta_omits_vendor_x_ai_keys() {
         let meta = client_capabilities_meta(&ConnectFlags::default());
-        assert!(meta.as_object().is_some_and(|o| o.is_empty()));
+        assert_eq!(
+            meta["pi/capabilities"],
+            serde_json::json!({"steer": true, "btw": true})
+        );
         let with_hunk = client_capabilities_meta(&ConnectFlags {
             hunk_tracker_mode: Some("mixed".into()),
             status_line: true,

@@ -5,6 +5,7 @@ from __future__ import annotations
 import asyncio
 import importlib.metadata
 import logging
+import re
 import uuid
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass, field, replace
@@ -163,6 +164,16 @@ logger = logging.getLogger(__name__)
 
 # The package this agent ships in. Its version is the version of the release.
 _DISTRIBUTION = "pi-agent-cli-lc"
+_LITERAL_BTW_RE = re.compile(r"^\s*/btw(?:\s|$)", re.IGNORECASE)
+
+
+def _client_supports_btw(capabilities: ClientCapabilities | None) -> bool:
+    """Whether the client opted into X10 ``/btw`` via ``clientCapabilities._meta``."""
+    if capabilities is None:
+        return False
+    meta = capabilities.field_meta or {}
+    pi_caps = meta.get("pi/capabilities")
+    return isinstance(pi_caps, Mapping) and pi_caps.get("btw") is True
 
 
 def _installed_version() -> str:
@@ -249,6 +260,7 @@ class PiAcpAgent(Agent):
         self._context_used: dict[str, int] = {}
         self._client_capabilities: ClientCapabilities | None = None
         self._client_info: Implementation | None = None
+        self._client_supports_btw: bool = False
         self._extensions: list[Any] = extensions or []
         self._commands_advertised: set[str] = set()
         self._background_tasks: set[asyncio.Task[Any]] = set()
@@ -294,6 +306,7 @@ class PiAcpAgent(Agent):
     ) -> InitializeResponse:
         self._client_capabilities = client_capabilities
         self._client_info = client_info
+        self._client_supports_btw = _client_supports_btw(client_capabilities)
         remote_mcp = mcp_extension_installed()
         setup_method = (
             setup_auth_method(client_capabilities, self._home) if self._offers_setup else None
@@ -524,6 +537,17 @@ class PiAcpAgent(Agent):
             await self._advertise_commands(session_id)
         await self._refuse_id_taken_meanwhile(session_id, harness)
         text, images = _prompt_to_text_images(prompt)
+        if _LITERAL_BTW_RE.match(text) and "btw" not in harness.extension_registry.get_commands():
+            if self._conn is not None:
+                await self._conn.session_update(
+                    session_id=session_id,
+                    update=update_agent_message_text(
+                        "/btw side chat requires a client that supports pi/session/btw "
+                        "(such as zypi or the zycode VS Code extension). Nothing was sent "
+                        "to the main session."
+                    ),
+                )
+            return PromptResponse(stop_reason="end_turn")
         auto = self._autos.get(session_id)
         if auto is not None:
             auto.note_user_message(text)
@@ -577,7 +601,8 @@ class PiAcpAgent(Agent):
         harness = self._harnesses.get(session_id)
         if harness is None:
             return
-        task = asyncio.create_task(harness.abort())
+        harness.begin_abort()
+        task = asyncio.create_task(harness.abort(_from_begin=True))
         self._abort_tasks.add(task)
         task.add_done_callback(self._abort_tasks.discard)
 
@@ -752,6 +777,13 @@ class PiAcpAgent(Agent):
                 "queued": False,
                 "reason": "waiting_for_trust",
             }
+        if harness.is_aborting:
+            return {
+                "sessionId": session_id,
+                "steerId": steer_id,
+                "queued": False,
+                "reason": "aborting",
+            }
         if harness.phase == "idle":
             reason = (
                 "waiting_for_barriers" if self._prompts_in_flight.get(session_id, 0) > 0 else "idle"
@@ -770,7 +802,7 @@ class PiAcpAgent(Agent):
                     "sessionId": session_id,
                     "steerId": steer_id,
                     "queued": False,
-                    "reason": "idle",
+                    "reason": "aborting" if harness.is_aborting else "idle",
                 }
             raise
         return {
@@ -1329,9 +1361,22 @@ class PiAcpAgent(Agent):
                     if chunk is not None:
                         await self._conn.session_update(session_id=session_id, update=chunk)
             elif etype == "queue_update":
-                await self._emit_queue_update(
-                    session_id, harness, getattr(event, "steer", ()) or ()
-                )
+                undelivered = getattr(event, "undeliveredSteer", None) or ()
+                if undelivered:
+                    cleared_ids = [
+                        sid for msg in undelivered if (sid := harness.steer_id_for(msg)) is not None
+                    ]
+                    await self._emit_queue_update(
+                        session_id,
+                        harness,
+                        getattr(event, "steer", ()) or (),
+                        cleared_by_abort=True,
+                        cleared_steer_ids=cleared_ids,
+                    )
+                else:
+                    await self._emit_queue_update(
+                        session_id, harness, getattr(event, "steer", ()) or ()
+                    )
             elif etype == "abort":
                 cleared = getattr(event, "clearedSteer", None) or ()
                 if cleared:
@@ -1733,7 +1778,7 @@ class PiAcpAgent(Agent):
                 continue
             seen_names.add(cmd_name)
             available.append(ac)
-        if "btw" not in seen_names:
+        if self._client_supports_btw and "btw" not in seen_names:
             seen_names.add("btw")
             available.append(
                 AvailableCommand(
