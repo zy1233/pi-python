@@ -318,7 +318,7 @@ fn build_initialize_meta(flags: &ConnectFlags) -> serde_json::Value {
 /// Build `client_capabilities.meta`.
 ///
 /// Advertises the documented `pi/capabilities` extension flags supported by `zypi`
-/// (X9 `steer`, X10 `btw`) while omitting legacy vendor `x.ai/*` keys.
+/// (X9 `steer`, X10 `btw`) while omitting legacy vendor extension keys.
 fn client_capabilities_meta(_flags: &ConnectFlags) -> serde_json::Value {
     serde_json::json!({
         "pi/capabilities": {
