@@ -1,7 +1,7 @@
 """AgentHarness runtime package built on top of pi-agent-core."""
 
 from pi_agent_core.messages import AssistantMessage, ToolResultMessage, UserMessage
-from pi_agent_harness.agent_harness import AgentHarness
+from pi_agent_harness.agent_harness import AgentHarness, BtwContextSnapshot
 from pi_agent_harness.env import LocalExecutionEnv
 from pi_agent_harness.prompt_templates import (
     load_prompt_templates,
@@ -79,6 +79,7 @@ __all__ = [
     "AssistantMessage",
     "BranchSummaryEntry",
     "BranchSummaryError",
+    "BtwContextSnapshot",
     "CompactionEntry",
     "CompactionError",
     "CompactionPreparation",

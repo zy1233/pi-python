@@ -300,6 +300,40 @@ def _raw_output(result: Any) -> Any:
     return result
 
 
+def _user_message_text(message: Any) -> str:
+    content = getattr(message, "content", None)
+    if content is None and isinstance(message, dict):
+        content = message.get("content")
+    if isinstance(content, str):
+        return content
+    if isinstance(content, list):
+        parts: list[str] = []
+        for item in content:
+            if isinstance(item, dict) and item.get("type") == "text":
+                parts.append(str(item.get("text", "")))
+            elif getattr(item, "type", None) == "text":
+                parts.append(str(getattr(item, "text", "")))
+        return "".join(parts)
+    return ""
+
+
+def project_steered_user_message(
+    message: Any, steer_id: str | None = None
+) -> UserMessageChunk | None:
+    """Project a live steered ``UserMessage`` onto a ``UserMessageChunk`` with steer metadata."""
+    text = _user_message_text(message)
+    if not text:
+        return None
+    meta: dict[str, Any] = {"pi/steered": True}
+    if steer_id:
+        meta["pi/steerId"] = steer_id
+    return UserMessageChunk(
+        content=text_block(skill_invocation_command(text) or text),
+        session_update="user_message_chunk",
+        field_meta=meta,
+    )
+
+
 def project_message_replay(message: Any) -> Iterator[SessionUpdate]:
     """Project a stored historical message onto ACP session_update events with replay meta."""
     role = getattr(message, "role", None)
@@ -309,20 +343,7 @@ def project_message_replay(message: Any) -> Iterator[SessionUpdate]:
     replay_meta: dict[str, Any] = {"isReplay": True}
 
     if role == "user":
-        content = getattr(message, "content", None)
-        if content is None and isinstance(message, dict):
-            content = message.get("content")
-        text = ""
-        if isinstance(content, str):
-            text = content
-        elif isinstance(content, list):
-            parts = []
-            for item in content:
-                if isinstance(item, dict) and item.get("type") == "text":
-                    parts.append(str(item.get("text", "")))
-                elif getattr(item, "type", None) == "text":
-                    parts.append(str(getattr(item, "text", "")))
-            text = "".join(parts)
+        text = _user_message_text(message)
         if text:
             # A prompt that ran a skill is stored with the text of the skill. The replay
             # shows the line that the user typed, as the client showed it the first time.

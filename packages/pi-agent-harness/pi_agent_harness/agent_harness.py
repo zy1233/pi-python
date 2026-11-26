@@ -5,6 +5,7 @@ from __future__ import annotations
 import asyncio
 import logging
 import time
+import uuid
 from collections.abc import Awaitable, Callable, Iterable, Mapping, Sequence
 from dataclasses import dataclass
 from pathlib import Path
@@ -203,6 +204,19 @@ class _TurnState:
     active_tools: list[AgentTool]
 
 
+@dataclass(frozen=True)
+class BtwContextSnapshot:
+    """Read-only snapshot of a session's LLM context for ephemeral ``/btw`` side chats.
+
+    Taken without acquiring the harness phase lock and without mutating session storage.
+    """
+
+    system_prompt: str
+    messages: list[AgentMessage]
+    model: Model
+    thinking_level: ThinkingLevel
+
+
 PendingWrite = dict[str, Any]
 
 
@@ -308,6 +322,9 @@ class AgentHarness:
         self.steering_mode = steering_mode
         self.follow_up_mode = follow_up_mode
         self.steer_queue: list[AgentMessage] = []
+        # In-memory tracking of steer message identity -> steer_id so subscribers can
+        # distinguish steered user messages without altering the pi v3 JSONL UserMessage schema.
+        self._steer_ids: dict[int, str] = {}
         self.follow_up_queue: list[AgentMessage] = []
         self.next_turn_queue: list[AgentMessage] = []
         self.pending_session_writes: list[PendingWrite] = []
@@ -1348,6 +1365,48 @@ class AgentHarness:
             )
         )
 
+    async def _compute_system_prompt(self, active_tools: list[AgentTool]) -> str:
+        system_prompt = "You are a helpful assistant."
+        if isinstance(self.system_prompt, str):
+            system_prompt = self.system_prompt
+        elif self.system_prompt:
+            system_prompt = await _maybe_await(
+                self.system_prompt(
+                    {
+                        "env": self.env,
+                        "session": self.session,
+                        "model": self.model,
+                        "thinking_level": self.thinking_level,
+                        "tools": list(self._tools.values()),
+                        "active_tools": active_tools,
+                        "deferred_tool_names": self.deferred_tool_names,
+                        "resources": self.resources,
+                    }
+                )
+            )
+        return build_harness_system_prompt(system_prompt, self.resources)
+
+    async def snapshot_context_for_btw(self) -> BtwContextSnapshot:
+        """Read-only snapshot of the current LLM context for an ephemeral ``/btw`` side chat.
+
+        Does not acquire the harness phase lock and never writes to session storage (a blank
+        ``DeferredJsonlSessionStorage`` stays unwritten on disk).
+        """
+        context = await self.session.build_context()
+        if self._cached_system_prompt is not None:
+            system_prompt = self._cached_system_prompt
+        else:
+            active_tools = [
+                self._tools[name] for name in self.active_tool_names if name in self._tools
+            ]
+            system_prompt = await self._compute_system_prompt(active_tools)
+        return BtwContextSnapshot(
+            system_prompt=system_prompt,
+            messages=list(context.messages),
+            model=self.model,
+            thinking_level=self.thinking_level,
+        )
+
     async def _create_turn_state(self) -> _TurnState:
         context = await self.session.build_context()
         metadata = await self.session.get_metadata()
@@ -1356,25 +1415,7 @@ class AgentHarness:
         if self._cached_system_prompt is not None:
             system_prompt = self._cached_system_prompt
         else:
-            system_prompt = "You are a helpful assistant."
-            if isinstance(self.system_prompt, str):
-                system_prompt = self.system_prompt
-            elif self.system_prompt:
-                system_prompt = await _maybe_await(
-                    self.system_prompt(
-                        {
-                            "env": self.env,
-                            "session": self.session,
-                            "model": self.model,
-                            "thinking_level": self.thinking_level,
-                            "tools": list(self._tools.values()),
-                            "active_tools": active_tools,
-                            "deferred_tool_names": self.deferred_tool_names,
-                            "resources": self.resources,
-                        }
-                    )
-                )
-            system_prompt = build_harness_system_prompt(system_prompt, self.resources)
+            system_prompt = await self._compute_system_prompt(active_tools)
             self._cached_system_prompt = system_prompt
         return _TurnState(
             messages=list(context.messages),
@@ -1438,8 +1479,11 @@ class AgentHarness:
         if event.type == "message_end":
             assert isinstance(event, MessageEndEvent)
             await self.session.append_message(event.message)
-            await self._emit_any(event, signal)
-            await self._emit_hook(event)
+            try:
+                await self._emit_any(event, signal)
+                await self._emit_hook(event)
+            finally:
+                self._steer_ids.pop(id(event.message), None)
             return
         if event.type == "turn_end":
             assert isinstance(event, TurnEndEvent)
@@ -1763,11 +1807,29 @@ class AgentHarness:
             self._set_phase("idle")
             raise normalize_harness_error(e, "unknown") from e
 
-    async def steer(self, text: str, images: list[ImageContent] | None = None) -> None:
+    async def steer(
+        self,
+        text: str,
+        images: list[ImageContent] | None = None,
+        *,
+        steer_id: str | None = None,
+    ) -> str:
         if self.phase == "idle":
             raise AgentHarnessError("invalid_state", "Cannot steer while idle")
-        self.steer_queue.append(_create_user_message(text, images))
+        message = _create_user_message(text, images)
+        sid = steer_id or str(uuid.uuid4())
+        self._steer_ids[id(message)] = sid
+        self.steer_queue.append(message)
         await self._emit_queue_update()
+        return sid
+
+    def steer_id_for(self, message: AgentMessage) -> str | None:
+        """Return the in-memory steer_id for a steered UserMessage, or ``None``."""
+        return self._steer_ids.get(id(message))
+
+    def is_steered_message(self, message: AgentMessage) -> bool:
+        """Whether *message* was enqueued via ``steer()`` (not a normal opening prompt)."""
+        return id(message) in self._steer_ids
 
     async def follow_up(self, text: str, images: list[ImageContent] | None = None) -> None:
         if self.phase == "idle":
@@ -1882,17 +1944,21 @@ class AgentHarness:
             self._run_abort_controller.abort()
 
         errors: list[Exception] = []
-        for step in (
-            self._emit_queue_update,
-            self.wait_for_idle,
-            lambda: self._emit_any(
-                AbortEvent(clearedSteer=cleared_steer, clearedFollowUp=cleared_follow_up)
-            ),
-        ):
-            try:
-                await step()
-            except Exception as e:
-                errors.append(e)
+        try:
+            for step in (
+                self._emit_queue_update,
+                self.wait_for_idle,
+                lambda: self._emit_any(
+                    AbortEvent(clearedSteer=cleared_steer, clearedFollowUp=cleared_follow_up)
+                ),
+            ):
+                try:
+                    await step()
+                except Exception as e:
+                    errors.append(e)
+        finally:
+            for message in cleared_steer:
+                self._steer_ids.pop(id(message), None)
         self._raise_hook_errors(errors)
         return {"cleared_steer": cleared_steer, "cleared_follow_up": cleared_follow_up}
 
