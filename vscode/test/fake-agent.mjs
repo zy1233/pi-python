@@ -52,6 +52,10 @@ const parsedModels = env.FAKE_MODELS ? JSON.parse(env.FAKE_MODELS) : [{ value: "
 let currentModel = parsedModels[0]?.value ?? "fake-model";
 const cancelled = new Set();
 const cwds = new Map();
+const busySessions = new Set();
+const pendingSteers = new Map();
+const cancelledBtw = new Set();
+let steerSeq = 0;
 
 // The sessions that the agent keeps: id -> {id, cwd, title, updatedAt, history: [{role, text}]}
 const store = env.FAKE_STORE && existsSync(env.FAKE_STORE) ? new Map(JSON.parse(readFileSync(env.FAKE_STORE, "utf8"))) : new Map();
@@ -249,6 +253,60 @@ async function runPrompt(ctx, sessionId, prompt) {
     process.stderr.write("fake agent: crashing\n");
     process.exit(3);
   }
+  if (prompt === "steer-wait") {
+    await notify(text(sessionId, "agent_message_chunk", "working"));
+    for (let i = 0; i < 400 && !cancelled.has(sessionId); i++) {
+      const queue = pendingSteers.get(sessionId);
+      if (queue && queue.length > 0) {
+        const next = queue.shift();
+        await ctx.client.notify("_pi/queue_update", {
+          sessionId,
+          steer: queue.map((s) => ({ steerId: s.steerId, preview: s.text.slice(0, 80) })),
+          clearedByAbort: false,
+        });
+        await notify({
+          sessionId,
+          update: {
+            sessionUpdate: "user_message_chunk",
+            content: { type: "text", text: next.text },
+            _meta: { "pi/steered": true, "pi/steerId": next.steerId },
+          },
+        });
+        remember(sessionId, "user", next.text);
+        await notify(text(sessionId, "agent_message_chunk", " steered: " + next.text));
+        return "end_turn";
+      }
+      await sleep(10);
+    }
+    const leftovers = pendingSteers.get(sessionId) ?? [];
+    if (leftovers.length > 0) {
+      pendingSteers.set(sessionId, []);
+      await ctx.client.notify("_pi/queue_update", {
+        sessionId,
+        steer: [],
+        clearedByAbort: true,
+        clearedSteerIds: leftovers.map((s) => s.steerId),
+      });
+    }
+    cancelled.delete(sessionId);
+    return "cancelled";
+  }
+  if (prompt === "steer-hang") {
+    await notify(text(sessionId, "agent_message_chunk", "working"));
+    for (let i = 0; i < 400 && !cancelled.has(sessionId); i++) await sleep(10);
+    const leftovers = pendingSteers.get(sessionId) ?? [];
+    if (leftovers.length > 0) {
+      pendingSteers.set(sessionId, []);
+      await ctx.client.notify("_pi/queue_update", {
+        sessionId,
+        steer: [],
+        clearedByAbort: true,
+        clearedSteerIds: leftovers.map((s) => s.steerId),
+      });
+    }
+    cancelled.delete(sessionId);
+    return "cancelled";
+  }
   if (prompt.startsWith("file:")) return runFileTool(ctx, sessionId, JSON.parse(prompt.slice("file:".length)));
   if (prompt === "refuse") return "refusal";
   await notify(text(sessionId, "agent_message_chunk", "echo: " + prompt));
@@ -302,6 +360,7 @@ const app = acp
       authMethods: terminal && env.FAKE_AUTH_MARKER
         ? [{ id: "pi-setup", name: "Set up", description: "setup", type: "terminal", args: ["--setup"], env: { FAKE_SETUP: "1" } }]
         : [],
+      ...(env.FAKE_STEER_BTW === "1" ? { _meta: { "pi/capabilities": { steer: true, btw: true } } } : {}),
     };
   })
   .onRequest(acp.methods.agent.session.new, (ctx) => {
@@ -388,6 +447,50 @@ const app = acp
       await ctx.client.notify(acp.methods.client.session.update, { sessionId, update: { sessionUpdate: "config_option_update", configOptions: configOptions() } });
     }
   })
+  .onRequest("_pi/session/steer", raw, async (ctx) => {
+    record(`pi/session/steer ${ctx.params.sessionId}`);
+    if (env.FAKE_STEER_BTW !== "1") throw new acp.RequestError(-32601, "Method not found");
+    const sessionId = String(ctx.params.sessionId);
+    const textVal = (ctx.params.prompt ?? []).map((b) => (b.type === "text" ? b.text : "")).join("");
+    const steerId = typeof ctx.params.steerId === "string" ? ctx.params.steerId : `st-${++steerSeq}`;
+    if (!busySessions.has(sessionId)) {
+      return { sessionId, steerId, queued: false, reason: "idle" };
+    }
+    const queue = pendingSteers.get(sessionId) ?? [];
+    queue.push({ steerId, text: textVal });
+    pendingSteers.set(sessionId, queue);
+    await ctx.client.notify("_pi/queue_update", {
+      sessionId,
+      steer: queue.map((s) => ({ steerId: s.steerId, preview: s.text.slice(0, 80) })),
+      clearedByAbort: false,
+    });
+    return { sessionId, steerId, queued: true, queueLength: queue.length };
+  })
+  .onRequest("_pi/session/btw", raw, async (ctx) => {
+    const question = (ctx.params.prompt ?? []).map((b) => (b.type === "text" ? b.text : "")).join("");
+    record(`pi/session/btw ${ctx.params.sessionId} ${question}`);
+    if (env.FAKE_STEER_BTW !== "1") throw new acp.RequestError(-32601, "Method not found");
+    const sessionId = String(ctx.params.sessionId);
+    const btwId = String(ctx.params.btwId);
+    const historyLen = Array.isArray(ctx.params.history) ? ctx.params.history.length : 0;
+    if (question === "hang-btw") {
+      await ctx.client.notify("_pi/btw_update", { sessionId, btwId, kind: "text_delta", delta: "partial..." });
+      for (let i = 0; i < 400 && !cancelledBtw.has(btwId); i++) await sleep(10);
+      cancelledBtw.delete(btwId);
+      await ctx.client.notify("_pi/btw_update", { sessionId, btwId, kind: "done", delta: "", stopReason: "cancelled" });
+      return { sessionId, btwId, stopReason: "cancelled", error: null };
+    }
+    await ctx.client.notify("_pi/btw_update", { sessionId, btwId, kind: "text_delta", delta: `btw(${historyLen}): ` });
+    await ctx.client.notify("_pi/btw_update", { sessionId, btwId, kind: "text_delta", delta: question });
+    await ctx.client.notify("_pi/btw_update", { sessionId, btwId, kind: "done", delta: "", stopReason: "end_turn" });
+    return { sessionId, btwId, stopReason: "end_turn", error: null };
+  })
+  .onRequest("_pi/session/btw_cancel", raw, (ctx) => {
+    record(`pi/session/btw_cancel ${ctx.params.btwId}`);
+    if (env.FAKE_STEER_BTW !== "1") throw new acp.RequestError(-32601, "Method not found");
+    cancelledBtw.add(String(ctx.params.btwId));
+    return { sessionId: ctx.params.sessionId, btwId: ctx.params.btwId, cancelled: true };
+  })
   .onRequest(acp.methods.agent.session.close, (ctx) => {
     record("session/close " + ctx.params.sessionId);
     return {};
@@ -401,7 +504,12 @@ const app = acp
     const prompt = ctx.params.prompt.map((block) => (block.type === "text" ? block.text : "")).join("");
     record("session/prompt " + prompt);
     remember(sessionId, "user", prompt);
-    return { stopReason: await runPrompt(ctx, sessionId, prompt) };
+    busySessions.add(sessionId);
+    try {
+      return { stopReason: await runPrompt(ctx, sessionId, prompt) };
+    } finally {
+      busySessions.delete(sessionId);
+    }
   })
   .onNotification(acp.methods.agent.session.cancel, (ctx) => {
     record("session/cancel " + ctx.params.sessionId);

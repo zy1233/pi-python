@@ -109,6 +109,24 @@ export interface AvatarState {
   assistant?: string;
 }
 
+export interface PendingSteerView {
+  id: string;
+  text: string;
+}
+
+export interface BtwTurnView {
+  id: string;
+  question: string;
+  answer: string;
+  thought: string;
+  status: "streaming" | "done" | "error" | "cancelled";
+  error?: string;
+}
+
+export interface BtwState {
+  turns: BtwTurnView[];
+}
+
 export interface StateMessage {
   type: "state";
   status: Status;
@@ -132,6 +150,12 @@ export interface StateMessage {
   showThinking?: boolean;
   /** Whether the agent advertised `promptCapabilities.image`. Absent before `initialize`. */
   supportsImages?: boolean;
+  /** Whether the agent advertised `pi/capabilities.steer`. */
+  supportsSteer?: boolean;
+  /** Whether the agent advertised `pi/capabilities.btw`. */
+  supportsBtw?: boolean;
+  /** Queued mid-turn steering messages waiting for the next turn boundary. */
+  pendingSteers?: PendingSteerView[];
   /** Number of pending permission/trust questions waiting for user input. Omitted when 0. */
   pendingPermissions?: number;
 }
@@ -191,7 +215,7 @@ export interface NoticeAction {
 }
 
 export type TranscriptItem =
-  | { type: "user"; id: string; text: string }
+  | { type: "user"; id: string; text: string; steered?: boolean }
   | { type: "agent"; id: string; text: string; thought: string; thoughtMs?: number; thoughtActive?: boolean }
   | { type: "tool"; toolCall: ToolCallView }
   | { type: "permission"; request: PermissionRequestView; done?: { outcome: PermissionOutcome; optionId?: string } }
@@ -202,7 +226,7 @@ export type NoticeLevel = "info" | "warning" | "error";
 export type HostMessage =
   | StateMessage
   | { type: "reset"; transcript: TranscriptItem[] }
-  | { type: "userMessage"; id: string; text: string }
+  | { type: "userMessage"; id: string; text: string; steered?: boolean }
   | { type: "agentText"; messageId: string; text: string }
   | { type: "agentThought"; messageId: string; text: string }
   | { type: "agentThoughtEnd"; messageId: string; durationMs: number }
@@ -215,7 +239,9 @@ export type HostMessage =
   | { type: "turnEnd"; stopReason: string }
   | { type: "diffState"; toolCallId: string; available: boolean }
   | { type: "mentionResults"; requestId: number; query: string; items: RankedMention[] }
-  | { type: "insertMention"; item: MentionAttachment };
+  | { type: "insertMention"; item: MentionAttachment }
+  | { type: "restoreDraft"; text: string }
+  | { type: "btwState"; btw: BtwState | null };
 
 export type WebviewMessage =
   | { type: "ready" }
@@ -237,7 +263,10 @@ export type WebviewMessage =
   | { type: "openFile"; path: string; line?: number }
   | { type: "copy"; text: string }
   | { type: "openLink"; url: string }
-  | { type: "pickAvatar"; role: AvatarRole };
+  | { type: "pickAvatar"; role: AvatarRole }
+  | { type: "btwAsk"; text: string }
+  | { type: "btwCancel"; btwId: string }
+  | { type: "btwClose" };
 
 const MAX_PROMPT_CHARS = 200_000;
 const MAX_ID_CHARS = 512;
@@ -417,6 +446,16 @@ export function parseWebviewMessage(value: unknown): WebviewMessage | undefined 
     case "pickAvatar":
       if (value.role !== "user" && value.role !== "assistant") return undefined;
       return { type: "pickAvatar", role: value.role };
+    case "btwClose":
+      return { type: "btwClose" };
+    case "btwCancel":
+      if (!shortString(value.btwId, MAX_ID_CHARS)) return undefined;
+      return { type: "btwCancel", btwId: value.btwId };
+    case "btwAsk":
+      if (typeof value.text !== "string" || value.text.length > MAX_PROMPT_CHARS || value.text.trim() === "") {
+        return undefined;
+      }
+      return { type: "btwAsk", text: value.text };
     default:
       return undefined;
   }

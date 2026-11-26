@@ -932,3 +932,162 @@ mark.match {
 .banner .steps { margin: 0 0 8px; padding-left: 20px; }
 .banner .steps li { margin-bottom: 4px; }
 .notice .actions { margin-top: 4px; }
+
+.badge.steered {
+  background: color-mix(in srgb, var(--vscode-textLink-foreground, var(--vscode-focusBorder)) 18%, transparent);
+  color: var(--vscode-textLink-foreground, var(--vscode-focusBorder));
+  text-transform: none;
+}
+
+.pending-steers {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  margin-bottom: 6px;
+  padding: 6px 8px;
+  border-radius: 6px;
+  border: 1px solid color-mix(in srgb, var(--vscode-focusBorder, #0e70c0) 45%, transparent);
+  background: color-mix(in srgb, var(--vscode-textBlockQuote-background) 70%, transparent);
+  font-size: 0.88em;
+}
+.pending-steers[hidden] { display: none; }
+.pending-steer-label {
+  font-size: 0.85em;
+  font-weight: 600;
+  color: var(--vscode-textLink-foreground, var(--vscode-focusBorder));
+}
+.pending-steer-list {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+.pending-steer-item {
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  color: var(--vscode-foreground);
+}
+
+.btw-panel {
+  flex: 0 1 auto;
+  display: flex;
+  flex-direction: column;
+  max-height: 42vh;
+  margin: 0 12px 6px;
+  border-radius: 8px;
+  border: 1px solid color-mix(in srgb, var(--vscode-focusBorder, #0e70c0) 55%, transparent);
+  background: var(--vscode-editorWidget-background, var(--vscode-editor-background));
+  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.24);
+  overflow: hidden;
+}
+.btw-panel[hidden] { display: none; }
+.btw-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 6px 10px;
+  border-bottom: 1px solid color-mix(in srgb, var(--vscode-widget-border, #888) 45%, transparent);
+  background: color-mix(in srgb, var(--vscode-textBlockQuote-background) 55%, transparent);
+}
+.btw-title-wrap {
+  display: flex;
+  align-items: baseline;
+  gap: 6px;
+  min-width: 0;
+  flex-wrap: wrap;
+}
+.btw-title {
+  font-size: 0.9em;
+}
+.btw-subtitle {
+  font-size: 0.82em;
+  color: var(--vscode-descriptionForeground);
+}
+.btw-close {
+  padding: 1px 7px;
+  line-height: 1.2;
+  font-weight: 600;
+}
+.btw-turns {
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow-y: auto;
+  padding: 8px 10px;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+.btw-turn {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding-bottom: 8px;
+  border-bottom: 1px solid color-mix(in srgb, var(--vscode-widget-border, #888) 30%, transparent);
+}
+.btw-turn:last-child {
+  padding-bottom: 0;
+  border-bottom: 0;
+}
+.btw-q-row {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 8px;
+}
+.btw-q {
+  font-weight: 600;
+  font-size: 0.92em;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+.btw-turn-actions {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  flex: none;
+}
+.btw-stop-btn {
+  padding: 1px 7px;
+  font-size: 0.8em;
+}
+.btw-a {
+  word-break: break-word;
+  overflow-wrap: anywhere;
+  line-height: 1.5;
+  font-size: 0.94em;
+}
+.btw-a p:first-child { margin-top: 0; }
+.btw-a p:last-child { margin-bottom: 0; }
+.btw-status-text {
+  color: var(--vscode-descriptionForeground);
+  font-style: italic;
+}
+.btw-error {
+  color: var(--vscode-errorForeground, #f85149);
+  font-size: 0.88em;
+  white-space: pre-wrap;
+}
+.btw-footer {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 8px;
+  border-top: 1px solid color-mix(in srgb, var(--vscode-widget-border, #888) 45%, transparent);
+}
+.btw-input {
+  flex: 1 1 auto;
+  min-width: 0;
+  padding: 4px 8px;
+  border-radius: 4px;
+  background: var(--vscode-input-background);
+  color: var(--vscode-input-foreground);
+  border: 1px solid var(--vscode-input-border, var(--vscode-widget-border, transparent));
+  font-family: inherit;
+  font-size: 0.92em;
+}
+.btw-input:focus-visible {
+  outline: 1px solid var(--vscode-focusBorder);
+  outline-offset: 1px;
+}
+
