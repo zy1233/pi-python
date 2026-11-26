@@ -425,6 +425,26 @@ async def test_a_bash_tool_that_cannot_find_a_shell_makes_every_call_ask(
     assert verdict.outcome is Outcome.ASK
 
 
+async def test_the_mount_points_of_the_shell_reach_the_rules(
+    world: _World, monkeypatch: pytest.MonkeyPatch
+):
+    """Git Bash reads ``/c/work/app`` as ``C:\\work\\app``, and the model writes the project folder
+    that way (``cd /c/work/app && ls``). The session gives the rules the mount points of its
+    shell (``auto_mode.shell_mounts``), or each of these calls asks: ``path.outside_project``."""
+    drive = world.project.parent
+    monkeypatch.setattr(auto_mode, "shell_mounts", lambda resolve=None: (("/c", str(drive)),))
+    agent, _, session_id = await _open(world)
+    decide = _verdict_of(agent, session_id)
+
+    assert agent._autos[session_id]._make_context().shell_mounts == (("/c", str(drive)),)
+    inside = await decide("bash", {"command": f"cd /c/{world.project.name} && ls"})
+    outside = await decide("bash", {"command": "ls /c/home"})
+
+    assert inside.outcome is Outcome.ALLOW
+    assert outside.outcome is Outcome.ASK
+    assert outside.rule_id == "path.outside_project"
+
+
 async def test_a_check_of_the_session_that_fails_makes_every_call_ask_and_says_so(
     world: _World, monkeypatch: pytest.MonkeyPatch
 ):

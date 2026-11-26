@@ -179,9 +179,16 @@ class AutoContext:
     asks when it names a folder in front of a protected glob (``.github``). ``pi_home`` is the
     agent's own home (config, trust store, sessions): all of it is protected.
 
+    ``shell_mounts`` are the mount points of the shell that lead to a folder of the host, as pairs
+    of ``(path in the shell, folder of the host)``. Git Bash and MSYS2 on Windows have one for
+    each drive: ``("/c", "C:\\")``. A path in a ``bash`` command that starts with a mount point
+    is read as the folder: ``/c/work/app`` is ``C:\\work\\app``. A shell with no such mount points
+    (any shell on Linux or macOS, the ``bash.exe`` of WSL) has none, and a path is read as the
+    host reads it.
+
     Every folder and path in the context has to be absolute (the globs are patterns, not
-    paths). With a relative or empty one the rules cannot know where it points, so every call
-    asks (``floor.context_not_absolute``).
+    paths), and so is the folder of every mount. With a relative or empty one the rules cannot
+    know where it points, so every call asks (``floor.context_not_absolute``).
     """
 
     cwd: str
@@ -193,6 +200,7 @@ class AutoContext:
     protected_globs: tuple[str, ...] = ()
     origin_cwd: str | None = None
     fs: FsProbe = field(default_factory=RealFs)
+    shell_mounts: tuple[tuple[str, str], ...] = ()
 
 
 def build_context(
@@ -206,6 +214,7 @@ def build_context(
     config: Any = None,
     origin_cwd: str | None = None,
     fs: FsProbe | None = None,
+    shell_mounts: tuple[tuple[str, str], ...] = (),
 ) -> AutoContext:
     """An ``AutoContext`` with the protected set filled from what the project asks to be
     trusted for (``gated_project_resources``), so the list does not drift from the trust code.
@@ -229,6 +238,7 @@ def build_context(
         protected_globs=tuple(protected_globs),
         origin_cwd=origin_cwd,
         fs=fs if fs is not None else RealFs(),
+        shell_mounts=tuple(shell_mounts),
     )
 
 
@@ -294,6 +304,7 @@ def is_absolute_folder(path: object) -> bool:
 
 def _context_is_absolute(ctx: AutoContext) -> bool:
     folders = [ctx.cwd, ctx.home_dir, ctx.pi_home, *ctx.extra_roots, *ctx.protected_paths]
+    folders.extend(folder for _, folder in ctx.shell_mounts)
     if ctx.origin_cwd:
         folders.append(ctx.origin_cwd)
     return all(_is_absolute(folder) for folder in folders)
@@ -395,9 +406,46 @@ class _Env:
         self.protected = [ctx.fs.realpath(p) for p in ctx.protected_paths]
         self.globs = ctx.protected_globs
         self.glob_names = _glob_names(ctx.protected_globs)
+        # Only a mount point of one name (``/c``) is read. Any other entry is left out, and a
+        # path that would have used it is read as the host reads it: the side that asks.
+        self.mounts = {
+            prefix[1:].lower(): folder
+            for prefix, folder in ctx.shell_mounts
+            if re.fullmatch(r"/[^/]+", prefix)
+        }
 
     def inside(self, real: str) -> bool:
         return any(_is_inside(real, root) for root in self.roots)
+
+    def host_path(self, text: str) -> str:
+        """*text*, a path that the shell reads, as a path that the host can read.
+
+        Git Bash and MSYS2 on Windows read ``/c/work/app`` as ``C:\\work\\app``. The host reads
+        the same text as ``\\c\\work\\app``, a folder of the current drive that is not there. Then
+        every path of the project looks like a path outside it, and every ``cd /c/work/app``
+        asks. A text that starts with a mount point of the context (``ctx.shell_mounts``) is
+        turned into the folder of the mount. Any other text is returned as it is.
+
+        A ``..`` that goes above the mount point leads to a folder that the rules do not map
+        (the root of the shell, ``/``), so it is a floor hit. The host would clamp it at the root
+        of the drive, and read another folder than the shell does.
+        """
+        if not self.mounts or not text.startswith("/"):
+            return text
+        name, _, rest = text[1:].partition("/")
+        folder = self.mounts.get(name.lower())
+        if folder is None:
+            return text
+        depth = 0
+        parts: list[str] = []
+        for part in rest.split("/"):
+            if part in ("", "."):
+                continue
+            depth += -1 if part == ".." else 1
+            if depth < 0:
+                raise _Floor(Reason.OUTSIDE_PROJECT, "path.mount_dotdot")
+            parts.append(part)
+        return os.path.join(folder, *parts)
 
     def protected_hit(self, real: str) -> tuple[Reason, str] | None:
         """Why *real* (a resolved path) is protected, or ``None``."""
@@ -1265,9 +1313,14 @@ def _glob_prefix(text: str) -> str:
     return prefix[: sep + 1] if sep >= 0 else ""
 
 
+def _joined(text: str, cwd: str, env: _Env) -> str:
+    """The path of a word of a command, as the host reads it, before links are followed."""
+    text = env.host_path(text)
+    return text if os.path.isabs(text) else os.path.join(cwd, text)
+
+
 def _resolve(text: str, cwd: str, env: _Env) -> str:
-    joined = text if os.path.isabs(text) else os.path.join(cwd, text)
-    return env.fs.realpath(joined)
+    return env.fs.realpath(_joined(text, cwd, env))
 
 
 # Names that the protected set knows, to test a glob against. Only the rules read these tuples;
@@ -2118,7 +2171,7 @@ def _cd(args_words: list[_Word], st: _State, program: str) -> bool:
         raise _Floor(Reason.UNCLEAR, "bash.unclear.cd")
     new: list[str] = []
     for cwd in st.cwds:
-        joined = target.text if os.path.isabs(target.text) else os.path.join(cwd, target.text)
+        joined = _joined(target.text, cwd, env)
         real = env.fs.realpath(joined)
         env.path_floor(real)
         # ``cd`` follows a symbolic link in its own way: a later ``cd ..`` goes to the parent of

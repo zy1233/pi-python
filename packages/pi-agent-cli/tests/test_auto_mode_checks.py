@@ -9,12 +9,15 @@ the log.
 from __future__ import annotations
 
 import os
+import string
 from pathlib import Path
 from types import SimpleNamespace
 
 import pytest
 
+from pi_agent_cli import auto_mode
 from pi_agent_cli.auto_mode import (
+    DRIVE_MOUNTS,
     ENTRY_MESSAGE,
     BashLimitRegistry,
     config_notes_message,
@@ -23,6 +26,7 @@ from pi_agent_cli.auto_mode import (
     format_log,
     path_problems,
     problems_message,
+    shell_mounts,
     shell_problems,
 )
 from pi_agent_cli.auto_rules import AutoContext
@@ -115,6 +119,89 @@ def test_a_bash_tool_that_cannot_find_a_shell_is_a_problem():
     assert shell_problems(none_found) != []
 
 
+# ------------------------------------------------------------------------ mount points
+
+
+def _host(monkeypatch: pytest.MonkeyPatch, *, windows: bool) -> None:
+    """Say which host the code runs on, so a test reads the same on Windows and on Linux."""
+    monkeypatch.setattr(auto_mode, "_host_is_windows", lambda: windows)
+
+
+@pytest.mark.parametrize(
+    "shell",
+    [
+        r"C:\Program Files\Git\bin\bash.exe",
+        r"C:\Program Files\Git\usr\bin\bash.exe",
+        r"C:\Program Files (x86)\Git\bin\bash.exe",
+        "C:/Program Files/Git/bin/bash.exe",
+        r"c:\program files\git\bin\bash.exe",
+        r"C:\msys64\usr\bin\bash.exe",
+        r"C:\msys32\usr\bin\bash.exe",
+        r"D:\tools\msys2\usr\bin\bash.exe",
+        r"D:\PortableGit\bin\bash.exe",
+        r"C:\Users\me\scoop\apps\git\current\bin\bash.exe",
+        r"C:\tools\git-for-windows\bin\bash.exe",
+    ],
+)
+def test_git_bash_and_msys2_have_a_mount_point_for_each_drive(
+    shell: str, monkeypatch: pytest.MonkeyPatch
+):
+    _host(monkeypatch, windows=True)
+
+    mounts = shell_mounts(_shell(shell))
+
+    assert mounts == DRIVE_MOUNTS
+    assert ("/c", "C:\\") in mounts
+    assert ("/d", "D:\\") in mounts
+    assert len(mounts) == 26
+
+
+def test_the_drive_mounts_are_one_name_each_and_lead_to_the_root_of_the_drive():
+    assert [name for name, _ in DRIVE_MOUNTS] == [f"/{letter}" for letter in string.ascii_lowercase]
+    assert all(folder == f"{name[1].upper()}:\\" for name, folder in DRIVE_MOUNTS)
+
+
+@pytest.mark.parametrize(
+    "shell",
+    [
+        r"C:\Windows\System32\bash.exe",  # the bash.exe of WSL: its drives are in /mnt/c
+        r"C:\Windows\sysnative\bash.exe",
+        r"C:\cygwin64\bin\bash.exe",  # Cygwin: its drives are in /cygdrive/c
+        r"C:\tools\bash.exe",  # a shell that is not known has none
+        r"C:\Users\digit\bin\bash.exe",  # "git" must be the whole name of a folder
+        r"C:\msysx\bash.exe",
+        r"C:\Windows\System32\cmd.exe",
+        "bash.exe",
+        "bash",
+        "/bin/bash",
+        "",
+    ],
+)
+def test_any_other_shell_has_no_mount_point(shell: str, monkeypatch: pytest.MonkeyPatch):
+    _host(monkeypatch, windows=True)
+
+    assert shell_mounts(_shell(shell)) == ()
+
+
+def test_a_host_that_is_not_windows_has_no_mount_point(monkeypatch: pytest.MonkeyPatch):
+    _host(monkeypatch, windows=False)
+
+    assert shell_mounts(_shell(r"C:\Program Files\Git\bin\bash.exe")) == ()
+
+
+def test_the_host_is_windows_when_the_os_says_nt():
+    assert auto_mode._host_is_windows() is (os.name == "nt")
+
+
+def test_a_shell_that_cannot_be_found_has_no_mount_point(monkeypatch: pytest.MonkeyPatch):
+    _host(monkeypatch, windows=True)
+
+    def none_found(_shell_path):
+        raise OSError("no shell")
+
+    assert shell_mounts(none_found) == ()
+
+
 # -------------------------------------------------------------------------- context
 
 
@@ -187,6 +274,16 @@ def test_a_protected_path_that_is_not_absolute_is_a_problem(tmp_path: Path):
     (problem,) = context_problems(_context(tmp_path, protected_paths=("secret.txt",)))
 
     assert "protected" in problem
+
+
+def test_a_mount_point_that_leads_to_a_folder_that_is_not_absolute_is_a_problem(tmp_path: Path):
+    (problem,) = context_problems(_context(tmp_path, shell_mounts=(("/c", "drive"),)))
+
+    assert "mount point" in problem
+
+
+def test_a_mount_point_that_leads_to_an_absolute_folder_is_fine(tmp_path: Path):
+    assert context_problems(_context(tmp_path, shell_mounts=(("/c", str(tmp_path)),))) == []
 
 
 # --------------------------------------------------------------------------- texts
