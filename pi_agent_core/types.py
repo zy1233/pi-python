@@ -65,6 +65,14 @@ class Model:
     # with `include_thoughts=True`). None uses "gemini" for Google's own OpenAI-compatible
     # hosts and "openai" elsewhere.
     thinking_format: ThinkingFormat | None = None
+    # Send the thinking of the earlier assistant messages back to the endpoint, as the field
+    # `reasoning_content` (opt-in; the adapter does it for `provider = "openai"` and for a
+    # `provider = "deepseek"` gateway). A model that thinks across tool calls (DeepSeek and the
+    # gateways that serve it) loses its own line of thought when it gets none of it back. It is
+    # sent only while thinking is asked for. An endpoint that refuses the field is noticed: the
+    # request is made again without it (`langchain_stream`). DeepSeek's own API needs no flag: it
+    # always gets the thinking back.
+    replay_reasoning: bool = False
 
     @property
     def id(self) -> str:

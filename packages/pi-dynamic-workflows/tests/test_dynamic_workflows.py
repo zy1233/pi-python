@@ -892,6 +892,27 @@ class TestHarnessSubagentExecutor:
             resolved = _parse_model_id(other_spec, parent)
             assert resolved.thinking_format is None
 
+    def test_parse_model_id_preserves_replay_reasoning_only_for_same_model(self) -> None:
+        from pi_dynamic_workflows.subagent import _parse_model_id
+
+        from pi_agent_core.types import Model
+
+        parent = Model(
+            provider="openai",
+            model_id="deepseek-flash",
+            base_url="https://gw/v1",
+            replay_reasoning=True,
+        )
+
+        for same_spec in ("deepseek-flash", "openai/deepseek-flash", "OpenAI/deepseek-flash"):
+            assert _parse_model_id(same_spec, parent).replay_reasoning is True
+
+        for other_spec in ("gpt-4o", "openai/gpt-4o", "anthropic/deepseek-flash"):
+            assert _parse_model_id(other_spec, parent).replay_reasoning is False
+
+        plain = Model(provider="openai", model_id="deepseek-flash", base_url="https://gw/v1")
+        assert _parse_model_id("deepseek-flash", plain).replay_reasoning is False
+
     async def test_subagent_asks_for_the_key_of_the_provider_it_actually_uses(self) -> None:
         """End to end: which provider a sub-agent runs on, and which key it is handed."""
         from pi_dynamic_workflows.subagent import HarnessSubagentExecutor

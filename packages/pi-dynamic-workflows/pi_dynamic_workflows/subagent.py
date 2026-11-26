@@ -25,8 +25,9 @@ def _parse_model_id(model_id: str, parent_model: Any) -> Any:
     belongs to the provider, not the model: it carries over when the provider is the
     parent's and is dropped otherwise, so the parent's gateway never fronts another vendor.
     Model-specific capabilities (``supports_images``, ``reasoning``) are not inherited.
-    ``thinking_format`` belongs to one model entry and is preserved only when the resolved
-    subagent model is the exact same model as *parent_model* (same provider and model id).
+    ``thinking_format`` and ``replay_reasoning`` belong to one model entry and are preserved only
+    when the resolved subagent model is the exact same model as *parent_model* (same provider and
+    model id).
     """
     from pi_agent_core.types import Model
 
@@ -42,6 +43,7 @@ def _parse_model_id(model_id: str, parent_model: Any) -> Any:
         context_window=parent_model.context_window,
         base_url=getattr(parent_model, "base_url", None) if same_provider else None,
         thinking_format=getattr(parent_model, "thinking_format", None) if same_model else None,
+        replay_reasoning=bool(getattr(parent_model, "replay_reasoning", False)) and same_model,
     )
 
 

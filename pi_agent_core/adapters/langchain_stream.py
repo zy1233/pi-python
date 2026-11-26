@@ -296,6 +296,53 @@ def _apply_deepseek_thinking(kwargs: dict[str, Any], level: ThinkingLevel | None
     return kwargs
 
 
+# Endpoints that refused ``reasoning_content`` on a request, as ``(base_url, model_id)``. A refused
+# request is made again without the thinking (see ``consume`` in ``langchain_stream``). When that
+# worked, the pair is kept here, so the later requests of this process leave the thinking out from
+# the start: the refusal costs one request, not one for each turn.
+_REPLAY_REFUSED: set[tuple[str, str]] = set()
+
+
+def _replay_key(model: Model) -> tuple[str, str]:
+    return (model.base_url or "").strip().rstrip("/").lower(), model.model_id
+
+
+def _replay_is_required(model: Model) -> bool:
+    """DeepSeek's own API answers 400 to a request with tools that has no thinking in it."""
+    return model.provider.lower() == "deepseek" and _is_deepseek_api(model.base_url)
+
+
+def _replays_reasoning(model: Model, level: ThinkingLevel | None) -> bool:
+    """Whether the request of *model* carries the thinking of the earlier assistant messages.
+
+    Both gates of thinking must be open (`model.reasoning` and a `level` other than "off"): a
+    request that does not ask for thinking sends none back, as it sends no other parameter of
+    it. Then DeepSeek's own API always gets it, and any other endpoint gets it only when the
+    model entry asks (`Model.replay_reasoning`) and the endpoint has not refused it before
+    (`_REPLAY_REFUSED`). Only `openai` and `deepseek` have a chat class that can send it.
+    """
+    if model.provider.lower() not in ("openai", "deepseek"):
+        return False
+    if not level or level == "off" or not model.reasoning:
+        return False
+    if _replay_is_required(model):
+        return True
+    return model.replay_reasoning and _replay_key(model) not in _REPLAY_REFUSED
+
+
+def _is_replay_refusal(error: BaseException) -> bool:
+    """Whether an endpoint refused ``reasoning_content`` on a message of the request.
+
+    A server of the OpenAI format that checks the fields of a message answers 400 (OpenAI:
+    ``Unknown parameter: 'messages[1].reasoning_content'``) or 422 (pydantic: ``Extra inputs are
+    not permitted``) and names the field. An error that does not name it is another error: a
+    request that grew too large with the thinking in it, for example, must not make the agent
+    drop the thinking for good.
+    """
+    status = getattr(error, "status_code", None)
+    return status in (400, 422) and "reasoning_content" in str(error).lower()
+
+
 def _get_attr(obj: Any, key: str, default: Any = None) -> Any:
     if obj is None:
         return default
@@ -547,6 +594,8 @@ def resolve_chat_model(
             raise _provider_missing("openai", "langchain-openai") from e
         # Chat Completions does not stream usage stats unless asked to.
         kwargs.setdefault("stream_usage", True)
+        # The thinking goes back to the gateway only if the model entry asks for it.
+        kwargs["replay_reasoning"] = _replays_reasoning(model, reasoning)
         return chat_cls(**kwargs)
     if provider == "anthropic":
         try:
@@ -558,16 +607,17 @@ def resolve_chat_model(
         # Also the right provider for DeepSeek-style OpenAI-compatible gateways
         # (SiliconFlow, vLLM, ...): it preserves the reasoning_content thinking
         # stream in additional_kwargs, and it can send the thinking back (the
-        # "openai" provider keeps the stream too, but sends nothing back).
+        # "openai" provider keeps the stream too, and sends the thinking back only when
+        # the model entry asks, ``Model.replay_reasoning``).
         try:
             chat_cls = replaying_chat_deepseek()
         except ImportError as e:
             raise _provider_missing("deepseek", "langchain-deepseek") from e
         kwargs.setdefault("stream_usage", True)
         # Its own API wants the thinking back on the earlier assistant messages whenever it
-        # was asked to think (and gets nothing it did not ask for); a gateway is left alone.
-        thinks = _deepseek_thinking_level(model, reasoning) is not None
-        kwargs["replay_reasoning"] = _is_deepseek_api(model.base_url) and thinks
+        # was asked to think (and gets nothing it did not ask for); a gateway is left alone
+        # unless the model entry asks for it.
+        kwargs["replay_reasoning"] = _replays_reasoning(model, reasoning)
         return chat_cls(**kwargs)
 
     try:
@@ -613,6 +663,9 @@ async def langchain_stream(
                 temperature=options.temperature,
                 max_tokens=options.max_tokens,
             )
+            # ``chat`` may be bound to tools or a response format below: this is the chat model
+            # itself, whose settings the request reads each time.
+            base_chat = chat
             transformed = transform_messages(context.messages, model)
 
             # Structured output (#7): schema instructions go into the system
@@ -851,12 +904,19 @@ async def langchain_stream(
                             )
 
             max_retries = max(options.max_retries, 0)
+            # The thinking that this request sends back to the endpoint (an opt-in; see
+            # ``_replays_reasoning``). An endpoint that refuses it is asked again without it.
+            # DeepSeek's own API is not asked again: it needs the thinking.
+            replay_is_on = getattr(base_chat, "replay_reasoning", False) is True
+            replay_can_be_dropped = replay_is_on and not _replay_is_required(model)
+            replay_dropped = False
 
             async def consume() -> None:
                 # Retry transient failures, but only while no chunk has been
                 # received: once deltas were emitted downstream they cannot be
                 # rolled back, so mid-stream failures surface as error events
                 # (mirrors pi's streamSimple retry scope).
+                nonlocal replay_dropped
                 attempt = 0
                 while True:
                     got_chunk = False
@@ -867,10 +927,40 @@ async def langchain_stream(
                             if signal is not None and getattr(signal, "aborted", False):
                                 raise _Aborted()
                             handle_chunk(chunk)
+                        if replay_dropped:
+                            # The request without the thinking worked, so the endpoint
+                            # refused the thinking, and nothing else.
+                            _REPLAY_REFUSED.add(_replay_key(model))
+                            logger.warning(
+                                "%s accepts the request without reasoning_content. The agent "
+                                "sends no thinking back to %s until it restarts. Set "
+                                "replay_reasoning = false for this model in agent.toml to skip "
+                                "the first refused request.",
+                                model.base_url or model.provider,
+                                model.model_id,
+                            )
                         return
                     except _Aborted:
                         raise
                     except Exception as e:
+                        if (
+                            replay_can_be_dropped
+                            and not replay_dropped
+                            and not got_chunk
+                            and _is_replay_refusal(e)
+                        ):
+                            # The refusal came before the first chunk, so nothing was shown:
+                            # ask again at once, without the thinking. It is not a retry of a
+                            # transient failure, and it does not use one.
+                            base_chat.replay_reasoning = False
+                            replay_dropped = True
+                            logger.warning(
+                                "%s refused reasoning_content on the earlier messages (%s). "
+                                "Asking again without it.",
+                                model.base_url or model.provider,
+                                e,
+                            )
+                            continue
                         if got_chunk or attempt >= max_retries or not _is_retryable_error(e):
                             raise
                         delay = _retry_delay(

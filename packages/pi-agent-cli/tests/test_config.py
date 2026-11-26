@@ -695,3 +695,102 @@ def test_invalid_thinking_format_is_ignored_with_a_note(tmp_path: Path, raw: str
     assert config.thinking_format is None
     assert config.default_choice().thinking_format is None
     assert any("thinking_format of [model]" in n for n in config.auto.notes)
+
+
+# ---------------------------------------------------------------------------------------------
+# ``replay_reasoning``
+# ---------------------------------------------------------------------------------------------
+
+
+def test_replay_reasoning_is_off_unless_it_is_set(tmp_path: Path):
+    config = _load(tmp_path, '[model]\nprovider = "openai"\nid = "g"\n')
+
+    assert config.replay_reasoning is False
+    assert config.default_choice().replay_reasoning is False
+    assert config.auto.notes == ()
+
+
+def test_replay_reasoning_in_model_and_top_level(tmp_path: Path):
+    config = _load(tmp_path, '[model]\nprovider = "openai"\nid = "g"\nreplay_reasoning = true\n')
+    assert config.replay_reasoning is True
+    assert config.default_choice().replay_reasoning is True
+    assert config.auto.notes == ()
+
+    top = _load(tmp_path, 'replay_reasoning = true\n[model]\nprovider = "openai"\nid = "g"\n')
+    assert top.replay_reasoning is True
+    assert top.auto.notes == ()
+
+    off = _load(tmp_path, '[model]\nprovider = "openai"\nid = "g"\nreplay_reasoning = false\n')
+    assert off.replay_reasoning is False
+    assert off.auto.notes == ()
+
+
+def test_replay_reasoning_in_models_list_and_not_inherited(tmp_path: Path):
+    config = _load(
+        tmp_path,
+        """
+[model]
+provider = "openai"
+id = "main"
+base_url = "http://gw.test/v1"
+replay_reasoning = true
+
+[[models]]
+id = "other"
+
+[[models]]
+id = "secondary"
+replay_reasoning = true
+
+[[models]]
+id = "tertiary"
+replay_reasoning = false
+""".strip(),
+    )
+    choices = config.model_choices()
+
+    assert [c.id for c in choices] == ["main", "other", "secondary", "tertiary"]
+    assert [c.replay_reasoning for c in choices] == [True, False, True, False]
+    assert config.auto.notes == ()
+
+
+def test_replay_reasoning_of_the_first_entry_does_not_reach_a_model_of_another_provider(
+    tmp_path: Path,
+):
+    config = _load(
+        tmp_path,
+        """
+[model]
+provider = "openai"
+id = "main"
+replay_reasoning = true
+
+[[models]]
+provider = "anthropic"
+id = "claude"
+""".strip(),
+    )
+
+    assert [c.replay_reasoning for c in config.model_choices()] == [True, False]
+
+
+@pytest.mark.parametrize("raw", ['"yes"', '"true"', "1", "0", "[]", '""'])
+def test_a_replay_reasoning_that_is_not_a_boolean_is_ignored_with_a_note(tmp_path: Path, raw: str):
+    """It sends more to the endpoint, so a text like ``"yes"`` is not read as ``true``."""
+    config = _load(tmp_path, f'[model]\nprovider = "openai"\nid = "g"\nreplay_reasoning = {raw}\n')
+
+    assert config.replay_reasoning is False
+    assert config.default_choice().replay_reasoning is False
+    (note,) = config.auto.notes
+    assert note == "replay_reasoning of [model] must be true or false. It is ignored."
+
+
+def test_a_bad_replay_reasoning_in_a_models_entry_names_the_entry(tmp_path: Path):
+    config = _load(
+        tmp_path,
+        '[model]\nprovider = "openai"\nid = "g"\n\n[[models]]\nid = "h"\nreplay_reasoning = "on"\n',
+    )
+
+    assert [c.replay_reasoning for c in config.model_choices()] == [False, False]
+    (note,) = config.auto.notes
+    assert 'the "h" entry of [[models]]' in note

@@ -68,3 +68,32 @@ async def test_the_harness_model_keeps_thinking_format(
 
     assert harness.model.thinking_format == "gemini"
     assert harness.model.reasoning is True
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("replays", [True, False])
+async def test_the_harness_model_keeps_replay_reasoning(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, replays: bool
+):
+    config = CliConfig(
+        provider="openai",
+        model_id="deepseek-flash",
+        base_url="http://gw.test/v1",
+        thinking_level="high",
+        replay_reasoning=replays,
+    )
+    harness = await build_model(tmp_path, monkeypatch, config)
+
+    assert harness.model.replay_reasoning is replays
+    assert harness.model.reasoning is True
+
+
+@pytest.mark.asyncio
+async def test_the_harness_model_does_not_replay_reasoning_unless_asked(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+):
+    config = CliConfig(provider="openai", model_id="deepseek-flash", thinking_level="high")
+
+    harness = await build_model(tmp_path, monkeypatch, config)
+
+    assert harness.model.replay_reasoning is False

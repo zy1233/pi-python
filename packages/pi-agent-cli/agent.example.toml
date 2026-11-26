@@ -51,6 +51,15 @@ api_key_env = "REAL_LLM_API_KEY" # key for `provider` only; other providers use 
 # for non-2.5 models (`gemini-2.5*` keeps `reasoning_effort`); set `thinking_format = "gemini"`
 # explicitly when serving Gemini through a gateway or proxy.
 # thinking_format = "gemini"
+# Send the thinking of the earlier turns back to the endpoint, as the field `reasoning_content` on
+# each assistant message. A model that thinks across tool calls (DeepSeek, and the gateways that
+# serve it, with `provider = "openai"` or `provider = "deepseek"`) loses its own line of thought
+# when none of it comes back, and works out the same conclusions again in every turn. Only while
+# thinking is on (`thinking_level` is not "off"). Off unless you set it: the OpenAI API and some
+# gateways refuse an unknown field of a message. If a gateway does, the agent notices (400 or 422
+# that names `reasoning_content`), asks again without the thinking, and sends none to that model
+# until it restarts. DeepSeek's own API needs no setting: it always gets the thinking back.
+# replay_reasoning = true
 # The context window of the model, in tokens (a whole number). With it the agent tells a client how
 # full the context is (ACP `usage_update`; the VS Code extension shows it as a Context row), and
 # compaction (see `auto_compact`) starts before the window is full. Unset: the agent sends no
@@ -61,7 +70,8 @@ api_key_env = "REAL_LLM_API_KEY" # key for `provider` only; other providers use 
 # Extra models for the TUI `/model` picker (ACP session config option "model").
 # `[model]` above is always offered first; unset fields inherit from it, but
 # base_url / api_key_env / supports_images only when `provider` is unset or the same.
-# `context_window` is never inherited: a window belongs to one model, so set it in each entry.
+# `context_window`, `thinking_format` and `replay_reasoning` are never inherited: each belongs to
+# one model, so set it in each entry that needs it.
 # [[models]]
 # id = "deepseek-ai/DeepSeek-V4-Pro"
 # name = "DeepSeek V4 Pro"

@@ -135,8 +135,9 @@ class ModelChoice:
     In ``[[models]]`` entries unset fields inherit from the default ``[model]`` table, but
     ``base_url`` / ``api_key_env`` / ``supports_images`` are only inherited when ``provider``
     is unset or equals the default provider (credentials never leak across providers).
-    ``context_window`` and ``thinking_format`` are never inherited: both belong to one model,
-    and another model of the same provider or gateway can have another size or protocol.
+    ``context_window``, ``thinking_format`` and ``replay_reasoning`` are never inherited: each
+    belongs to one model, and another model of the same provider or gateway can have another size,
+    protocol, or idea of the field ``reasoning_content``.
     """
 
     id: str
@@ -150,6 +151,9 @@ class ModelChoice:
     # reaches ``Model.context_window`` (``factory.model_for_choice``).
     context_window: int | None = None
     thinking_format: ThinkingFormat | None = None
+    # Send the thinking of earlier assistant messages back to the endpoint
+    # (``Model.replay_reasoning``).
+    replay_reasoning: bool = False
 
 
 # The largest ``context_window`` that is accepted. It is far above any model that exists. A
@@ -263,6 +267,9 @@ class CliConfig:
     # for a thinking level is taken as saying so (``model_reasoning``).
     reasoning: bool | None = None
     thinking_format: ThinkingFormat | None = None
+    # ``[model] replay_reasoning``: send the thinking of earlier assistant messages back to the
+    # endpoint of the default model (``Model.replay_reasoning``). Off unless the user asks.
+    replay_reasoning: bool = False
     skills_dirs: tuple[str, ...] = ()
     include_builtin_skills: bool = True
     agent_command: str | None = None
@@ -309,6 +316,7 @@ class CliConfig:
             supports_images=self.supports_images,
             context_window=self.context_window,
             thinking_format=self.thinking_format,
+            replay_reasoning=self.replay_reasoning,
         )
 
     def model_choices(self) -> tuple[ModelChoice, ...]:
@@ -337,6 +345,7 @@ class CliConfig:
                     # Not inherited, not even from the same provider: see ``ModelChoice``.
                     context_window=item.context_window,
                     thinking_format=item.thinking_format,
+                    replay_reasoning=item.replay_reasoning,
                 )
             )
         return tuple(out)
@@ -506,6 +515,17 @@ def _from_toml(data: dict[str, Any]) -> CliConfig:
         thinking_format_raw = data.get("thinking_format")
     thinking_format = _model_thinking_format(thinking_format_raw, "[model]")
 
+    def _model_replay_reasoning(value: object, where: str) -> bool:
+        replay, note = _replay_reasoning(value, where)
+        if note is not None:
+            format_notes.append(note)
+        return replay
+
+    replay_reasoning_raw = model.get("replay_reasoning")
+    if replay_reasoning_raw is None:
+        replay_reasoning_raw = data.get("replay_reasoning")
+    replay_reasoning = _model_replay_reasoning(replay_reasoning_raw, "[model]")
+
     agent_command = agent.get("command")
     if agent_command is not None:
         agent_command = str(agent_command).strip() or None
@@ -545,6 +565,9 @@ def _from_toml(data: dict[str, Any]) -> CliConfig:
                     thinking_format=_model_thinking_format(
                         item.get("thinking_format"), f'the "{model_id}" entry of [[models]]'
                     ),
+                    replay_reasoning=_model_replay_reasoning(
+                        item.get("replay_reasoning"), f'the "{model_id}" entry of [[models]]'
+                    ),
                 )
             )
 
@@ -580,6 +603,7 @@ def _from_toml(data: dict[str, Any]) -> CliConfig:
         context_window=context_window,
         reasoning=reasoning,
         thinking_format=thinking_format,
+        replay_reasoning=replay_reasoning,
         skills_dirs=skills_dirs,
         include_builtin_skills=include_builtin_skills,
         agent_command=agent_command,
@@ -890,6 +914,19 @@ def _thinking_format(value: object, where: str) -> tuple[ThinkingFormat | None, 
         if normalized in _VALID_THINKING_FORMATS:
             return normalized, None  # type: ignore[return-value]
     return None, f'thinking_format of {where} must be "openai" or "gemini". It is ignored.'
+
+
+def _replay_reasoning(value: object, where: str) -> tuple[bool, str | None]:
+    """The ``replay_reasoning`` of one model: ``(on, None)``, or ``(False, note)``.
+
+    Only ``true`` and ``false`` are values. It is a setting that sends more to the endpoint, so
+    a text such as ``"yes"`` is not read as ``true``: it is dropped, and the note says so.
+    """
+    if value is None:
+        return False, None
+    if isinstance(value, bool):
+        return value, None
+    return False, f"replay_reasoning of {where} must be true or false. It is ignored."
 
 
 def _as_bool(value: object, default: bool) -> bool:

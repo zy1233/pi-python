@@ -41,7 +41,8 @@ API_KEY = (
 MODEL_ID = os.environ.get("SMOKE_MODEL", "Qwen/Qwen3-8B")
 # "deepseek" preserves reasoning_content thinking on OpenAI-compatible
 # gateways (and sends it back on DeepSeek's own API); set SMOKE_PROVIDER=openai to exercise
-# the "openai" provider (a ChatOpenAI that keeps reasoning_content too, sends nothing back).
+# the "openai" provider (a ChatOpenAI that keeps reasoning_content too; it sends nothing back
+# unless Model.replay_reasoning is on, and scripts/probe_reasoning_replay.py tests that).
 PROVIDER = os.environ.get("SMOKE_PROVIDER", "deepseek")
 
 
