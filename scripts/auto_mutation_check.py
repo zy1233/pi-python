@@ -14,6 +14,7 @@
     python scripts/auto_mutation_check.py --only "comment " # only the rule for a shell comment (M-06)
     python scripts/auto_mutation_check.py --only "network name" # only the names of decision 7
     python scripts/auto_mutation_check.py --only "unknown judge" # only the notice for an [auto] model id that no entry has
+    python scripts/auto_mutation_check.py --only "mounts: " # only the mount points of the shell (Git Bash: /c/work/app)
 
 Each mutation is an exact text replacement in one source file: ``auto_rules.py`` (or
 ``auto_reasons.py``) for the rules, and for the wiring ``auto_mode.py``, ``agent.py``,
@@ -59,6 +60,7 @@ again after any change to these files; a text that no longer matches is an error
 from __future__ import annotations
 
 import argparse
+import os
 import shutil
 import subprocess
 import sys
@@ -4043,6 +4045,136 @@ UNKNOWN_JUDGE_MUTATIONS: list[Mutation] = [
     ),
 ]
 
+_MOUNT_TESTS = (
+    _CLI_TESTS + "test_auto_shell_mounts.py",
+    _CLI_TESTS + "test_auto_mode_checks.py",
+    _CLI_TESTS + "test_auto_wiring.py::test_the_mount_points_of_the_shell_reach_the_rules",
+)
+
+
+def mt(name: str, old: str, new: str, *, file: str = "auto_rules.py") -> Mutation:
+    """A mutation of the mount points of the shell (Git Bash reads ``/c/work/app`` as
+    ``C:\\work\\app``): the path reading in ``auto_rules.py`` and the mount points of the shell in
+    ``auto_mode.py``. The tests of the mounts run, and the wiring test that holds the step from
+    the session to the rules."""
+    return Mutation(f"mounts: {name}", old, new, None, file, "cli", _MOUNT_TESTS)
+
+
+MOUNT_MUTATIONS: list[Mutation] = [
+    # ---- the rules read a path through a mount point (auto_rules.py)
+    mt(
+        "no path is read through a mount point",
+        '        if not self.mounts or not text.startswith("/"):\n            return text\n',
+        "        if True:\n            return text\n",
+    ),
+    mt(
+        "the name of a mount point is case sensitive",
+        "        folder = self.mounts.get(name.lower())\n",
+        "        folder = self.mounts.get(name)\n",
+    ),
+    mt(
+        "a dotdot above the mount point is clamped",
+        '            if depth < 0:\n                raise _Floor(Reason.OUTSIDE_PROJECT, "path.mount_dotdot")\n',
+        "            if depth < 0:\n                depth = 0\n                continue\n",
+    ),
+    mt(
+        "a dotdot is not counted",
+        '            depth += -1 if part == ".." else 1\n',
+        "            depth += 1\n",
+    ),
+    mt(
+        "the folder of the mount is not used",
+        "        return os.path.join(folder, *parts)\n",
+        "        return os.path.join(os.sep, *parts)\n",
+    ),
+    mt(
+        "a mount point of more than one name is read",
+        '            if re.fullmatch(r"/[^/]+", prefix)\n',
+        '            if prefix.startswith("/")\n',
+    ),
+    mt(
+        "a mount point with no name is read",
+        '            if re.fullmatch(r"/[^/]+", prefix)\n',
+        '            if re.fullmatch(r"/[^/]*", prefix)\n',
+    ),
+    mt(
+        "a word of a command is not read through a mount point",
+        "    text = env.host_path(text)\n    return text if os.path.isabs(text) else os.path.join(cwd, text)\n",
+        "    return text if os.path.isabs(text) else os.path.join(cwd, text)\n",
+    ),
+    mt(
+        "cd is not read through a mount point",
+        "        joined = _joined(target.text, cwd, env)\n        real = env.fs.realpath(joined)\n",
+        "        joined = target.text if os.path.isabs(target.text) else os.path.join(cwd, target.text)\n        real = env.fs.realpath(joined)\n",
+    ),
+    mt(
+        "the folder of a mount is not looked at",
+        "    folders.extend(folder for _, folder in ctx.shell_mounts)\n",
+        "    pass\n",
+    ),
+    mt(
+        "the context drops the mount points",
+        "        shell_mounts=tuple(shell_mounts),\n    )\n",
+        "        shell_mounts=(),\n    )\n",
+    ),
+    # ---- the mount points of the shell (auto_mode.py)
+    mt(
+        "no shell has mount points",
+        "    if any(_DRIVE_SHELL_FOLDER.fullmatch(folder) for folder in folders):\n        return DRIVE_MOUNTS\n",
+        "    if False:\n        return DRIVE_MOUNTS\n",
+        file="auto_mode.py",
+    ),
+    mt(
+        "every shell has mount points",
+        "    if any(_DRIVE_SHELL_FOLDER.fullmatch(folder) for folder in folders):\n        return DRIVE_MOUNTS\n",
+        "    if True:\n        return DRIVE_MOUNTS\n",
+        file="auto_mode.py",
+    ),
+    mt(
+        "a folder name that only holds a known name counts",
+        "    if any(_DRIVE_SHELL_FOLDER.fullmatch(folder) for folder in folders):\n",
+        "    if any(_DRIVE_SHELL_FOLDER.search(folder) for folder in folders):\n",
+        file="auto_mode.py",
+    ),
+    mt(
+        "a host that is not Windows has mount points",
+        "    if not _host_is_windows():\n        return ()\n",
+        "    if False:\n        return ()\n",
+        file="auto_mode.py",
+    ),
+    mt(
+        "a shell that cannot be found has mount points",
+        "    except Exception:\n        return ()\n    folders = shell.replace",
+        "    except Exception:\n        return DRIVE_MOUNTS\n    folders = shell.replace",
+        file="auto_mode.py",
+    ),
+    mt(
+        "only the drive c has a mount point",
+        '    (f"/{letter}", f"{letter.upper()}:\\\\") for letter in string.ascii_lowercase\n',
+        '    (f"/{letter}", f"{letter.upper()}:\\\\") for letter in "c"\n',
+        file="auto_mode.py",
+    ),
+    mt(
+        "a mount point leads to the current folder of a drive",
+        '    (f"/{letter}", f"{letter.upper()}:\\\\") for letter in string.ascii_lowercase\n',
+        '    (f"/{letter}", f"{letter.upper()}:") for letter in string.ascii_lowercase\n',
+        file="auto_mode.py",
+    ),
+    mt(
+        "the folder of a mount is not named when it is not absolute",
+        '    if not all(is_absolute_folder(folder) for _, folder in ctx.shell_mounts):\n        problems.append("A mount point of the shell leads to a folder that is not absolute.")\n',
+        "",
+        file="auto_mode.py",
+    ),
+    # ---- the session gives the mount points of its shell to the rules (auto_mode.py)
+    mt(
+        "the session gives no mount points to the rules",
+        "            shell_mounts=shell_mounts(self._resolve_shell),\n",
+        "            shell_mounts=(),\n",
+        file="auto_mode.py",
+    ),
+]
+
 
 def apply(source: str, mutation: Mutation) -> str:
     count = source.count(mutation.old)
@@ -4097,8 +4229,15 @@ def run_one(mutation: Mutation, work: Path) -> tuple[str, bool, str]:
         (directory / "sitecustomize.py").write_text(
             "import importlib\nimportlib.import_module('pi_agent_core')\n", encoding="utf-8"
         )
-    env = {"PYTHONPATH": str(directory), "PATH": __import__("os").environ.get("PATH", "")}
+    env = {"PYTHONPATH": str(directory), "PATH": os.environ.get("PATH", "")}
     env["HOME"] = str(directory)
+    if sys.platform == "win32":
+        # Python cannot start asyncio on Windows without these (WinError 10106), and ``~`` is
+        # read from ``USERPROFILE`` there.
+        env["USERPROFILE"] = str(directory)
+        for name in ("SYSTEMROOT", "WINDIR", "COMSPEC", "PATHEXT"):
+            if name in os.environ:
+                env[name] = os.environ[name]
     if mutation.package == "scripts":
         env["AUTO_EVAL_SCRIPT"] = str(package / mutation.file)
     tests = [_in_copy(test, base, package) for test in tests_of(mutation)]
@@ -4133,7 +4272,8 @@ def run_one(mutation: Mutation, work: Path) -> tuple[str, bool, str]:
         failed = [
             line for line in result.stdout.splitlines() if line.startswith(("FAILED", "ERROR"))
         ]
-        detail = failed[0][:150] if failed else result.stdout.strip().splitlines()[-1][:150]
+        lines = (result.stdout.strip() or result.stderr.strip()).splitlines()
+        detail = failed[0][:150] if failed else (lines[-1][:150] if lines else "no output")
     return mutation.name, result.returncode != 0, detail
 
 
@@ -4154,6 +4294,7 @@ def main(argv: list[str] | None = None) -> int:
         *NETWORK_MUTATIONS,
         *MODEL_MUTATIONS,
         *UNKNOWN_JUDGE_MUTATIONS,
+        *MOUNT_MUTATIONS,
     ]
     chosen = [mut for mut in everything if args.only in mut.name]
     if args.list:

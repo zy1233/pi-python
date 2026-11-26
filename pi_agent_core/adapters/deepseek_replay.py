@@ -12,8 +12,13 @@ The shape follows pi's own OpenAI-compatible provider for DeepSeek: the thinking
 an empty string, since the API wants the field on all of them. A tool-call message also gets a
 string ``content`` rather than ``null``, as DeepSeek's own samples send it.
 
-Only the request to DeepSeek's own API while thinking is on is changed (``resolve_chat_model``
-decides). A gateway that serves DeepSeek models has its own idea of both and may refuse the field.
+Only the request to DeepSeek's own API while thinking is on is changed by default
+(``resolve_chat_model`` decides). A gateway that serves DeepSeek models has its own idea of both
+and may refuse the field, so it gets the thinking only when the user asks
+(``Model.replay_reasoning``, ``replay_reasoning`` in ``agent.toml``). The request to such a
+gateway has the same shape: the OpenAI-format chat class of ``provider = "openai"`` uses
+``apply_reasoning_replay`` and ``flatten_assistant_content`` too (``openai_reasoning``), and
+``langchain_stream`` asks again without the thinking when the gateway refuses it.
 """
 
 from __future__ import annotations
@@ -59,6 +64,23 @@ def apply_reasoning_replay(messages: Sequence[BaseMessage], wire: list[dict[str,
         if entry.get("tool_calls") and entry.get("content") is None:
             entry["content"] = ""
     return True
+
+
+def flatten_assistant_content(wire: list[dict[str, Any]]) -> None:
+    """Turn the list content of each assistant message into plain text, in place.
+
+    ``ChatDeepSeek`` does this itself: DeepSeek's API wants a string for the content of an
+    assistant message, not a list of blocks. The text blocks are joined; a list with none
+    (a message of thinking only) gives an empty string.
+    """
+    for entry in wire:
+        content = entry.get("content")
+        if entry.get("role") == "assistant" and isinstance(content, list):
+            entry["content"] = "".join(
+                str(block.get("text", ""))
+                for block in content
+                if isinstance(block, dict) and block.get("type") == "text"
+            )
 
 
 @functools.cache

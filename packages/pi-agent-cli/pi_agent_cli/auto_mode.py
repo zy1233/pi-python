@@ -30,6 +30,8 @@ import asyncio
 import dataclasses
 import logging
 import os
+import re
+import string
 import time
 from collections import Counter, OrderedDict
 from collections.abc import Callable, Mapping, Sequence
@@ -175,6 +177,46 @@ def shell_problems(resolve: Callable[[str | None], ShellConfig] | None = None) -
     return []
 
 
+# Git Bash and MSYS2 mount each drive of Windows as a folder of the root: ``C:`` is ``/c``.
+DRIVE_MOUNTS: tuple[tuple[str, str], ...] = tuple(
+    (f"/{letter}", f"{letter.upper()}:\\") for letter in string.ascii_lowercase
+)
+
+# A folder name in the path of a shell that is Git for Windows or MSYS2 (``...\Git\bin\bash.exe``,
+# ``C:\msys64\usr\bin\bash.exe``). Any other name does not count: a shell that is not known is
+# read as the host reads it, and that is the side that asks.
+_DRIVE_SHELL_FOLDER = re.compile(r"(portable)?git([-_ ]?for[-_ ]?windows)?|msys(2|32|64)?")
+
+
+def _host_is_windows() -> bool:
+    return os.name == "nt"
+
+
+def shell_mounts(
+    resolve: Callable[[str | None], ShellConfig] | None = None,
+) -> tuple[tuple[str, str], ...]:
+    """The mount points of the shell of the Bash tool that lead to a folder of the host.
+
+    The model writes the project folder as the shell reads it: ``cd /c/work/app`` in Git Bash.
+    On Windows the rules must read it that way too. If they do not, a path of the project looks
+    like a path outside it, and each of these commands asks (``path.outside_project``). Git Bash
+    and MSYS2 have a mount point for each drive (``DRIVE_MOUNTS``). The ``bash.exe`` of WSL has
+    none (it keeps the drives in ``/mnt/c``), and Cygwin has none (``/cygdrive/c``), so for them
+    a path is read as the host reads it. The shell is known by the folders in its path. A shell
+    that is not known has no mount points, and neither has any host that is not Windows.
+    """
+    if not _host_is_windows():
+        return ()
+    try:
+        shell = (resolve or get_shell_config)(None).shell
+    except Exception:
+        return ()
+    folders = shell.replace("/", "\\").lower().split("\\")[:-1]
+    if any(_DRIVE_SHELL_FOLDER.fullmatch(folder) for folder in folders):
+        return DRIVE_MOUNTS
+    return ()
+
+
 def context_problems(ctx: AutoContext) -> list[str]:
     """Why the rules cannot trust *ctx*. Every folder in it has to be absolute (a relative one
     is read from the folder of the process, not the project), and the project folder has to be
@@ -196,6 +238,8 @@ def context_problems(ctx: AutoContext) -> list[str]:
     )
     if not all(is_absolute_folder(path) for path in ctx.protected_paths):
         problems.append("A protected file of the project is not an absolute path.")
+    if not all(is_absolute_folder(folder) for _, folder in ctx.shell_mounts):
+        problems.append("A mount point of the shell leads to a folder that is not absolute.")
     return problems
 
 
@@ -605,6 +649,7 @@ class AutoSession:
             protected_globs=(*default_protected_globs(), *auto.protected),
             config=self._get_config(),
             origin_cwd=origin_cwd,
+            shell_mounts=shell_mounts(self._resolve_shell),
         )
 
     def _check_blocking(self) -> tuple[str, ...]:

@@ -15,11 +15,19 @@ chunk into a message chunk, the thinking of the chunk is put into
 ``additional_kwargs["reasoning_content"]``, where ``langchain_stream`` reads it. A chunk with
 no such field is not touched, so api.openai.com is not affected.
 
-Only the streamed answer is changed (the adapter always streams). The request is not changed:
-nothing is sent back, and ``convert_to_langchain`` already leaves thinking blocks out of a
-request for this provider (``ChatOpenAI`` drops the ``thinking`` content blocks). A provider
-that wants the thinking back (DeepSeek's own API) is ``provider = "deepseek"``
+Only the streamed answer is changed (the adapter always streams). The request is not changed
+unless the user asks: nothing is sent back, and ``convert_to_langchain`` already leaves thinking
+blocks out of a request for this provider (``ChatOpenAI`` drops the ``thinking`` content blocks).
+A provider that wants the thinking back (DeepSeek's own API) is ``provider = "deepseek"``
 (``deepseek_replay``).
+
+A model that thinks across tool calls (DeepSeek, and the gateways that serve it) loses its own
+line of thought when none of it comes back: each turn it works out the same conclusions again. A
+gateway that takes ``reasoning_content`` on an assistant message can get it: with
+``Model.replay_reasoning`` on (``replay_reasoning`` in ``agent.toml``) and while thinking is asked
+for, the chat class puts the thinking of each assistant message into the request, in the shape of
+``provider = "deepseek"`` (``deepseek_replay``). The OpenAI API itself refuses unknown fields of a
+message, so this is opt-in, and ``langchain_stream`` asks again without it when a gateway refuses.
 """
 
 from __future__ import annotations
@@ -28,6 +36,11 @@ import functools
 from typing import Any, Literal
 
 from langchain_core.messages import AIMessageChunk
+
+from pi_agent_core.adapters.deepseek_replay import (
+    apply_reasoning_replay,
+    flatten_assistant_content,
+)
 
 REASONING_CONTENT = "reasoning_content"
 GOOGLE_THOUGHT_FLAG = "_google_thought"
@@ -211,18 +224,34 @@ class ThoughtTagSplitter:
 
 @functools.cache
 def reasoning_chat_openai() -> type:
-    """``ChatOpenAI`` that keeps the thinking that a gateway streams.
+    """``ChatOpenAI`` that keeps the thinking that a gateway streams, and that can send it back.
 
     Built on first use: ``langchain-openai`` is an optional dependency.
     """
     from langchain_openai import ChatOpenAI
 
     class ReasoningChatOpenAI(ChatOpenAI):  # type: ignore[misc]
+        # Whether this request carries the thinking of the earlier assistant messages. The
+        # adapter decides (``langchain_stream.resolve_chat_model``), and it can turn it off
+        # again when the gateway refuses the field.
+        replay_reasoning: bool = False
+
         # ``*args`` and ``**kwargs``: this is a private LangChain method, and a later release
         # may add a parameter. It is passed on as it is.
         def _convert_chunk_to_generation_chunk(self, chunk: Any, *args: Any, **kwargs: Any) -> Any:
             generation_chunk = super()._convert_chunk_to_generation_chunk(chunk, *args, **kwargs)
             keep_streamed_reasoning(chunk, generation_chunk)
             return generation_chunk
+
+        def _get_request_payload(
+            self, input_: Any, *, stop: list[str] | None = None, **kwargs: Any
+        ) -> dict:
+            payload = super()._get_request_payload(input_, stop=stop, **kwargs)
+            # The Responses API has ``input``, not ``messages``: nothing to add there.
+            if self.replay_reasoning and isinstance(payload.get("messages"), list):
+                sent = self._convert_input(input_).to_messages()
+                if apply_reasoning_replay(sent, payload["messages"]):
+                    flatten_assistant_content(payload["messages"])
+            return payload
 
     return ReasoningChatOpenAI

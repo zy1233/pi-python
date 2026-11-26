@@ -138,9 +138,13 @@ def convert_to_langchain(
                     content.append({"type": "text", "text": "".join(text_parts)})
             else:
                 content = "".join(text_parts) if text_parts else ""
-            # DeepSeek wants its thinking back as ``reasoning_content`` (see deepseek_replay);
-            # the chat model decides whether this request sends it.
-            kept = reasoning_text(msg.content) if provider == "deepseek" else ""
+            # DeepSeek wants its thinking back as ``reasoning_content`` (see deepseek_replay), and
+            # a gateway of the OpenAI format can take it when the user asks for that
+            # (``Model.replay_reasoning``). The chat model decides whether this request sends it.
+            replays = provider == "deepseek" or (
+                provider == "openai" and model is not None and model.replay_reasoning
+            )
+            kept = reasoning_text(msg.content) if replays else ""
             extra = {REASONING_CONTENT: kept} if kept else {}
             if tool_calls:
                 ai = AIMessage(content=content, tool_calls=tool_calls, additional_kwargs=extra)
