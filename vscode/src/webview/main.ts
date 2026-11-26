@@ -787,57 +787,134 @@ function renderPendingSteers(): void {
   pendingSteerBar.append(list);
 }
 
-function renderBtwTurn(turn: BtwTurnView): HTMLElement {
-  const headActions = el("div", { class: "btw-turn-actions" });
-  if (turn.status === "streaming") {
-    headActions.append(button("Stop", () => send({ type: "btwCancel", btwId: turn.id }), "secondary btw-stop-btn"));
-  }
-  if (turn.answer !== "") {
-    headActions.append(copyButton(turn.answer, "Copy BTW answer", "btw-copy", "Copy"));
-  }
-  const qRow = el(
-    "div",
-    { class: "btw-q-row" },
-    el("div", { class: "btw-q", text: turn.question }),
-    headActions,
-  );
-  const parts: Node[] = [qRow];
-  if (turn.thought !== "" && state.showThinking !== false) {
-    const thoughtDetails = el(
-      "details",
-      { class: "thought btw-thought" },
-      el("summary", { text: "Thinking" }),
-      el("div", { class: "thought-body", text: turn.thought }),
-    );
-    parts.push(thoughtDetails);
-  }
+interface BtwTurnDom {
+  article: HTMLElement;
+  stopBtn: HTMLButtonElement;
+  copyBtn: HTMLButtonElement;
+  thoughtDetails: HTMLElement;
+  thoughtBody: HTMLElement;
+  answerEl: HTMLElement;
+  errorEl: HTMLElement;
+  renderedAnswer: string;
+  renderedThought: string;
+  renderedStatus: BtwTurnView["status"] | "";
+  renderedError: string;
+  renderedShowThinking: boolean;
+}
+
+const btwTurnNodes = new Map<string, BtwTurnDom>();
+
+function createBtwTurnDom(turn: BtwTurnView): BtwTurnDom {
+  const stopBtn = button("Stop", () => send({ type: "btwCancel", btwId: turn.id }), "secondary btw-stop-btn");
+  const copyBtn = copyButton(turn.answer, "Copy BTW answer", "btw-copy", "Copy");
+  const headActions = el("div", { class: "btw-turn-actions" }, stopBtn, copyBtn);
+  const qRow = el("div", { class: "btw-q-row" }, el("div", { class: "btw-q", text: turn.question }), headActions);
+  const thoughtBody = el("div", { class: "thought-body" });
+  const thoughtDetails = el("details", { class: "thought btw-thought" }, el("summary", { text: "Thinking" }), thoughtBody);
   const answerEl = el("div", { class: "btw-a body" });
-  if (turn.answer !== "") {
-    fill(answerEl, turn.answer);
-  } else if (turn.status === "streaming") {
-    answerEl.append(el("span", { class: "btw-status-text", text: "Thinking…" }));
-  } else if (turn.status === "cancelled") {
-    answerEl.append(el("span", { class: "btw-status-text", text: "Cancelled." }));
+  answerEl.setAttribute("aria-live", "polite");
+  const errorEl = el("div", { class: "btw-error" });
+  const article = el(
+    "article",
+    { class: `btw-turn ${turn.status}`, dataset: { btwId: turn.id } },
+    qRow,
+    thoughtDetails,
+    answerEl,
+    errorEl,
+  );
+  return {
+    article,
+    stopBtn,
+    copyBtn,
+    thoughtDetails,
+    thoughtBody,
+    answerEl,
+    errorEl,
+    renderedAnswer: "\0",
+    renderedThought: "\0",
+    renderedStatus: "",
+    renderedError: "\0",
+    renderedShowThinking: true,
+  };
+}
+
+function patchBtwTurnDom(dom: BtwTurnDom, turn: BtwTurnView): void {
+  const showThinking = state.showThinking !== false;
+  if (dom.renderedStatus !== turn.status) {
+    dom.article.className = `btw-turn ${turn.status}`;
+    dom.stopBtn.hidden = turn.status !== "streaming";
   }
-  parts.push(answerEl);
-  if (turn.status === "error" && turn.error) {
-    parts.push(el("div", { class: "btw-error", text: turn.error }));
+  const hasAnswer = turn.answer !== "";
+  dom.copyBtn.hidden = !hasAnswer;
+  if (dom.renderedAnswer !== turn.answer) {
+    dom.copyBtn.dataset.copy = turn.answer;
   }
-  return el("article", { class: `btw-turn ${turn.status}`, dataset: { btwId: turn.id } }, ...parts);
+  if (dom.renderedThought !== turn.thought || dom.renderedShowThinking !== showThinking) {
+    const showThoughtBox = turn.thought !== "" && showThinking;
+    dom.thoughtDetails.hidden = !showThoughtBox;
+    if (showThoughtBox && dom.renderedThought !== turn.thought) {
+      dom.thoughtBody.textContent = turn.thought;
+    }
+    dom.renderedThought = turn.thought;
+    dom.renderedShowThinking = showThinking;
+  }
+  if (dom.renderedAnswer !== turn.answer || dom.renderedStatus !== turn.status) {
+    if (hasAnswer) {
+      fill(dom.answerEl, turn.answer);
+    } else if (turn.status === "streaming") {
+      dom.answerEl.replaceChildren(el("span", { class: "btw-status-text", text: "Thinking…" }));
+    } else if (turn.status === "cancelled") {
+      dom.answerEl.replaceChildren(el("span", { class: "btw-status-text", text: "Cancelled." }));
+    } else {
+      dom.answerEl.replaceChildren();
+    }
+    dom.renderedAnswer = turn.answer;
+  }
+  const errText = turn.status === "error" && turn.error ? turn.error : "";
+  if (dom.renderedError !== errText) {
+    dom.errorEl.hidden = errText === "";
+    dom.errorEl.textContent = errText;
+    dom.renderedError = errText;
+  }
+  dom.renderedStatus = turn.status;
 }
 
 function renderBtwPanel(): void {
   const open = btwState !== null && btwState.turns.length > 0;
+  const wasHidden = btwPanel.hidden;
+  const wasNearBottom = wasHidden || btwTurnsEl.scrollHeight - btwTurnsEl.scrollTop - btwTurnsEl.clientHeight <= 40;
   btwPanel.hidden = !open;
-  btwTurnsEl.replaceChildren();
-  if (!open || !btwState) return;
+  if (!open || !btwState) {
+    if (btwTurnNodes.size > 0) {
+      btwTurnNodes.clear();
+      btwTurnsEl.replaceChildren();
+    }
+    return;
+  }
+  const activeIds = new Set(btwState.turns.map((turn) => turn.id));
+  for (const [id, dom] of btwTurnNodes) {
+    if (!activeIds.has(id)) {
+      dom.article.remove();
+      btwTurnNodes.delete(id);
+    }
+  }
+  let addedNewTurn = false;
   for (const turn of btwState.turns) {
-    btwTurnsEl.append(renderBtwTurn(turn));
+    let dom = btwTurnNodes.get(turn.id);
+    if (!dom) {
+      dom = createBtwTurnDom(turn);
+      btwTurnNodes.set(turn.id, dom);
+      btwTurnsEl.append(dom.article);
+      addedNewTurn = true;
+    }
+    patchBtwTurnDom(dom, turn);
   }
   const canAsk = state.status === "ready" || state.status === "busy";
   btwInput.disabled = !canAsk;
   btwAskButton.disabled = !canAsk;
-  btwTurnsEl.scrollTop = btwTurnsEl.scrollHeight;
+  if (wasNearBottom || addedNewTurn) {
+    btwTurnsEl.scrollTop = btwTurnsEl.scrollHeight;
+  }
 }
 
 function renderComposer(): void {

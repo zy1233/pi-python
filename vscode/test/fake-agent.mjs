@@ -307,6 +307,20 @@ async function runPrompt(ctx, sessionId, prompt) {
     cancelled.delete(sessionId);
     return "cancelled";
   }
+  if (prompt === "steer-idle-race") {
+    // Simulate agent phase returning to idle before prompt() response reaches the client.
+    busySessions.delete(sessionId);
+    await notify(text(sessionId, "agent_message_chunk", "finishing"));
+    await sleep(60);
+    return "end_turn";
+  }
+  if (prompt === "steer-unconsumed-end") {
+    await notify(text(sessionId, "agent_message_chunk", "working"));
+    for (let i = 0; i < 400 && (pendingSteers.get(sessionId)?.length ?? 0) === 0; i++) await sleep(10);
+    // End turn without consuming or clearing the queued steer so controller restores it at finishTurn.
+    pendingSteers.set(sessionId, []);
+    return "end_turn";
+  }
   if (prompt.startsWith("file:")) return runFileTool(ctx, sessionId, JSON.parse(prompt.slice("file:".length)));
   if (prompt === "refuse") return "refusal";
   await notify(text(sessionId, "agent_message_chunk", "echo: " + prompt));
@@ -449,7 +463,9 @@ const app = acp
   })
   .onRequest("_pi/session/steer", raw, async (ctx) => {
     record(`pi/session/steer ${ctx.params.sessionId}`);
-    if (env.FAKE_STEER_BTW !== "1") throw new acp.RequestError(-32601, "Method not found");
+    if (env.FAKE_STEER_BTW !== "1" || env.FAKE_STEER_METHOD_NOT_FOUND === "1") {
+      throw new acp.RequestError(-32601, "Method not found");
+    }
     const sessionId = String(ctx.params.sessionId);
     const textVal = (ctx.params.prompt ?? []).map((b) => (b.type === "text" ? b.text : "")).join("");
     const steerId = typeof ctx.params.steerId === "string" ? ctx.params.steerId : `st-${++steerSeq}`;
@@ -472,13 +488,24 @@ const app = acp
     if (env.FAKE_STEER_BTW !== "1") throw new acp.RequestError(-32601, "Method not found");
     const sessionId = String(ctx.params.sessionId);
     const btwId = String(ctx.params.btwId);
-    const historyLen = Array.isArray(ctx.params.history) ? ctx.params.history.length : 0;
+    const history = Array.isArray(ctx.params.history) ? ctx.params.history : [];
+    const historyBytes = history.reduce((sum, item) => sum + Buffer.byteLength(String(item.text ?? ""), "utf8"), 0);
+    if (historyBytes > 32 * 1024) {
+      throw new acp.RequestError(-32602, "btw history exceeds 32768 bytes");
+    }
+    const historyLen = history.length;
     if (question === "hang-btw") {
       await ctx.client.notify("_pi/btw_update", { sessionId, btwId, kind: "text_delta", delta: "partial..." });
       for (let i = 0; i < 400 && !cancelledBtw.has(btwId); i++) await sleep(10);
       cancelledBtw.delete(btwId);
       await ctx.client.notify("_pi/btw_update", { sessionId, btwId, kind: "done", delta: "", stopReason: "cancelled" });
       return { sessionId, btwId, stopReason: "cancelled", error: null };
+    }
+    if (question === "big-btw") {
+      const payload = "x".repeat(20 * 1024);
+      await ctx.client.notify("_pi/btw_update", { sessionId, btwId, kind: "text_delta", delta: payload });
+      await ctx.client.notify("_pi/btw_update", { sessionId, btwId, kind: "done", delta: "", stopReason: "end_turn" });
+      return { sessionId, btwId, stopReason: "end_turn", error: null };
     }
     await ctx.client.notify("_pi/btw_update", { sessionId, btwId, kind: "text_delta", delta: `btw(${historyLen}): ` });
     await ctx.client.notify("_pi/btw_update", { sessionId, btwId, kind: "text_delta", delta: question });

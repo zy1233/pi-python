@@ -14,7 +14,12 @@ import type {
   SessionNotification,
 } from "./acp-connection.js";
 import { AgentProcess, type StopTimings } from "./agent-process.js";
-import { parseAvailableCommandsUpdate, sameSlashCommands, type SlashCommandInfo } from "./composer.js";
+import {
+  parseAvailableCommandsUpdate,
+  resolveClientSlashCommand,
+  sameSlashCommands,
+  type SlashCommandInfo,
+} from "./composer.js";
 import { DiffTracker, type DiffInfo } from "./diff-tracker.js";
 import { classifyAuthRequired, classifyTurnFailure, failureNotice, setupText } from "./first-run.js";
 import type { Host, McpServerConfig } from "./host.js";
@@ -90,6 +95,34 @@ const SETUP_FALLBACK_ARGS = ["--setup"];
 const MODE_CONFIRM_MS = 5000;
 const BTW_COMMAND_RE = /^\s*\/btw(?:\s+([\s\S]*))?$/i;
 const MAX_BTW_HISTORY_TURNS = 10;
+const MAX_BTW_HISTORY_BYTES = 32 * 1024;
+
+/** Builds `/btw` follow-up history capped by both turn count and UTF-8 bytes (newest kept). */
+export function buildTrimmedBtwHistory(
+  turns: readonly BtwTurnView[],
+  maxTurns = MAX_BTW_HISTORY_TURNS,
+  maxBytes = MAX_BTW_HISTORY_BYTES,
+): BtwHistoryTurn[] {
+  const keptPairs: [BtwHistoryTurn, BtwHistoryTurn][] = [];
+  let totalBytes = 0;
+  for (let i = turns.length - 1; i >= 0 && keptPairs.length < maxTurns; i--) {
+    const turn = turns[i];
+    if (!turn || turn.status !== "done" || turn.answer.trim() === "") continue;
+    const pairBytes = Buffer.byteLength(turn.question, "utf8") + Buffer.byteLength(turn.answer, "utf8");
+    if (totalBytes + pairBytes > maxBytes) break;
+    totalBytes += pairBytes;
+    keptPairs.push([
+      { role: "user", text: turn.question },
+      { role: "assistant", text: turn.answer },
+    ]);
+  }
+  keptPairs.reverse();
+  const history: BtwHistoryTurn[] = [];
+  for (const [userTurn, assistantTurn] of keptPairs) {
+    history.push(userTurn, assistantTurn);
+  }
+  return history;
+}
 
 export const ALWAYS_APPROVE_WARNING = {
   message: "Turn on Always approve?",
@@ -192,6 +225,11 @@ export class ChatController {
 
   private items: TranscriptItem[] = [];
   private pendingSteers: PendingSteerView[] = [];
+  private pendingIdleFallbacks: {
+    text: string;
+    mentions: readonly MentionAttachment[];
+    images: readonly ImageAttachment[];
+  }[] = [];
   private btwTurns: BtwTurnView[] = [];
   private readonly btwActiveIds = new Set<string>();
   private readonly toolItemIndices = new Map<string, number>();
@@ -889,6 +927,7 @@ export class ChatController {
     }
     this.clearBtwLocal();
     this.pendingSteers = [];
+    this.pendingIdleFallbacks = [];
     this.piCapabilities = { steer: false, btw: false };
     await this.stopProcess();
     this.sessionId = undefined;
@@ -930,6 +969,7 @@ export class ChatController {
     this.clearCancelTimer();
     this.clearBtwLocal();
     this.pendingSteers = [];
+    this.pendingIdleFallbacks = [];
     this.piCapabilities = { steer: false, btw: false };
     const text = this.exitText(info, proc);
     this.host.log.error(text);
@@ -988,6 +1028,14 @@ export class ChatController {
 
     if (this.status === "busy") {
       if (!this.piCapabilities.steer) return false;
+      if (mentions.length === 0 && !hasImages && this.isSlashCommandWhileBusy(text)) {
+        this.pushNotice(
+          "info",
+          "Slash commands cannot be sent as a mid-turn steer. Wait until the current turn finishes (or use /btw for a side question).",
+        );
+        this.emit({ type: "restoreDraft", text });
+        return false;
+      }
       if (hasImages && !this.supportsImages()) {
         this.pushNotice("warning", "This agent does not support image attachments.");
         return false;
@@ -1039,6 +1087,16 @@ export class ChatController {
     return true;
   }
 
+  private isSlashCommandWhileBusy(text: string): boolean {
+    const trimmed = text.trim();
+    if (!trimmed.startsWith("/") || trimmed.includes("\n")) return false;
+    if (resolveClientSlashCommand(trimmed, this.stateMessage()) !== undefined) return true;
+    const match = /^\/([^\s/]+)(?:\s|$)/.exec(trimmed);
+    if (!match) return false;
+    const name = (match[1] ?? "").toLowerCase();
+    return this.agentCommands.some((cmd) => cmd.name.toLowerCase() === name);
+  }
+
   private async sendSteer(
     rawText: string,
     mentions: readonly MentionAttachment[],
@@ -1064,8 +1122,16 @@ export class ChatController {
       if (response.queued) return true;
       this.pendingSteers = this.pendingSteers.filter((entry) => entry.id !== steerId);
       this.emit(this.stateMessage());
-      if (response.reason === "idle" && this.status === "ready") {
-        return this.send(rawText, mentions, images ?? []);
+      if (response.reason === "idle") {
+        if (this.status === "ready") {
+          return this.send(rawText, mentions, images ?? []);
+        }
+        if (this.status === "busy") {
+          // Agent returned to idle before its prompt response reached us: queue for automatic
+          // dispatch as soon as finishTurn transitions this controller back to ready (S3).
+          this.pendingIdleFallbacks.push({ text: rawText, mentions, images: images ?? [] });
+          return true;
+        }
       }
       this.pushNotice("info", `Could not steer right now (${response.reason}).`);
       this.emit({ type: "restoreDraft", text: rawText });
@@ -1098,13 +1164,7 @@ export class ChatController {
     }
     if (trimmed === "" && (!images || images.length === 0)) return false;
 
-    const history: BtwHistoryTurn[] = [];
-    for (const turn of this.btwTurns.slice(-MAX_BTW_HISTORY_TURNS)) {
-      if (turn.status === "done" && turn.answer.trim() !== "") {
-        history.push({ role: "user", text: turn.question });
-        history.push({ role: "assistant", text: turn.answer });
-      }
-    }
+    const history = buildTrimmedBtwHistory(this.btwTurns);
 
     const btwId = this.nextId("btw");
     const turn: BtwTurnView = {
@@ -1221,7 +1281,9 @@ export class ChatController {
     this.segmentId = undefined;
     this.clearCancelTimer();
     this.cancelAllPermissions();
+    let unconsumedDrafts: string[] = [];
     if (this.pendingSteers.length > 0 && stopReason !== "cancelled") {
+      unconsumedDrafts = this.pendingSteers.map((entry) => entry.text);
       this.pendingSteers = [];
     }
     if (this.turnStartedAt !== undefined) {
@@ -1247,8 +1309,25 @@ export class ChatController {
     }
     this.noteTurnFailure();
     this.emit({ type: "turnEnd", stopReason });
-    if (this.status === "busy" || this.status === "cancelling") this.setStatus("ready");
+    if (this.status === "busy" || this.status === "cancelling") {
+      this.setStatus("ready");
+    } else if (unconsumedDrafts.length > 0) {
+      this.emit(this.stateMessage());
+    }
+    if (unconsumedDrafts.length > 0) {
+      this.emit({ type: "restoreDraft", text: unconsumedDrafts.join("\n") });
+    }
     this.refreshSessionList();
+    if (this.pendingIdleFallbacks.length > 0) {
+      if (stopReason === "cancelled" || this.status !== "ready") {
+        const queuedTexts = this.pendingIdleFallbacks.map((item) => item.text);
+        this.pendingIdleFallbacks = [];
+        this.emit({ type: "restoreDraft", text: queuedTexts.join("\n") });
+      } else {
+        const next = this.pendingIdleFallbacks.shift();
+        if (next) void this.send(next.text, next.mentions, next.images);
+      }
+    }
   }
 
   /** A failed model call is an agent message `Error: ...`. A known kind gets a hint and a button. */
@@ -1307,6 +1386,7 @@ export class ChatController {
     this.activeThought = undefined;
     this.items = [];
     this.pendingSteers = [];
+    this.pendingIdleFallbacks = [];
     this.clearBtwLocal();
     this.toolItemIndices.clear();
     this.tools.clear();

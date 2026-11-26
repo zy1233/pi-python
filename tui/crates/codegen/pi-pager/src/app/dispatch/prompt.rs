@@ -361,6 +361,7 @@ pub(super) fn dispatch_send_prompt_inner(
             agent.btw_state =
                 Some(crate::views::btw_overlay::BtwOverlayState::Loading { question: q.clone() });
             agent.btw_focused = false;
+            crate::app::acp_handler::trim_btw_history(&mut agent.btw_history);
             out.push(Effect::SendBtw {
                 agent_id: id,
                 session_id,

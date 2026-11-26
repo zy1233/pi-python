@@ -75,6 +75,7 @@ from pi_agent_cli.auto_reasons import Reason
 from pi_agent_cli.btw import (
     BTW_MAX_CONCURRENT_PER_SESSION,
     BtwAbortController,
+    BtwResult,
     parse_btw_history,
     run_btw,
 )
@@ -292,7 +293,9 @@ class PiAcpAgent(Agent):
         self._auto_from_config: set[str] = set()
         self._mode_lock = asyncio.Lock()
         # In-flight ephemeral ``/btw`` side-chat tasks keyed by ``(session_id, btw_id)``.
-        self._btw_tasks: dict[tuple[str, str], tuple[asyncio.Task[Any], BtwAbortController]] = {}
+        self._btw_tasks: dict[
+            tuple[str, str], tuple[asyncio.Task[Any] | None, BtwAbortController]
+        ] = {}
 
     def on_connect(self, conn: Client) -> None:
         self._conn = conn
@@ -524,37 +527,47 @@ class PiAcpAgent(Agent):
         **kwargs: Any,
     ) -> PromptResponse:
         harness = self._require_harness(session_id)
-        # Until the user has answered the question about the project, nothing of it is
-        # loaded, and a prompt would run without it (and then again with it, differently).
-        if not await self._wait_for_trust(session_id, harness):
-            return PromptResponse(stop_reason="cancelled")
-        # An extension may still be setting up what the turn needs (the tools of an MCP server
-        # that is starting). The wait ends when it is done, or given up, or on ``session/cancel``.
-        if not await self._wait_for_turn_barriers(session_id, harness):
-            return PromptResponse(stop_reason="cancelled")
-        # Fallback: re-advertise commands if the deferred task was missed.
-        if session_id not in self._commands_advertised:
-            await self._advertise_commands(session_id)
-        await self._refuse_id_taken_meanwhile(session_id, harness)
-        text, images = _prompt_to_text_images(prompt)
-        if _LITERAL_BTW_RE.match(text) and "btw" not in harness.extension_registry.get_commands():
-            if self._conn is not None:
-                await self._conn.session_update(
-                    session_id=session_id,
-                    update=update_agent_message_text(
-                        "/btw side chat requires a client that supports pi/session/btw "
-                        "(such as zypi or the zycode VS Code extension). Nothing was sent "
-                        "to the main session."
-                    ),
-                )
-            return PromptResponse(stop_reason="end_turn")
-        auto = self._autos.get(session_id)
-        if auto is not None:
-            auto.note_user_message(text)
-        message = await self._run_prompt(session_id, harness, text, images)
-        if message is None:
-            return PromptResponse(stop_reason="cancelled")
-        return PromptResponse(stop_reason=_stop_reason(message))
+        in_flight = self._prompts_in_flight
+        in_flight[session_id] = in_flight.get(session_id, 0) + 1
+        try:
+            # Until the user has answered the question about the project, nothing of it is
+            # loaded, and a prompt would run without it (and then again with it, differently).
+            if not await self._wait_for_trust(session_id, harness):
+                return PromptResponse(stop_reason="cancelled")
+            # An extension may still be setting up what the turn needs (an MCP server starting).
+            # The wait ends when it is done, or given up, or on ``session/cancel``.
+            if not await self._wait_for_turn_barriers(session_id, harness):
+                return PromptResponse(stop_reason="cancelled")
+            # Fallback: re-advertise commands if the deferred task was missed.
+            if session_id not in self._commands_advertised:
+                await self._advertise_commands(session_id)
+            await self._refuse_id_taken_meanwhile(session_id, harness)
+            text, images = _prompt_to_text_images(prompt)
+            if (
+                _LITERAL_BTW_RE.match(text)
+                and "btw" not in harness.extension_registry.get_commands()
+            ):
+                if self._conn is not None:
+                    await self._conn.session_update(
+                        session_id=session_id,
+                        update=update_agent_message_text(
+                            "/btw side chat requires a client that supports pi/session/btw "
+                            "(such as zypi or the zycode VS Code extension). Nothing was sent "
+                            "to the main session."
+                        ),
+                    )
+                return PromptResponse(stop_reason="end_turn")
+            auto = self._autos.get(session_id)
+            if auto is not None:
+                auto.note_user_message(text)
+            message = await self._run_prompt(session_id, harness, text, images)
+            if message is None:
+                return PromptResponse(stop_reason="cancelled")
+            return PromptResponse(stop_reason=_stop_reason(message))
+        finally:
+            in_flight[session_id] -= 1
+            if not in_flight[session_id]:
+                del in_flight[session_id]
 
     async def _run_prompt(
         self, session_id: str, harness: AgentHarness, text: str, images: list[ImageContent]
@@ -568,23 +581,16 @@ class PiAcpAgent(Agent):
         with such a turn therefore waits for it instead of failing. A prompt that finds
         another one of the client's own in flight is a client error and is refused as busy.
         """
-        in_flight = self._prompts_in_flight
-        in_flight[session_id] = in_flight.get(session_id, 0) + 1
-        try:
-            while True:
-                try:
-                    return await harness.prompt(text, images or None)
-                except Exception as exc:
-                    if not _is_busy(exc):
-                        raise
-                    if in_flight[session_id] > 1:
-                        raise RequestError.invalid_params({"reason": "busy"}) from exc
-                if not await self._wait_until_idle(session_id, harness):
-                    return None
-        finally:
-            in_flight[session_id] -= 1
-            if not in_flight[session_id]:
-                del in_flight[session_id]
+        while True:
+            try:
+                return await harness.prompt(text, images or None)
+            except Exception as exc:
+                if not _is_busy(exc):
+                    raise
+                if self._prompts_in_flight.get(session_id, 0) > 1:
+                    raise RequestError.invalid_params({"reason": "busy"}) from exc
+            if not await self._wait_until_idle(session_id, harness):
+                return None
 
     async def cancel(self, session_id: str, **kwargs: Any) -> None:
         state = self._trust.get(session_id)
@@ -702,7 +708,7 @@ class PiAcpAgent(Agent):
                 continue
             task, controller = entry
             controller.abort()
-            if not task.done():
+            if task is not None and not task.done():
                 task.cancel()
 
     async def _send_ext_notification(self, method: str, params: dict[str, Any]) -> None:
@@ -845,65 +851,70 @@ class PiAcpAgent(Agent):
                 {"reason": str(exc), "method": "pi/session/btw"}
             ) from exc
 
-        active_for_session = sum(1 for sid, _ in self._btw_tasks if sid == session_id)
-        if active_for_session >= BTW_MAX_CONCURRENT_PER_SESSION:
-            raise RequestError.invalid_params(
-                {"reason": "too many concurrent btw requests", "method": "pi/session/btw"}
-            )
         key = (session_id, btw_id)
         if key in self._btw_tasks:
             raise RequestError.invalid_params(
                 {"reason": "btwId is already in flight", "method": "pi/session/btw"}
             )
-
-        snapshot = await harness.snapshot_context_for_btw()
-        btw_cfg = self._config.btw
-        btw_thinking: ThinkingLevel = (
-            snapshot.thinking_level if btw_cfg.thinking == "inherit" else "off"
-        )
-        if self._config.reasoning is False:
-            btw_thinking = "off"
-
-        override_choice = self._choice_by_id(btw_cfg.model) if btw_cfg.model else None
-        if override_choice is not None:
-            btw_model = model_for_choice(override_choice, reasoning=(btw_thinking != "off"))
-            btw_api_key = api_key_for_choice(override_choice)
-        else:
-            btw_model = replace(snapshot.model, reasoning=(btw_thinking != "off"))
-            btw_api_key = harness.get_api_key
+        active_for_session = sum(1 for sid, _ in self._btw_tasks if sid == session_id)
+        if active_for_session >= BTW_MAX_CONCURRENT_PER_SESSION:
+            raise RequestError.invalid_params(
+                {"reason": "too many concurrent btw requests", "method": "pi/session/btw"}
+            )
 
         controller = BtwAbortController()
-
-        async def _on_btw_update(kind: str, delta: str) -> None:
-            await self._send_ext_notification(
-                "pi/btw_update",
-                {
-                    "sessionId": session_id,
-                    "btwId": btw_id,
-                    "kind": kind,
-                    "delta": delta,
-                    "error": None,
-                },
-            )
-
-        task = asyncio.create_task(
-            run_btw(
-                snapshot=snapshot,
-                question=text,
-                stream_fn=self._stream_fn,
-                model=btw_model,
-                thinking_level=btw_thinking,
-                get_api_key=btw_api_key,
-                images=images or None,
-                history=history,
-                on_update=_on_btw_update,
-                abort_controller=controller,
-                timeout_seconds=btw_cfg.timeout_seconds,
-            )
-        )
-        self._btw_tasks[key] = (task, controller)
+        # Reserve the concurrency & duplicate-id slot synchronously BEFORE the first await
+        # so parallel requests on an uncached session cannot bypass the limit or overwrite keys.
+        self._btw_tasks[key] = (None, controller)
         try:
-            result = await task
+            snapshot = await harness.snapshot_context_for_btw()
+            if controller.signal.aborted:
+                result = BtwResult(stop_reason="cancelled")
+            else:
+                btw_cfg = self._config.btw
+                btw_thinking: ThinkingLevel = (
+                    snapshot.thinking_level if btw_cfg.thinking == "inherit" else "off"
+                )
+                if self._config.reasoning is False:
+                    btw_thinking = "off"
+
+                override_choice = self._choice_by_id(btw_cfg.model) if btw_cfg.model else None
+                if override_choice is not None:
+                    btw_model = model_for_choice(override_choice, reasoning=(btw_thinking != "off"))
+                    btw_api_key = api_key_for_choice(override_choice)
+                else:
+                    btw_model = replace(snapshot.model, reasoning=(btw_thinking != "off"))
+                    btw_api_key = harness.get_api_key
+
+                async def _on_btw_update(kind: str, delta: str) -> None:
+                    await self._send_ext_notification(
+                        "pi/btw_update",
+                        {
+                            "sessionId": session_id,
+                            "btwId": btw_id,
+                            "kind": kind,
+                            "delta": delta,
+                            "error": None,
+                        },
+                    )
+
+                task = asyncio.create_task(
+                    run_btw(
+                        snapshot=snapshot,
+                        question=text,
+                        stream_fn=self._stream_fn,
+                        model=btw_model,
+                        thinking_level=btw_thinking,
+                        get_api_key=btw_api_key,
+                        images=images or None,
+                        history=history,
+                        on_update=_on_btw_update,
+                        abort_controller=controller,
+                        timeout_seconds=btw_cfg.timeout_seconds,
+                    )
+                )
+                self._btw_tasks[key] = (task, controller)
+                result = await task
         finally:
             self._btw_tasks.pop(key, None)
 
@@ -943,7 +954,7 @@ class PiAcpAgent(Agent):
         if entry is not None:
             task, controller = entry
             controller.abort()
-            if not task.done():
+            if task is not None and not task.done():
                 task.cancel()
         return {"sessionId": session_id, "btwId": btw_id, "cancelled": True}
 

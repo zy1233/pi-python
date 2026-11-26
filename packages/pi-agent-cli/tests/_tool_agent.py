@@ -81,6 +81,12 @@ async def _tool_once_stream(model, context, options=None):
         return _aborted_stream(model)
     if any(getattr(m, "role", None) == "toolResult" for m in context.messages):
         return await mock_text_stream(model, context, options)
+    if context.tools == [] and any(
+        getattr(m, "role", None) == "user"
+        and "<btw_side_question>" in str(getattr(m, "content", ""))
+        for m in context.messages
+    ):
+        return await mock_text_stream(model, context, options)
     if os.environ.get("PI_TEST_STUCK_THREAD"):
         # A blocking call that cannot be cancelled: `asyncio.run` waits for it at shutdown, so
         # the agent hangs there. The pidfile holds the agent's own pid in this mode.

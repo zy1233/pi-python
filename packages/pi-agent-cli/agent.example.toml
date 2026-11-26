@@ -167,7 +167,9 @@ command = "python -m pi_agent_cli"
 [btw]
 # Ephemeral side chat (`/btw <question>`): answers using a read-only snapshot of the main session
 # without calling any tools and without writing anything to the session JSONL.
+# Note: `/btw` sends the full session context (system prompt, user/assistant text, and tool results
+# truncated to 4000 characters) to `[btw].model`, which may use a different provider and API key.
 # model = ""                 # id of a [model] or [[models]] entry (empty: current session model)
 # thinking = "off"           # "off" (default, fastest) | "inherit" (match session thinking_level)
-# timeout_seconds = 60       # per-question timeout in seconds (1 to 300)
+# timeout_seconds = 120      # per-question timeout in seconds (5 to 600)
 

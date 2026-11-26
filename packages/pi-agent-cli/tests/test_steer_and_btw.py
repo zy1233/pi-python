@@ -204,6 +204,7 @@ async def test_literal_btw_prompt_returns_notice_without_turn_or_jsonl(tmp_path:
 def test_btw_config_parsing(tmp_path: Path):
     (tmp_path / "agent.toml").write_text(
         '[model]\nprovider = "openai"\nid = "gpt-4o"\n\n'
+        '[[models]]\nprovider = "openai"\nid = "gpt-4o-mini"\n\n'
         '[btw]\nmodel = "gpt-4o-mini"\nthinking = "inherit"\ntimeout_seconds = 45\n',
         encoding="utf-8",
     )
@@ -212,6 +213,18 @@ def test_btw_config_parsing(tmp_path: Path):
     assert cfg.btw.thinking == "inherit"
     assert cfg.btw.timeout_seconds == 45.0
     assert cfg.btw.notes == ()
+    assert not cfg.btw_model_is_unknown()
+
+
+def test_btw_config_unknown_model_records_note(tmp_path: Path):
+    (tmp_path / "agent.toml").write_text(
+        '[model]\nprovider = "openai"\nid = "gpt-4o"\n\n[btw]\nmodel = "does-not-exist"\n',
+        encoding="utf-8",
+    )
+    cfg = load_config(tmp_path)
+    assert cfg.btw_model_is_unknown()
+    assert any("does-not-exist" in n for n in cfg.btw.notes)
+    assert any("does-not-exist" in n for n in cfg.auto.notes)
 
 
 def test_btw_config_invalid_values_fallback_with_notes(tmp_path: Path):
@@ -842,12 +855,19 @@ async def test_btw_runs_parallel_during_busy_tool_and_does_not_pollute_jsonl(tmp
 
 @pytest.mark.asyncio
 async def test_btw_cancel_and_concurrency_limit(tmp_path: Path):
-    btw_started = asyncio.Event()
+    started_count = 0
+    first_started = asyncio.Event()
+    second_started = asyncio.Event()
     bg_tasks: list[asyncio.Task[None]] = []
 
     async def slow_btw_stream(model: Model, context: Any, options: Any = None):
+        nonlocal started_count
         stream = AssistantMessageEventStream()
-        btw_started.set()
+        started_count += 1
+        if started_count == 1:
+            first_started.set()
+        elif started_count >= 2:
+            second_started.set()
 
         async def _drip():
             try:
@@ -875,7 +895,7 @@ async def test_btw_cancel_and_concurrency_limit(tmp_path: Path):
             },
         )
     )
-    await asyncio.wait_for(btw_started.wait(), timeout=5.0)
+    await asyncio.wait_for(first_started.wait(), timeout=5.0)
     t2 = asyncio.create_task(
         agent.ext_method(
             "pi/session/btw",
@@ -886,7 +906,7 @@ async def test_btw_cancel_and_concurrency_limit(tmp_path: Path):
             },
         )
     )
-    await asyncio.sleep(0.05)
+    await asyncio.wait_for(second_started.wait(), timeout=5.0)
 
     # Third concurrent btw on same session is rejected.
     with pytest.raises(RequestError):
@@ -912,6 +932,305 @@ async def test_btw_cancel_and_concurrency_limit(tmp_path: Path):
     await agent.close_session(session_id=created.session_id)
     r2 = await asyncio.wait_for(t2, timeout=5.0)
     assert r2["stopReason"] == "cancelled"
+
+
+@pytest.mark.asyncio
+async def test_btw_slot_reserved_before_snapshot_yields_for_limit_and_duplicate_id(
+    tmp_path: Path,
+):
+    """Finding #3: parallel /btw on uncached session enforces limit=2 and duplicate btwId."""
+    release_snapshot = asyncio.Event()
+    started_streams: list[str] = []
+
+    async def stream_fn(model: Model, context: Any, options: Any = None):
+        started_streams.append("btw")
+        return _text_stream(model, "ok")
+
+    client = _RecordingClient()
+    agent = _make_agent(tmp_path, stream_fn)
+    agent.on_connect(client)
+    created = await agent.new_session(cwd=str(tmp_path))
+    harness = agent._harnesses[created.session_id]
+
+    orig_snapshot = harness.snapshot_context_for_btw
+
+    async def slow_snapshot():
+        await release_snapshot.wait()
+        return await orig_snapshot()
+
+    harness.snapshot_context_for_btw = slow_snapshot  # type: ignore[method-assign]
+
+    # Fire 6 concurrent requests with distinct ids + 1 duplicate btwId while snapshot is suspended.
+    coros = [
+        agent.ext_method(
+            "pi/session/btw",
+            {
+                "sessionId": created.session_id,
+                "btwId": f"race-{i}",
+                "prompt": [{"type": "text", "text": f"q{i}"}],
+            },
+        )
+        for i in range(6)
+    ]
+    coros.append(
+        agent.ext_method(
+            "pi/session/btw",
+            {
+                "sessionId": created.session_id,
+                "btwId": "race-0",
+                "prompt": [{"type": "text", "text": "dup"}],
+            },
+        )
+    )
+    tasks = [asyncio.create_task(c) for c in coros]
+    await asyncio.sleep(0)
+    release_snapshot.set()
+    results = await asyncio.gather(*tasks, return_exceptions=True)
+
+    succeeded = [r for r in results if isinstance(r, dict)]
+    failed = [r for r in results if isinstance(r, RequestError)]
+    assert len(succeeded) == 2
+    assert len(failed) == 5
+    assert len(started_streams) == 2
+    assert isinstance(results[-1], RequestError)
+
+
+@pytest.mark.asyncio
+async def test_steer_waiting_for_trust_and_waiting_for_barriers(tmp_path: Path):
+    """Finding #4 & #9: steer returns waiting_for_trust and waiting_for_barriers accurately."""
+    barrier_entered = asyncio.Event()
+    release_barrier = asyncio.Event()
+
+    def ext(pi: Any) -> None:
+        async def wait_barrier() -> None:
+            barrier_entered.set()
+            await release_barrier.wait()
+
+        pi.add_turn_barrier(wait_barrier)
+
+    client = _RecordingClient()
+    agent = _make_agent(tmp_path, lambda m, c, o=None: _text_stream(m, "done"), extensions=[ext])
+    agent.on_connect(client)
+    created = await agent.new_session(cwd=str(tmp_path))
+    sid = created.session_id
+
+    # 1. Simulate unsettled project trust -> waiting_for_trust.
+    trust_state = agent._trust[sid]
+    trust_state.settled.clear()
+    res_trust = await agent.ext_method(
+        "pi/session/steer",
+        {
+            "sessionId": sid,
+            "steerId": "s-trust",
+            "prompt": [{"type": "text", "text": "steer during trust"}],
+        },
+    )
+    assert res_trust == {
+        "sessionId": sid,
+        "steerId": "s-trust",
+        "queued": False,
+        "reason": "waiting_for_trust",
+    }
+
+    # 2. Settle trust; prompt blocks on turn barrier -> waiting_for_barriers!
+    trust_state.settled.set()
+    prompt_task = asyncio.create_task(agent.prompt(session_id=sid, prompt=[text_block("go")]))
+    await asyncio.wait_for(barrier_entered.wait(), timeout=5.0)
+
+    res_barrier = await agent.ext_method(
+        "pi/session/steer",
+        {
+            "sessionId": sid,
+            "steerId": "s-barrier",
+            "prompt": [{"type": "text", "text": "steer during barrier"}],
+        },
+    )
+    assert res_barrier == {
+        "sessionId": sid,
+        "steerId": "s-barrier",
+        "queued": False,
+        "reason": "waiting_for_barriers",
+    }
+
+    release_barrier.set()
+    prompt_res = await asyncio.wait_for(prompt_task, timeout=5.0)
+    assert prompt_res.stop_reason == "end_turn"
+
+
+@pytest.mark.asyncio
+async def test_steer_invalid_params_unknown_session_and_image_block(tmp_path: Path):
+    """Finding #9: invalid params, unknown session, and steer carrying an image content block."""
+    tool_started = asyncio.Event()
+    release_tool = asyncio.Event()
+    seen_image_blocks: list[dict[str, Any]] = []
+
+    def ext(pi: Any) -> None:
+        async def hold_tool(
+            tool_call_id: str, params: Any, signal: Any = None, on_update: Any = None
+        ):
+            tool_started.set()
+            await release_tool.wait()
+            return {"content": [{"type": "text", "text": "ok"}]}
+
+        pi.register_tool(
+            ToolDefinition(
+                name="img_hold_probe",
+                description="waits",
+                parameters={"type": "object", "properties": {}},
+                execute=hold_tool,
+                annotations=ToolAnnotations(readOnlyHint=True),
+            )
+        )
+
+    call_count = 0
+
+    async def stream_fn(model: Model, context: Any, options: Any = None):
+        nonlocal call_count
+        call_count += 1
+        if call_count == 1:
+            return _tool_call_stream(model, "call_img", "img_hold_probe", {})
+        for msg in context.messages:
+            if getattr(msg, "role", None) == "user" and isinstance(msg.content, list):
+                for block in msg.content:
+                    if isinstance(block, dict) and block.get("type") == "image":
+                        seen_image_blocks.append(block)
+        return _text_stream(model, "saw image")
+
+    client = _RecordingClient()
+    agent = _make_agent(tmp_path, stream_fn, extensions=[ext])
+    agent.on_connect(client)
+    created = await agent.new_session(cwd=str(tmp_path))
+    sid = created.session_id
+
+    # Unknown session -> RequestError
+    with pytest.raises(RequestError):
+        await agent.ext_method(
+            "pi/session/steer",
+            {"sessionId": "nonexistent-session", "prompt": [{"type": "text", "text": "hi"}]},
+        )
+    # Empty prompt -> RequestError
+    with pytest.raises(RequestError):
+        await agent.ext_method("pi/session/steer", {"sessionId": sid, "prompt": []})
+    # Blank text only -> RequestError
+    with pytest.raises(RequestError):
+        await agent.ext_method(
+            "pi/session/steer", {"sessionId": sid, "prompt": [{"type": "text", "text": "   "}]}
+        )
+
+    # Steer with an image content block while turn is active.
+    prompt_task = asyncio.create_task(agent.prompt(session_id=sid, prompt=[text_block("check")]))
+    await asyncio.wait_for(tool_started.wait(), timeout=5.0)
+
+    steer_res = await agent.ext_method(
+        "pi/session/steer",
+        {
+            "sessionId": sid,
+            "steerId": "s-img",
+            "prompt": [
+                {"type": "text", "text": "look at this screenshot"},
+                {"type": "image", "data": "iVBORw0KGgo=", "mimeType": "image/png"},
+            ],
+        },
+    )
+    assert steer_res["queued"] is True
+    release_tool.set()
+    await asyncio.wait_for(prompt_task, timeout=5.0)
+    assert len(seen_image_blocks) == 1
+    assert seen_image_blocks[0]["mimeType"] == "image/png"
+    assert seen_image_blocks[0]["data"] == "iVBORw0KGgo="
+
+
+@pytest.mark.asyncio
+async def test_btw_timeout_model_override_unknown_cancel_and_pending_trust(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+):
+    """Finding #9: /btw timeout, [btw].model + key override, unknown btw_cancel, pending trust."""
+    monkeypatch.setenv("TEST_MAIN_KEY", "main-secret")
+    monkeypatch.setenv("TEST_BTW_KEY", "btw-secret")
+
+    (tmp_path / "agent.toml").write_text(
+        '[model]\nprovider = "openai"\nid = "gpt-4o"\napi_key_env = "TEST_MAIN_KEY"\n\n'
+        '[[models]]\nprovider = "openai"\nid = "gpt-4o-mini"\napi_key_env = "TEST_BTW_KEY"\n\n'
+        '[btw]\nmodel = "gpt-4o-mini"\nthinking = "off"\ntimeout_seconds = 5\n',
+        encoding="utf-8",
+    )
+    cfg = load_config(tmp_path)
+
+    captured_calls: list[tuple[str, str | None]] = []
+
+    async def stream_fn(model: Model, context: Any, options: Any = None):
+        api_key = getattr(options, "api_key", None)
+        captured_calls.append((model.model_id, api_key))
+        return _text_stream(model, "override answer")
+
+    client = _RecordingClient()
+    agent = PiAcpAgent(stream_fn=stream_fn, home=tmp_path, config=cfg)
+    agent.on_connect(client)
+    created = await agent.new_session(cwd=str(tmp_path))
+    sid = created.session_id
+
+    # 1. Unknown btw_cancel is idempotent.
+    cancel_unknown = await agent.ext_method(
+        "pi/session/btw_cancel", {"sessionId": sid, "btwId": "never-existed"}
+    )
+    assert cancel_unknown == {"sessionId": sid, "btwId": "never-existed", "cancelled": True}
+
+    # 2. [btw].model override uses configured model and api_key_env, even while trust is pending.
+    agent._trust[sid].settled.clear()
+    btw_res = await agent.ext_method(
+        "pi/session/btw",
+        {
+            "sessionId": sid,
+            "btwId": "btw-override",
+            "prompt": [{"type": "text", "text": "quick check while trust pending"}],
+        },
+    )
+    assert btw_res["stopReason"] == "end_turn"
+    assert captured_calls == [("gpt-4o-mini", "btw-secret")]
+
+    # 3. /btw timeout aborts stream signal and returns stopReason='error'.
+    aborted_signal = False
+    bg_tasks: list[asyncio.Task[None]] = []
+
+    async def hanging_stream(model: Model, context: Any, options: Any = None):
+        nonlocal aborted_signal
+        stream = AssistantMessageEventStream()
+        signal = getattr(options, "signal", None)
+
+        async def _wait_and_check():
+            nonlocal aborted_signal
+            try:
+                await asyncio.sleep(5)
+            except asyncio.CancelledError:
+                pass
+            finally:
+                if signal is not None and getattr(signal, "aborted", False):
+                    aborted_signal = True
+                stream.end()
+
+        bg_tasks.append(asyncio.create_task(_wait_and_check()))
+        return stream
+
+    from dataclasses import replace as dc_replace
+
+    fast_timeout_cfg = dc_replace(cfg, btw=dc_replace(cfg.btw, timeout_seconds=0.05))
+    agent_to = PiAcpAgent(stream_fn=hanging_stream, home=tmp_path / "to", config=fast_timeout_cfg)
+    agent_to.on_connect(client)
+    created_to = await agent_to.new_session(cwd=str(tmp_path))
+    res_to = await agent_to.ext_method(
+        "pi/session/btw",
+        {
+            "sessionId": created_to.session_id,
+            "btwId": "btw-timeout",
+            "prompt": [{"type": "text", "text": "hang forever"}],
+        },
+    )
+    assert res_to["stopReason"] == "error"
+    assert "timed out" in (res_to["error"] or "").lower()
+    for t in bg_tasks:
+        t.cancel()
+    await asyncio.gather(*bg_tasks, return_exceptions=True)
+    assert aborted_signal is True
 
 
 @pytest.mark.asyncio

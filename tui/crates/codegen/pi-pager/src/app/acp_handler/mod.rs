@@ -526,8 +526,16 @@ fn handle_queue_update_notification(notif: &acp::ExtNotification, app: &mut AppV
             });
             texts
         };
-        if !restored.is_empty() && agent.prompt.text().trim().is_empty() {
-            agent.prompt.set_text(&restored.join("\n"));
+        if !restored.is_empty() {
+            let restored_text = restored.join("\n");
+            let existing = agent.prompt.text();
+            if existing.trim().is_empty() {
+                agent.prompt.set_text(&restored_text);
+            } else {
+                agent
+                    .prompt
+                    .set_text(&format!("{restored_text}\n{existing}"));
+            }
         }
         return true;
     }
@@ -540,6 +548,26 @@ fn handle_queue_update_notification(notif: &acp::ExtNotification, app: &mut AppV
         .pending_steers
         .retain(|(sid, _)| live_ids.contains(sid.as_str()));
     true
+}
+
+pub(crate) const BTW_MAX_HISTORY_ENTRIES: usize = 20;
+pub(crate) const BTW_MAX_HISTORY_BYTES: usize = 32 * 1024;
+
+/// Keep `/btw` follow-up history within both the entry cap (20) and UTF-8 byte cap (32 KiB)
+/// by dropping the oldest user/assistant pairs first.
+pub(crate) fn trim_btw_history(history: &mut Vec<pi_acp_lib::extensions::btw::BtwHistoryTurn>) {
+    while history.len() > BTW_MAX_HISTORY_ENTRIES {
+        let drop_n = if history.len() >= 2 { 2 } else { 1 };
+        history.drain(..drop_n);
+    }
+    while history.iter().map(|t| t.text.len()).sum::<usize>() > BTW_MAX_HISTORY_BYTES {
+        if history.len() >= 2 {
+            history.drain(..2);
+        } else {
+            history.clear();
+            break;
+        }
+    }
 }
 
 fn handle_btw_update_notification(notif: &acp::ExtNotification, app: &mut AppView) -> bool {
@@ -604,10 +632,7 @@ fn handle_btw_update_notification(notif: &acp::ExtNotification, app: &mut AppVie
                     role: BtwHistoryRole::Assistant,
                     text: answer,
                 });
-                if agent.btw_history.len() > 20 {
-                    let excess = agent.btw_history.len() - 20;
-                    agent.btw_history.drain(..excess);
-                }
+                trim_btw_history(&mut agent.btw_history);
             }
         }
         BtwUpdateKind::Error => {

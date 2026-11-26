@@ -438,6 +438,143 @@ async def test_steer_queue_drains_and_rolls_back_on_emit_failure():
 
 
 @pytest.mark.asyncio
+async def test_steer_id_mapping_and_cleanup_on_inject_and_abort():
+    import asyncio
+
+    class EchoParams(BaseModel):
+        message: str = ""
+
+    tool_started = asyncio.Event()
+    release_tool = asyncio.Event()
+
+    async def slow_echo(_id, params, signal, on_update):
+        tool_started.set()
+        await release_tool.wait()
+        return AgentToolResult(content=[{"type": "text", "text": "ok"}], details={})
+
+    session = await _memory_session()
+    call_count = 0
+
+    async def stream_fn(model, context, options=None):
+        nonlocal call_count
+        call_count += 1
+        if call_count == 1:
+            return await _tool_once_stream(model, context, options)
+        return await mock_text_stream(model, context, options)
+
+    harness = AgentHarness(
+        session=session,
+        model=_model(),
+        stream_fn=stream_fn,
+        tools=[SimpleTool("echo", "", "Echo", EchoParams, slow_echo)],
+    )
+
+    seen_steer_ids: list[str | None] = []
+
+    def listener(event, signal=None):
+        if event.type == "message_start" and getattr(event.message, "role", None) == "user":
+            sid = harness.steer_id_for(event.message)
+            if sid is not None:
+                seen_steer_ids.append(sid)
+
+    harness.subscribe(listener)
+
+    # 1. Custom steer_id is mapped while queued, visible at message_start, and cleaned on inject.
+    run_task = asyncio.create_task(harness.prompt("start"))
+    await asyncio.wait_for(tool_started.wait(), timeout=5.0)
+    assigned = await harness.steer("redirect", steer_id="custom-steer-42")
+    assert assigned == "custom-steer-42"
+    queued_msg = harness.steer_queue[0]
+    assert harness.steer_id_for(queued_msg) == "custom-steer-42"
+
+    release_tool.set()
+    await asyncio.wait_for(run_task, timeout=5.0)
+    assert seen_steer_ids == ["custom-steer-42"]
+    assert harness.steer_id_for(queued_msg) is None
+    assert harness._steer_ids == {}
+
+    # 2. Aborted steer is cleared from both steer_queue and _steer_ids.
+    call_count = 0
+    tool_started.clear()
+    release_tool.clear()
+    session2 = await _memory_session()
+    harness2 = AgentHarness(
+        session=session2,
+        model=_model(),
+        stream_fn=stream_fn,
+        tools=[SimpleTool("echo", "", "Echo", EchoParams, slow_echo)],
+    )
+    run_task2 = asyncio.create_task(harness2.prompt("second"))
+    await asyncio.wait_for(tool_started.wait(), timeout=5.0)
+    assigned2 = await harness2.steer("to-abort", steer_id="abort-steer-99")
+    assert assigned2 == "abort-steer-99"
+    queued_msg2 = harness2.steer_queue[0]
+    assert harness2.steer_id_for(queued_msg2) == "abort-steer-99"
+
+    abort_task = asyncio.create_task(harness2.abort())
+    await asyncio.sleep(0)
+    release_tool.set()
+    abort_res = await asyncio.wait_for(abort_task, timeout=5.0)
+    assert len(abort_res["cleared_steer"]) == 1
+    assert harness2.steer_queue == []
+    assert harness2.steer_id_for(queued_msg2) is None
+    assert harness2._steer_ids == {}
+    await asyncio.wait_for(run_task2, timeout=5.0)
+
+
+@pytest.mark.asyncio
+async def test_snapshot_context_for_btw_during_active_turn():
+    import asyncio
+
+    class EchoParams(BaseModel):
+        message: str = ""
+
+    tool_started = asyncio.Event()
+    release_tool = asyncio.Event()
+
+    async def hold_echo(_id, params, signal, on_update):
+        tool_started.set()
+        await release_tool.wait()
+        return AgentToolResult(content=[{"type": "text", "text": "ok"}], details={})
+
+    session = await _memory_session()
+    call_count = 0
+
+    async def stream_fn(model, context, options=None):
+        nonlocal call_count
+        call_count += 1
+        if call_count == 1:
+            return await _tool_once_stream(model, context, options)
+        return await mock_text_stream(model, context, options)
+
+    harness = AgentHarness(
+        session=session,
+        model=_model(),
+        stream_fn=stream_fn,
+        tools=[SimpleTool("echo", "", "Echo", EchoParams, hold_echo)],
+        system_prompt="You are a test system prompt.",
+        thinking_level="medium",
+    )
+
+    run_task = asyncio.create_task(harness.prompt("hello active turn"))
+    await asyncio.wait_for(tool_started.wait(), timeout=5.0)
+    assert harness.phase == "turn"
+
+    snapshot = await harness.snapshot_context_for_btw()
+    assert snapshot.system_prompt == "You are a test system prompt."
+    assert snapshot.model.model_id == _model().model_id
+    assert snapshot.thinking_level == "medium"
+    assert any(
+        getattr(m, "role", None) == "user" and _user_text(m) == "hello active turn"
+        for m in snapshot.messages
+    )
+
+    release_tool.set()
+    final = await asyncio.wait_for(run_task, timeout=5.0)
+    assert final.stopReason == "stop"
+
+
+@pytest.mark.asyncio
 async def test_tool_call_hook_can_block_execution():
     class EchoParams(BaseModel):
         message: str = ""

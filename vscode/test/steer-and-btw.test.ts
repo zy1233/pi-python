@@ -1,6 +1,7 @@
 import { afterEach, describe, expect, it } from "vitest";
 
 import { parsePiCapabilities } from "../src/core/acp-connection.js";
+import { buildTrimmedBtwHistory } from "../src/core/chat-controller.js";
 import { parseWebviewMessage } from "../src/core/protocol.js";
 import { TestHost, newController, ofType, waitFor } from "./helpers.js";
 
@@ -188,5 +189,149 @@ describe("ChatController steer and /btw", () => {
     const notices = ofType(messages, "notice");
     expect(notices.some((n) => n.text.includes("does not support /btw"))).toBe(true);
     expect(controller.btwState()).toBeNull();
+  });
+
+  it("automatically falls back to a normal prompt when steer returns idle while controller is still busy (#4)", async () => {
+    const { controller, messages } = startRig({ FAKE_STEER_BTW: "1" });
+    await controller.start();
+
+    const turn = controller.send("steer-idle-race");
+    await waitFor(
+      () => ofType(messages, "agentText").some((m) => m.text.includes("finishing")),
+      "steer-idle-race finishing chunk",
+    );
+    expect(controller.stateMessage().status).toBe("busy");
+
+    // Agent already transitioned to idle before prompt() returned; controller queues fallback and sends after turnEnd.
+    const ok = await controller.send("follow up automatically");
+    expect(ok).toBe(true);
+    await turn;
+
+    await waitFor(
+      () =>
+        controller
+          .transcript()
+          .some((item) => item.type === "agent" && item.text.includes("echo: follow up automatically")),
+      "automatic fallback prompt ran and echoed",
+    );
+    expect(ofType(messages, "restoreDraft")).toHaveLength(0);
+  });
+
+  it("disables steer capability and restores draft when agent returns method-not-found (-32601)", async () => {
+    const { controller, messages } = startRig({
+      FAKE_STEER_BTW: "1",
+      FAKE_STEER_METHOD_NOT_FOUND: "1",
+    });
+    await controller.start();
+    expect(controller.stateMessage().supportsSteer).toBe(true);
+
+    const turn = controller.send("steer-hang");
+    await waitFor(
+      () => ofType(messages, "agentText").some((m) => m.text.includes("working")),
+      "steer-hang working",
+    );
+
+    const ok = await controller.send("my unsent steer");
+    expect(ok).toBe(false);
+    expect(controller.stateMessage().supportsSteer).toBe(false);
+    expect(ofType(messages, "restoreDraft").at(-1)?.text).toBe("my unsent steer");
+    expect(ofType(messages, "notice").some((n) => n.text.includes("does not support mid-turn steering"))).toBe(true);
+
+    await controller.cancel();
+    await turn;
+  });
+
+  it("restores unconsumed pendingSteers to draft when a turn ends without cancellation (#6)", async () => {
+    const { controller, messages } = startRig({ FAKE_STEER_BTW: "1" });
+    await controller.start();
+
+    const turn = controller.send("steer-unconsumed-end");
+    await waitFor(
+      () => ofType(messages, "agentText").some((m) => m.text.includes("working")),
+      "steer-unconsumed-end working",
+    );
+
+    await controller.send("leftover steer text");
+    await turn;
+
+    expect(controller.stateMessage().status).toBe("ready");
+    expect(controller.stateMessage().pendingSteers).toBeUndefined();
+    const restored = ofType(messages, "restoreDraft");
+    expect(restored).toHaveLength(1);
+    expect(restored[0]!.text).toBe("leftover steer text");
+  });
+
+  it("trims /btw follow-up history to 32 KiB UTF-8 bytes so long multi-turn threads keep working (#5)", async () => {
+    // Unit check on buildTrimmedBtwHistory with multi-byte UTF-8 characters.
+    const trimmed = buildTrimmedBtwHistory([
+      { id: "1", question: "q1", answer: "你".repeat(8000), thought: "", status: "done" }, // 24 KB
+      { id: "2", question: "q2", answer: "好".repeat(8000), thought: "", status: "done" }, // 24 KB
+    ]);
+    expect(trimmed).toHaveLength(2);
+    expect(trimmed[0]!.text).toBe("q2");
+
+    // End-to-end check against fake-agent enforcing 32 KiB server limit.
+    const { controller } = startRig({ FAKE_STEER_BTW: "1" });
+    await controller.start();
+
+    await controller.askBtw("big-btw"); // 20 KB answer
+    await controller.askBtw("big-btw"); // another 20 KB answer -> 40 KB total if untrimmed!
+    await controller.askBtw("third question");
+
+    const turns = controller.btwState()?.turns ?? [];
+    expect(turns).toHaveLength(3);
+    expect(turns[2]!.status).toBe("done");
+    // Only the newest 20 KB turn (2 entries) fits under 32 KiB.
+    expect(turns[2]!.answer).toBe("btw(2): third question");
+  });
+
+  it("cancels in-flight /btw request when closing the /btw panel during streaming", async () => {
+    const { controller } = startRig({ FAKE_STEER_BTW: "1" });
+    await controller.start();
+
+    const hanging = controller.askBtw("hang-btw");
+    await waitFor(
+      () => controller.btwState()?.turns.at(0)?.answer === "partial...",
+      "hanging btw started streaming",
+    );
+
+    await controller.closeBtw();
+    await hanging;
+
+    expect(controller.btwState()).toBeNull();
+  });
+
+  it("blocks slash commands from being sent as plain steer while busy (9A)", async () => {
+    const { controller, messages } = startRig({
+      FAKE_STEER_BTW: "1",
+      FAKE_COMMANDS: JSON.stringify([{ name: "auto-log", description: "Show Auto decisions" }]),
+    });
+    await controller.start();
+    await waitFor(
+      () => (controller.stateMessage().commands?.length ?? 0) > 0,
+      "agent commands advertised",
+    );
+
+    const turn = controller.send("steer-hang");
+    await waitFor(
+      () => ofType(messages, "agentText").some((m) => m.text.includes("working")),
+      "steer-hang working",
+    );
+
+    // Client command `/model` and advertised agent command `/auto-log` must NOT be sent as steer.
+    expect(await controller.send("/model gpt-4o")).toBe(false);
+    expect(await controller.send("/auto-log")).toBe(false);
+    expect(controller.stateMessage().pendingSteers).toBeUndefined();
+    expect(ofType(messages, "restoreDraft").map((m) => m.text)).toEqual(["/model gpt-4o", "/auto-log"]);
+    expect(ofType(messages, "notice").some((n) => n.text.includes("Slash commands cannot be sent as a mid-turn steer"))).toBe(
+      true,
+    );
+
+    // Normal paths like `/usr/bin/python` are NOT slash commands and still queue as steer.
+    expect(await controller.send("/usr/bin/python check this")).toBe(true);
+    expect(controller.stateMessage().pendingSteers).toHaveLength(1);
+
+    await controller.cancel();
+    await turn;
   });
 });

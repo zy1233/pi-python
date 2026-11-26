@@ -366,6 +366,12 @@ class CliConfig:
         wanted = self.auto.model
         return bool(wanted) and all(choice.id != wanted for choice in self.model_choices())
 
+    def btw_model_is_unknown(self) -> bool:
+        """``[btw] model`` names an id that no ``[model]`` or ``[[models]]`` entry has. Empty
+        means the session model. When unknown, ``/btw`` falls back to the session model."""
+        wanted = self.btw.model
+        return bool(wanted) and all(choice.id != wanted for choice in self.model_choices())
+
 
 def load_config(home: Path | str | None = None) -> CliConfig:
     import tomllib
@@ -626,7 +632,17 @@ def _from_toml(data: dict[str, Any]) -> CliConfig:
             "[[models]]. The model step cannot run, and Auto asks about every command that the "
             "rules cannot prove."
         )
-        config = replace(config, auto=replace(auto, notes=(*auto.notes, note)))
+        config = replace(config, auto=replace(config.auto, notes=(*config.auto.notes, note)))
+    if config.btw_model_is_unknown():
+        note = (
+            f'model in [btw] is "{btw.model}", which is not the id of a model in [model] or '
+            "[[models]]. /btw falls back to the session model."
+        )
+        config = replace(
+            config,
+            btw=replace(config.btw, notes=(*config.btw.notes, note)),
+            auto=replace(config.auto, notes=(*config.auto.notes, note)),
+        )
     return config
 
 
