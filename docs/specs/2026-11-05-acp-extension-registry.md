@@ -53,6 +53,8 @@ For an item that is in use and fails a rule, `docs/DESIGN.md` section 8.5 says: 
 | X6 | `_meta.terminal_info`, `_meta.terminal_output`, `_meta.terminal_exit` | keys in `tool_call` and `tool_call_update` | agent to client | in use; the convention is Zed's |
 | X7 | `_meta.yoloMode`, `_meta.autoMode` | keys in the `session/new` and `session/load` requests | client to agent | legacy, kept (D5; the user, 2026-11-04) |
 | X8 | `pi/yolo_mode_changed` | notification | client to agent | legacy, kept (D5; the user, 2026-11-04) |
+| X9 | `pi/session/steer` (with `pi/queue_update`, `_meta["pi/steered"]`, `_meta["pi/steerId"]`) | request + notifications | bidirectional | in use (Pre-Refactor spec 2026-11-26) |
+| X10 | `pi/session/btw`, `pi/session/btw_cancel`, `pi/btw_update` | requests + notification | bidirectional | in use (Pre-Refactor spec 2026-11-26) |
 
 Registered in another spec: the terminal login (`clientCapabilities.auth.terminal`, `_meta["terminal-auth"]`, the authentication method `pi-setup`). Zed defines the first two. The spec `docs/specs/2026-10-28-acp-terminal-auth-setup-design.md` (section 3.2) describes all three. They are not repeated here.
 
@@ -148,6 +150,30 @@ Paths of the pager are relative to `tui/crates/codegen/pi-pager/src/`. Paths of 
 - **Tests.** `test_permission_mode_wire.py`, `test_acp_stdio_tools.py` (over the wire), `test_acp_agent.py` (`test_permission_mode_notification_updates_live_session_policy`, `test_invalid_permission_mode_notification_is_ignored`), `python_agent_e2e.rs` (`announce_mode`).
 - **Status.** Legacy, kept, with the same decisions as X7. The standard equivalent is `session/set_config_option` (`mode`) or `session/set_mode`. The standard way is per session. This notification moves all sessions.
 
+### X9. `pi/session/steer` (mid-turn steering)
+
+- **Capability.** Announced by the agent in `initialize` response `_meta["pi/capabilities"]["steer"] = true`.
+- **Wire.**
+  - Request, client to agent: `pi/session/steer` (wire `_pi/session/steer`). Params: `{"sessionId": string, "steerId"?: string, "prompt": ContentBlock[]}`. Result: `{"sessionId": string, "steerId": string, "queued": true, "queueLength": number}` or `{"sessionId": string, "steerId": string, "queued": false, "reason": "idle" | "waiting_for_trust" | "waiting_for_barriers"}`.
+  - Notification, agent to client: `pi/queue_update` (wire `_pi/queue_update`). Params: `{"sessionId": string, "steer": [{"steerId": string, "preview": string}], "clearedByAbort": boolean, "clearedSteerIds"?: string[]}`.
+  - Live injection confirmation: standard `session/update` `user_message_chunk` with `_meta["pi/steered"] = true` and optional `_meta["pi/steerId"]`.
+- **Effect.** Enqueues a user steering message onto `AgentHarness.steer_queue` to be drained at the next turn boundary without interrupting in-flight tools. `AutoSession.note_user_message` is called only when the steered message is actually injected (`message_start`), never if cleared by `session/cancel`.
+- **Sent by / Read by.** Agent: `PiAcpAgent._handle_steer` and `_emit_queue_update` in `agent.py`, `project_steered_user_message` in `events.py`. VS Code: `AcpConnection.steerSession` and `ChatController`. Rust types: `pi-acp-lib/src/extensions/steer.rs`.
+- **Tests.** `test_steer_and_btw.py`, `vscode/test/steer-and-btw.test.ts`, `pi-acp-lib` unit tests.
+- **Status.** In use (`docs/specs/2026-11-26-pre-refactor-steer-and-btw-design.md`). Meets all five admission rules.
+
+### X10. `pi/session/btw` (ephemeral side chat)
+
+- **Capability.** Announced by the agent in `initialize` response `_meta["pi/capabilities"]["btw"] = true`; also advertised as `/btw` in `available_commands_update`.
+- **Wire.**
+  - Request, client to agent: `pi/session/btw` (wire `_pi/session/btw`). Params: `{"sessionId": string, "btwId": string, "prompt": ContentBlock[], "history"?: [{"role": "user"|"assistant", "text": string}]}`. Result: `{"sessionId": string, "btwId": string, "stopReason": "end_turn" | "cancelled" | "error", "error": string | null}`.
+  - Notification, agent to client: `pi/btw_update` (wire `_pi/btw_update`). Params: `{"sessionId": string, "btwId": string, "kind": "thought_delta" | "text_delta" | "done" | "error", "delta": string, "error": string | null, "stopReason"?: string}`.
+  - Request, client to agent: `pi/session/btw_cancel` (wire `_pi/session/btw_cancel`). Params: `{"sessionId": string, "btwId": string}`. Result: `{"sessionId": string, "btwId": string, "cancelled": true}` (idempotent).
+- **Effect.** Takes a lock-free read-only snapshot (`AgentHarness.snapshot_context_for_btw`), repairs dangling in-flight tool calls, projects tool history into tool-free text, and streams a side answer with `tools=[]` in parallel with any active main turn without modifying the main session JSONL.
+- **Sent by / Read by.** Agent: `PiAcpAgent._handle_btw` / `_handle_btw_cancel` in `agent.py`, `btw.py`. VS Code: `AcpConnection.askBtw` / `cancelBtw` and `ChatController`. Rust types: `pi-acp-lib/src/extensions/btw.rs`.
+- **Tests.** `test_steer_and_btw.py`, `vscode/test/steer-and-btw.test.ts`, `pi-acp-lib` unit tests.
+- **Status.** In use (`docs/specs/2026-11-26-pre-refactor-steer-and-btw-design.md`). Meets all five admission rules.
+
 ## 4. The admission check
 
 Each cell says how the item stands against the five rules. "Harmless" means: a client that does not know the item ignores it, and the agent works without it.
@@ -162,6 +188,8 @@ Each cell says how the item stands against the five rules. "Harmless" means: a c
 | X6 | meets: with `terminal/*` the client runs the command | yes (producer) | yes | no Rust party | not negotiated (the agent ignores the capability of Zed); harmless |
 | X7 | **fails**: the `mode` config option | yes | yes | no: the pager builds it in `app/effects/helpers.rs` | not negotiated; harmless |
 | X8 | **fails**: `session/set_config_option` and `session/set_mode` | yes | yes | no: the pager builds it in `app/effects/helpers.rs` | not negotiated; harmless |
+| X9 | meets: ACP v1 has no mid-turn steer or queue notification | yes | yes | yes (`extensions/steer.rs`) | negotiated (`_meta["pi/capabilities"]["steer"]`); harmless |
+| X10 | meets: ACP v1 has no ephemeral read-only side-chat channel | yes | yes | yes (`extensions/btw.rs`) | negotiated (`_meta["pi/capabilities"]["btw"]`); harmless |
 
 Result. Four items fail rule 1 (X1, X4, X7, X8). Each of them has a decision that keeps it (section 3). Six items have a Rust party (X1, X2, X4, X5, X7, X8) and none of them has its type in `pi-acp-lib`. No item is negotiated in `initialize`: the `initialize` response of the agent has no `_meta` (plan item 1.P5). Rule 3 is met by this document. The owner decided on 2026-11-05 that rules 4 and 5 apply to new items only (section 7), so the gap in rules 4 and 5 does not change any item.
 
