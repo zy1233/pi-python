@@ -1069,6 +1069,7 @@ pub(crate) async fn run(
         })
         .unwrap_or(true);
     app.cancel_rewind_enabled = connection.cancel_rewind_enabled;
+    app.pi_capabilities = connection.pi_capabilities;
 
     // Preserve auth methods so logout→re-login works without restarting.
     app.auth_methods = connection.auth_methods.clone();

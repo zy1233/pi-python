@@ -132,6 +132,10 @@ export class ChatViewProvider implements vscode.WebviewViewProvider, vscode.Disp
         this.latestMentionRequest = 0;
         this.post(controller.stateMessage());
         this.post({ type: "reset", transcript: controller.transcript() });
+        {
+          const btw = typeof controller.btwState === "function" ? controller.btwState() : null;
+          if (btw) this.post({ type: "btwState", btw });
+        }
         for (const item of this.pendingMentions.splice(0)) {
           this.post({ type: "insertMention", item });
         }
@@ -196,6 +200,15 @@ export class ChatViewProvider implements vscode.WebviewViewProvider, vscode.Disp
         return;
       case "pickAvatar":
         await this.actions.pickAvatar?.(message.role);
+        return;
+      case "btwAsk":
+        await controller.askBtw(message.text);
+        return;
+      case "btwCancel":
+        await controller.cancelBtw(message.btwId);
+        return;
+      case "btwClose":
+        await controller.closeBtw();
         return;
       case "showDiff": {
         const info = controller.diffFor(message.toolCallId);

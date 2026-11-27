@@ -999,6 +999,16 @@ pub struct AgentView {
     pub(crate) btw_focused: bool,
     /// Hit area for the [Esc] close button in the /btw panel title.
     pub(crate) hit_btw_close: HitArea,
+    /// Queued mid-turn steering instructions `(steer_id, text)` awaiting injection or abort restore.
+    pub(crate) pending_steers: Vec<(String, String)>,
+    /// In-flight `/btw` side-chat request id (`pi/session/btw`), if any.
+    pub(crate) active_btw_id: Option<String>,
+    /// Question for the in-flight `/btw` request.
+    pub(crate) active_btw_question: Option<String>,
+    /// Accumulated streaming answer for the in-flight `/btw` request.
+    pub(crate) active_btw_answer: String,
+    /// Client-side ephemeral multi-turn `/btw` history (capped to 10 messages).
+    pub(crate) btw_history: Vec<pi_acp_lib::extensions::btw::BtwHistoryTurn>,
     /// Toast message to display briefly (e.g., "Copied!" after y).
     /// Tuple of (message, remaining_ticks). Decremented each tick, removed at 0.
     /// Does **not** carry sticky status banners — see [`Self::sticky_toast`].

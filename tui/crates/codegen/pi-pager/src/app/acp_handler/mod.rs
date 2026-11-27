@@ -480,10 +480,179 @@ fn handle_ext_notification(notif: &acp::ExtNotification, app: &mut AppView) -> b
         );
         return false;
     }
+    if method == pi_acp_lib::extensions::steer::QUEUE_UPDATE_NOTIFICATION {
+        return handle_queue_update_notification(notif, app);
+    }
+    if method == pi_acp_lib::extensions::btw::BTW_UPDATE_NOTIFICATION {
+        return handle_btw_update_notification(notif, app);
+    }
     if crate::acp::is_session_update_ext_method(method) {
         return handle_session_notification(notif, app);
     }
     false
+}
+
+/// Puts steer text that the agent did not take back into the prompt box, in front of what the
+/// user has typed since, so that nothing is lost.
+pub(crate) fn restore_into_draft(agent: &mut crate::app::agent_view::AgentView, text: &str) {
+    let existing = agent.prompt.text();
+    if existing.trim().is_empty() {
+        agent.prompt.set_text(text);
+    } else {
+        agent.prompt.set_text(&format!("{text}\n{existing}"));
+    }
+}
+
+fn handle_queue_update_notification(notif: &acp::ExtNotification, app: &mut AppView) -> bool {
+    let Ok(update) = serde_json::from_str::<pi_acp_lib::extensions::steer::QueueUpdateNotification>(
+        notif.params.get(),
+    ) else {
+        return false;
+    };
+    let Some(agent) = app.agents.values_mut().find(|a| {
+        a.session
+            .session_id
+            .as_ref()
+            .is_some_and(|sid| sid.0.as_ref() == update.session_id)
+    }) else {
+        return false;
+    };
+    if update.cleared_by_abort {
+        let restored: Vec<String> = if update.cleared_steer_ids.is_empty() {
+            agent
+                .pending_steers
+                .drain(..)
+                .map(|(_, text)| text)
+                .collect()
+        } else {
+            let mut texts = Vec::new();
+            let ids = &update.cleared_steer_ids;
+            agent.pending_steers.retain(|(sid, text)| {
+                if ids.iter().any(|cleared| cleared == sid) {
+                    texts.push(text.clone());
+                    false
+                } else {
+                    true
+                }
+            });
+            texts
+        };
+        if !restored.is_empty() {
+            restore_into_draft(agent, &restored.join("\n"));
+        }
+        return true;
+    }
+    let live_ids: std::collections::HashSet<&str> = update
+        .steer
+        .iter()
+        .map(|item| item.steer_id.as_str())
+        .collect();
+    agent
+        .pending_steers
+        .retain(|(sid, _)| live_ids.contains(sid.as_str()));
+    true
+}
+
+pub(crate) const BTW_MAX_HISTORY_ENTRIES: usize = 20;
+pub(crate) const BTW_MAX_HISTORY_BYTES: usize = 32 * 1024;
+
+/// Keep `/btw` follow-up history within both the entry cap (20) and UTF-8 byte cap (32 KiB)
+/// by dropping the oldest user/assistant pairs first.
+pub(crate) fn trim_btw_history(history: &mut Vec<pi_acp_lib::extensions::btw::BtwHistoryTurn>) {
+    while history.len() > BTW_MAX_HISTORY_ENTRIES {
+        let drop_n = if history.len() >= 2 { 2 } else { 1 };
+        history.drain(..drop_n);
+    }
+    while history.iter().map(|t| t.text.len()).sum::<usize>() > BTW_MAX_HISTORY_BYTES {
+        if history.len() >= 2 {
+            history.drain(..2);
+        } else {
+            history.clear();
+            break;
+        }
+    }
+}
+
+fn handle_btw_update_notification(notif: &acp::ExtNotification, app: &mut AppView) -> bool {
+    use crate::views::btw_overlay::BtwOverlayState;
+    use pi_acp_lib::extensions::btw::{BtwHistoryRole, BtwHistoryTurn, BtwUpdateKind};
+
+    let Ok(update) = serde_json::from_str::<pi_acp_lib::extensions::btw::BtwUpdateNotification>(
+        notif.params.get(),
+    ) else {
+        return false;
+    };
+    let Some(agent) = app.agents.values_mut().find(|a| {
+        a.session
+            .session_id
+            .as_ref()
+            .is_some_and(|sid| sid.0.as_ref() == update.session_id)
+            && a.active_btw_id.as_deref() == Some(update.btw_id.as_str())
+    }) else {
+        return false;
+    };
+    let question = agent
+        .active_btw_question
+        .clone()
+        .unwrap_or_else(|| "Side question".to_string());
+    match update.kind {
+        BtwUpdateKind::ThoughtDelta => {}
+        BtwUpdateKind::TextDelta => {
+            agent.active_btw_answer.push_str(&update.delta);
+            let prev_scroll = agent
+                .btw_state
+                .as_ref()
+                .map(|s| s.scroll_offset())
+                .unwrap_or(0);
+            let mut next = BtwOverlayState::done(question, agent.active_btw_answer.clone());
+            if let BtwOverlayState::Done {
+                ref mut scroll_offset,
+                ..
+            } = next
+            {
+                *scroll_offset = prev_scroll;
+            }
+            agent.btw_state = Some(next);
+        }
+        BtwUpdateKind::Done => {
+            let answer = std::mem::take(&mut agent.active_btw_answer);
+            agent.active_btw_id = None;
+            agent.active_btw_question = None;
+            let cancelled = update.stop_reason.as_deref() == Some("cancelled");
+            let display_answer = if answer.is_empty() && cancelled {
+                "Cancelled.".to_string()
+            } else {
+                answer.clone()
+            };
+            agent.btw_state = Some(BtwOverlayState::done(question.clone(), display_answer));
+            agent.btw_focused = true;
+            if !cancelled && !answer.is_empty() {
+                agent.btw_history.push(BtwHistoryTurn {
+                    role: BtwHistoryRole::User,
+                    text: question,
+                });
+                agent.btw_history.push(BtwHistoryTurn {
+                    role: BtwHistoryRole::Assistant,
+                    text: answer,
+                });
+                trim_btw_history(&mut agent.btw_history);
+            }
+        }
+        BtwUpdateKind::Error => {
+            agent.active_btw_id = None;
+            agent.active_btw_question = None;
+            agent.active_btw_answer.clear();
+            let err = update
+                .error
+                .unwrap_or_else(|| "BTW request failed".to_string());
+            agent.btw_state = Some(BtwOverlayState::Error {
+                question,
+                error: err,
+            });
+            agent.btw_focused = false;
+        }
+    }
+    true
 }
 
 /// Handle an ACP `ext_method` request (blocking request that expects a response).

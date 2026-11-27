@@ -1,16 +1,25 @@
 import { readFileSync, statSync } from "node:fs";
 
-import { AcpConnection, AuthRequiredError, isMethodNotFound } from "./acp-connection.js";
+import { AcpConnection, AuthRequiredError, isMethodNotFound, parsePiCapabilities } from "./acp-connection.js";
 import type {
+  BtwHistoryTurn,
+  BtwUpdateNotification,
   InitializeResponse,
   NewSessionResponse,
+  PiCapabilities,
+  QueueUpdateNotification,
   RequestPermissionRequest,
   RequestPermissionResponse,
   SessionConfigOption,
   SessionNotification,
 } from "./acp-connection.js";
 import { AgentProcess, type StopTimings } from "./agent-process.js";
-import { parseAvailableCommandsUpdate, sameSlashCommands, type SlashCommandInfo } from "./composer.js";
+import {
+  parseAvailableCommandsUpdate,
+  resolveClientSlashCommand,
+  sameSlashCommands,
+  type SlashCommandInfo,
+} from "./composer.js";
 import { DiffTracker, type DiffInfo } from "./diff-tracker.js";
 import { classifyAuthRequired, classifyTurnFailure, failureNotice, setupText } from "./first-run.js";
 import type { Host, McpServerConfig } from "./host.js";
@@ -28,12 +37,15 @@ import {
 } from "./mentions.js";
 import {
   ALWAYS_APPROVE,
+  type BtwState,
+  type BtwTurnView,
   type HostMessage,
   type ImageAttachment,
   type ModeState,
   type ModelState,
   type NoticeAction,
   type NoticeLevel,
+  type PendingSteerView,
   type PermissionModeName,
   type PermissionOptionView,
   type PermissionOutcome,
@@ -81,6 +93,47 @@ const TRUST_REJECT_ID = "dont-trust-project";
 const TRUST_ACCEPT_ID = "trust-project";
 const SETUP_FALLBACK_ARGS = ["--setup"];
 const MODE_CONFIRM_MS = 5000;
+const BTW_COMMAND_RE = /^\s*\/btw(?:\s+([\s\S]*))?$/i;
+const MAX_BTW_HISTORY_TURNS = 10;
+const MAX_BTW_HISTORY_BYTES = 32 * 1024;
+
+/** Builds `/btw` follow-up history capped by both turn count and UTF-8 bytes (newest kept). */
+export function buildTrimmedBtwHistory(
+  turns: readonly BtwTurnView[],
+  maxTurns = MAX_BTW_HISTORY_TURNS,
+  maxBytes = MAX_BTW_HISTORY_BYTES,
+): BtwHistoryTurn[] {
+  const keptPairs: [BtwHistoryTurn, BtwHistoryTurn][] = [];
+  let totalBytes = 0;
+  for (let i = turns.length - 1; i >= 0 && keptPairs.length < maxTurns; i--) {
+    const turn = turns[i];
+    if (!turn || turn.status !== "done" || turn.answer.trim() === "") continue;
+    const pairBytes = Buffer.byteLength(turn.question, "utf8") + Buffer.byteLength(turn.answer, "utf8");
+    if (totalBytes + pairBytes > maxBytes) break;
+    totalBytes += pairBytes;
+    keptPairs.push([
+      { role: "user", text: turn.question },
+      { role: "assistant", text: turn.answer },
+    ]);
+  }
+  keptPairs.reverse();
+  const history: BtwHistoryTurn[] = [];
+  for (const [userTurn, assistantTurn] of keptPairs) {
+    history.push(userTurn, assistantTurn);
+  }
+  return history;
+}
+
+interface PendingIdleFallback {
+  text: string;
+  mentions: readonly MentionAttachment[];
+  images: readonly ImageAttachment[];
+}
+
+/** The one text that is sent, and restored if the send does not start: they must be equal. */
+function joinIdleFallbackTexts(queued: readonly PendingIdleFallback[]): string {
+  return queued.map((item) => item.text).join("\n\n");
+}
 
 export const ALWAYS_APPROVE_WARNING = {
   message: "Turn on Always approve?",
@@ -137,6 +190,7 @@ export class ChatController {
   private conn: AcpConnection | undefined;
   private command: AgentCommand | undefined;
   private initResult: InitializeResponse | undefined;
+  private piCapabilities: PiCapabilities = { steer: false, btw: false };
   private sessionId: string | undefined;
   private cwd: string | undefined;
   private mode: ModeState | undefined;
@@ -181,6 +235,10 @@ export class ChatController {
   private readonly sessionListeners = new Set<() => void>();
 
   private items: TranscriptItem[] = [];
+  private pendingSteers: PendingSteerView[] = [];
+  private pendingIdleFallbacks: PendingIdleFallback[] = [];
+  private btwTurns: BtwTurnView[] = [];
+  private readonly btwActiveIds = new Set<string>();
   private readonly toolItemIndices = new Map<string, number>();
   private readonly tools = new ToolCallStore();
   private readonly diffs: DiffTracker;
@@ -212,6 +270,11 @@ export class ChatController {
     return this.initResult?.agentCapabilities?.promptCapabilities?.image === true;
   }
 
+  btwState(): BtwState | null {
+    if (this.btwTurns.length === 0) return null;
+    return { turns: this.btwTurns.map((t) => ({ ...t })) };
+  }
+
   stateMessage(): StateMessage {
     const message: StateMessage = {
       type: "state",
@@ -226,7 +289,14 @@ export class ChatController {
         source: this.command.source,
       };
     }
-    if (this.initResult) message.supportsImages = this.supportsImages();
+    if (this.initResult) {
+      message.supportsImages = this.supportsImages();
+      message.supportsSteer = this.piCapabilities.steer;
+      message.supportsBtw = this.piCapabilities.btw;
+    }
+    if (this.pendingSteers.length > 0) {
+      message.pendingSteers = this.pendingSteers.map((s) => ({ ...s }));
+    }
     if (this.cwd !== undefined) message.cwd = this.cwd;
     if (this.mode) message.mode = this.visibleMode(this.mode);
     if (this.model !== undefined) message.model = this.model;
@@ -524,11 +594,14 @@ export class ChatController {
       const conn = AcpConnection.open(proc, {
         onUpdate: (notification) => this.onUpdate(notification),
         requestPermission: (request, signal) => this.onPermissionRequest(request, signal),
+        onQueueUpdate: (notification) => this.onQueueUpdate(notification),
+        onBtwUpdate: (notification) => this.onBtwUpdate(notification),
       });
       this.conn = conn;
       const init = await this.withTimeout(conn.initialize(this.host.extensionVersion), proc);
       if (generation !== this.generation) return;
       this.initResult = init;
+      this.piCapabilities = parsePiCapabilities(init);
       this.thinkingFile = this.parseThinkingText();
       const verdict = checkAgentIdentity({
         protocolVersion: init.protocolVersion,
@@ -859,6 +932,10 @@ export class ChatController {
     if (conn && sessionId && (this.status === "busy" || this.status === "cancelling")) {
       await conn.cancel(sessionId).catch(() => undefined);
     }
+    this.clearBtwLocal();
+    this.pendingSteers = [];
+    this.pendingIdleFallbacks = [];
+    this.piCapabilities = { steer: false, btw: false };
     await this.stopProcess();
     this.sessionId = undefined;
     this.models = undefined;
@@ -897,6 +974,10 @@ export class ChatController {
     this.finishActiveThought();
     this.cancelAllPermissions();
     this.clearCancelTimer();
+    this.clearBtwLocal();
+    this.pendingSteers = [];
+    this.pendingIdleFallbacks = [];
+    this.piCapabilities = { steer: false, btw: false };
     const text = this.exitText(info, proc);
     this.host.log.error(text);
     this.proc = undefined;
@@ -920,7 +1001,7 @@ export class ChatController {
 
   // ----- chat
 
-  /** Sends a prompt. Returns `false` if it was not sent (the view should not offer it). */
+  /** Sends a prompt, mid-turn steer, or `/btw` side question. Returns `false` if not sent. */
   async send(
     text: string,
     mentions: readonly MentionAttachment[] = [],
@@ -930,7 +1011,46 @@ export class ChatController {
     const sessionId = this.sessionId;
     const promptText = formatPromptWithMentions(text, mentions);
     const hasImages = images.length > 0;
-    if (this.status !== "ready" || !conn || !sessionId || (promptText.trim() === "" && !hasImages)) return false;
+    if (!conn || !sessionId || (promptText.trim() === "" && !hasImages)) return false;
+
+    // `/btw <question>` is allowed both when ready and when busy (never touches the main transcript).
+    const btwMatch = BTW_COMMAND_RE.exec(text);
+    if (btwMatch && mentions.length === 0) {
+      if (this.status !== "ready" && this.status !== "busy") return false;
+      const question = (btwMatch[1] ?? "").trim();
+      if (!this.piCapabilities.btw) {
+        this.pushNotice("warning", "This agent version does not support /btw side chat.");
+        return false;
+      }
+      if (question === "" && !hasImages) {
+        this.pushNotice("info", "Usage: /btw <question>");
+        return false;
+      }
+      if (hasImages && !this.supportsImages()) {
+        this.pushNotice("warning", "This agent does not support image attachments.");
+        return false;
+      }
+      return this.askBtw(question, hasImages ? images : undefined);
+    }
+
+    if (this.status === "busy") {
+      if (!this.piCapabilities.steer) return false;
+      if (mentions.length === 0 && !hasImages && this.isSlashCommandWhileBusy(text)) {
+        this.pushNotice(
+          "info",
+          "Slash commands cannot be sent as a mid-turn steer. Wait until the current turn finishes (or use /btw for a side question).",
+        );
+        this.emit({ type: "restoreDraft", text });
+        return false;
+      }
+      if (hasImages && !this.supportsImages()) {
+        this.pushNotice("warning", "This agent does not support image attachments.");
+        return false;
+      }
+      return this.sendSteer(text, mentions, promptText, hasImages ? images : undefined);
+    }
+
+    if (this.status !== "ready") return false;
     if (hasImages && !this.supportsImages()) {
       this.pushNotice("warning", "This agent does not support image attachments.");
       return false;
@@ -972,6 +1092,158 @@ export class ChatController {
       }
     }
     return true;
+  }
+
+  private isSlashCommandWhileBusy(text: string): boolean {
+    const trimmed = text.trim();
+    if (!trimmed.startsWith("/") || trimmed.includes("\n")) return false;
+    if (resolveClientSlashCommand(trimmed, this.stateMessage()) !== undefined) return true;
+    const match = /^\/([^\s/]+)(?:\s|$)/.exec(trimmed);
+    if (!match) return false;
+    const name = (match[1] ?? "").toLowerCase();
+    return this.agentCommands.some((cmd) => cmd.name.toLowerCase() === name);
+  }
+
+  private async sendSteer(
+    rawText: string,
+    mentions: readonly MentionAttachment[],
+    promptText: string,
+    images?: readonly ImageAttachment[],
+  ): Promise<boolean> {
+    const conn = this.conn;
+    const sessionId = this.sessionId;
+    if (!conn || !sessionId) return false;
+    const steerId = this.nextId("steer");
+    const displayText =
+      images && images.length > 0
+        ? promptText.trim() !== ""
+          ? `${images.map((img) => `[Image: ${img.name ?? img.mimeType}]`).join(" ")}\n\n${promptText}`
+          : images.map((img) => `[Image: ${img.name ?? img.mimeType}]`).join(" ")
+        : promptText;
+    this.pendingSteers.push({ id: steerId, text: displayText });
+    this.emit(this.stateMessage());
+    const generation = this.generation;
+    try {
+      const response = await conn.steerSession(sessionId, promptText, steerId, images);
+      if (generation !== this.generation) return true;
+      if (response.queued) return true;
+      this.pendingSteers = this.pendingSteers.filter((entry) => entry.id !== steerId);
+      this.emit(this.stateMessage());
+      if (response.reason === "idle") {
+        if (this.status === "ready") {
+          return this.send(rawText, mentions, images ?? []);
+        }
+        if (this.status === "busy") {
+          // Agent returned to idle before its prompt response reached us: queue for automatic
+          // dispatch as soon as finishTurn transitions this controller back to ready (S3).
+          this.pendingIdleFallbacks.push({ text: rawText, mentions, images: images ?? [] });
+          return true;
+        }
+      }
+      this.pushNotice("info", `Could not steer right now (${response.reason}).`);
+      this.emit({ type: "restoreDraft", text: rawText });
+      return false;
+    } catch (error) {
+      if (generation !== this.generation) return true;
+      this.pendingSteers = this.pendingSteers.filter((entry) => entry.id !== steerId);
+      this.emit(this.stateMessage());
+      if (isMethodNotFound(error)) {
+        this.piCapabilities = { ...this.piCapabilities, steer: false };
+        this.emit(this.stateMessage());
+        this.pushNotice("warning", "This agent version does not support mid-turn steering.");
+      } else {
+        this.pushNotice("error", `Steer failed: ${messageOf(error)}`);
+      }
+      this.emit({ type: "restoreDraft", text: rawText });
+      return false;
+    }
+  }
+
+  /** Sends an ephemeral `/btw` side question without touching the main transcript. */
+  async askBtw(question: string, images?: readonly ImageAttachment[]): Promise<boolean> {
+    const conn = this.conn;
+    const sessionId = this.sessionId;
+    const trimmed = question.trim();
+    if (!conn || !sessionId || (this.status !== "ready" && this.status !== "busy")) return false;
+    if (!this.piCapabilities.btw) {
+      this.pushNotice("warning", "This agent version does not support /btw side chat.");
+      return false;
+    }
+    if (trimmed === "" && (!images || images.length === 0)) return false;
+
+    const history = buildTrimmedBtwHistory(this.btwTurns);
+
+    const btwId = this.nextId("btw");
+    const turn: BtwTurnView = {
+      id: btwId,
+      question: trimmed,
+      answer: "",
+      thought: "",
+      status: "streaming",
+    };
+    this.btwTurns.push(turn);
+    this.btwActiveIds.add(btwId);
+    this.emit({ type: "btwState", btw: this.btwState() });
+    const generation = this.generation;
+
+    try {
+      const response = await conn.askBtw(sessionId, btwId, trimmed, history, images);
+      if (generation !== this.generation) return true;
+      this.btwActiveIds.delete(btwId);
+      const current = this.btwTurns.find((item) => item.id === btwId);
+      if (current) {
+        current.status =
+          response.stopReason === "cancelled"
+            ? "cancelled"
+            : response.stopReason === "error"
+              ? "error"
+              : "done";
+        if (response.error) current.error = response.error;
+        this.emit({ type: "btwState", btw: this.btwState() });
+      }
+    } catch (error) {
+      if (generation !== this.generation) return true;
+      this.btwActiveIds.delete(btwId);
+      const current = this.btwTurns.find((item) => item.id === btwId);
+      if (current) {
+        current.status = "error";
+        current.error = messageOf(error);
+        this.emit({ type: "btwState", btw: this.btwState() });
+      }
+    }
+    return true;
+  }
+
+  /** Cancels a single in-flight `/btw` side question without affecting the main turn. */
+  async cancelBtw(btwId: string): Promise<void> {
+    const conn = this.conn;
+    const sessionId = this.sessionId;
+    if (!conn || !sessionId || !this.btwActiveIds.has(btwId)) return;
+    await conn.cancelBtw(sessionId, btwId).catch((error) => {
+      this.host.log.warn(`pi/session/btw_cancel failed: ${messageOf(error)}`);
+    });
+  }
+
+  /** Closes the `/btw` overlay, cancelling any in-flight side questions and discarding ephemeral state. */
+  async closeBtw(): Promise<void> {
+    const conn = this.conn;
+    const sessionId = this.sessionId;
+    const active = [...this.btwActiveIds];
+    this.clearBtwLocal();
+    if (conn && sessionId) {
+      await Promise.all(
+        active.map((btwId) =>
+          conn.cancelBtw(sessionId, btwId).catch(() => undefined),
+        ),
+      );
+    }
+  }
+
+  private clearBtwLocal(): void {
+    const had = this.btwTurns.length > 0 || this.btwActiveIds.size > 0;
+    this.btwTurns = [];
+    this.btwActiveIds.clear();
+    if (had) this.emit({ type: "btwState", btw: null });
   }
 
   /** Saves all dirty files in the workspace. */
@@ -1016,6 +1288,11 @@ export class ChatController {
     this.segmentId = undefined;
     this.clearCancelTimer();
     this.cancelAllPermissions();
+    let unconsumedDrafts: string[] = [];
+    if (this.pendingSteers.length > 0 && stopReason !== "cancelled") {
+      unconsumedDrafts = this.pendingSteers.map((entry) => entry.text);
+      this.pendingSteers = [];
+    }
     if (this.turnStartedAt !== undefined) {
       this.lastTurnMs = Math.max(0, this.now() - this.turnStartedAt);
       this.turnStartedAt = undefined;
@@ -1039,8 +1316,36 @@ export class ChatController {
     }
     this.noteTurnFailure();
     this.emit({ type: "turnEnd", stopReason });
-    if (this.status === "busy" || this.status === "cancelling") this.setStatus("ready");
+    if (this.status === "busy" || this.status === "cancelling") {
+      this.setStatus("ready");
+    } else if (unconsumedDrafts.length > 0) {
+      this.emit(this.stateMessage());
+    }
+    if (unconsumedDrafts.length > 0) {
+      this.emit({ type: "restoreDraft", text: unconsumedDrafts.join("\n") });
+    }
     this.refreshSessionList();
+    if (this.pendingIdleFallbacks.length > 0) {
+      const queued = this.pendingIdleFallbacks;
+      this.pendingIdleFallbacks = [];
+      if (stopReason === "cancelled" || this.status !== "ready") {
+        this.emit({ type: "restoreDraft", text: joinIdleFallbackTexts(queued) });
+      } else {
+        void this.sendIdleFallbacks(queued);
+      }
+    }
+  }
+
+  /** Sends every steer that the agent refused as `idle` as one prompt, in the order typed (S3). */
+  private async sendIdleFallbacks(queued: readonly PendingIdleFallback[]): Promise<void> {
+    const text = joinIdleFallbackTexts(queued);
+    const mentions = queued.flatMap((item) => item.mentions);
+    const images = queued.flatMap((item) => item.images);
+    const sent = await this.send(text, mentions, images);
+    if (!sent) {
+      this.pushNotice("info", "Could not send the queued message. It is back in the input.");
+      this.emit({ type: "restoreDraft", text: joinIdleFallbackTexts(queued) });
+    }
   }
 
   /** A failed model call is an agent message `Error: ...`. A known kind gets a hint and a button. */
@@ -1098,6 +1403,9 @@ export class ChatController {
     this.turnInFlight = false;
     this.activeThought = undefined;
     this.items = [];
+    this.pendingSteers = [];
+    this.pendingIdleFallbacks = [];
+    this.clearBtwLocal();
     this.toolItemIndices.clear();
     this.tools.clear();
     this.diffs.clear();
@@ -1413,10 +1721,12 @@ export class ChatController {
     if (notification.sessionId !== this.sessionId) return;
     const update = notification.update as unknown as Record<string, unknown> & { sessionUpdate: string };
     const replay = isRecord(update._meta) && update._meta.isReplay === true;
+    const steered = isRecord(update._meta) && update._meta["pi/steered"] === true;
     switch (update.sessionUpdate) {
       case "user_message_chunk":
-        // Only the replay of `session/load` has these: a live prompt is shown when it is sent.
+        // Live prompts are shown when sent; replays and live steered injections arrive here.
         if (replay) this.onReplayedUser(update);
+        else if (steered) this.onSteeredUser(update);
         return;
       case "agent_message_chunk":
       case "agent_thought_chunk":
@@ -1511,6 +1821,80 @@ export class ChatController {
     const id = this.nextId("user");
     this.items.push({ type: "user", id, text: content.text });
     this.emit({ type: "userMessage", id, text: content.text });
+  }
+
+  private onSteeredUser(update: Record<string, unknown>): void {
+    const content = update.content;
+    if (!isRecord(content) || content.type !== "text" || typeof content.text !== "string" || content.text === "") return;
+    const meta = isRecord(update._meta) ? update._meta : undefined;
+    const steerId = typeof meta?.["pi/steerId"] === "string" ? meta["pi/steerId"] : undefined;
+    if (steerId !== undefined) {
+      const next = this.pendingSteers.filter((entry) => entry.id !== steerId);
+      if (next.length !== this.pendingSteers.length) {
+        this.pendingSteers = next;
+        this.emit(this.stateMessage());
+      }
+    } else if (this.pendingSteers.length > 0) {
+      this.pendingSteers = this.pendingSteers.slice(1);
+      this.emit(this.stateMessage());
+    }
+    this.finishActiveThought();
+    this.segmentId = undefined;
+    const id = this.nextId("user");
+    this.items.push({ type: "user", id, text: content.text, steered: true });
+    this.emit({ type: "userMessage", id, text: content.text, steered: true });
+  }
+
+  private onQueueUpdate(notification: QueueUpdateNotification): void {
+    if (notification.sessionId !== this.sessionId) return;
+    if (notification.clearedByAbort) {
+      const ids = notification.clearedSteerIds ? new Set(notification.clearedSteerIds) : undefined;
+      const toRestore = this.pendingSteers
+        .filter((entry) => !ids || ids.has(entry.id))
+        .map((entry) => entry.text);
+      if (this.pendingSteers.length > 0) {
+        this.pendingSteers = [];
+        this.emit(this.stateMessage());
+      }
+      if (toRestore.length > 0) {
+        this.emit({ type: "restoreDraft", text: toRestore.join("\n") });
+      }
+      return;
+    }
+    if (this.pendingSteers.length === 0) return;
+    const activeIds = new Set(notification.steer.map((s) => s.steerId).filter((id) => id !== ""));
+    if (notification.steer.length === 0) {
+      this.pendingSteers = [];
+      this.emit(this.stateMessage());
+    } else if (activeIds.size > 0) {
+      const next = this.pendingSteers.filter((entry) => activeIds.has(entry.id));
+      if (next.length !== this.pendingSteers.length) {
+        this.pendingSteers = next;
+        this.emit(this.stateMessage());
+      }
+    }
+  }
+
+  private onBtwUpdate(notification: BtwUpdateNotification): void {
+    if (notification.sessionId !== this.sessionId) return;
+    const turn = this.btwTurns.find((item) => item.id === notification.btwId);
+    if (!turn) return;
+    if (notification.kind === "text_delta" && notification.delta !== "") {
+      turn.answer += notification.delta;
+      this.emit({ type: "btwState", btw: this.btwState() });
+    } else if (notification.kind === "thought_delta" && notification.delta !== "") {
+      turn.thought += notification.delta;
+      this.emit({ type: "btwState", btw: this.btwState() });
+    } else if (notification.kind === "error") {
+      turn.status = "error";
+      if (notification.error) turn.error = notification.error;
+      this.btwActiveIds.delete(turn.id);
+      this.emit({ type: "btwState", btw: this.btwState() });
+    } else if (notification.kind === "done") {
+      turn.status = notification.stopReason === "cancelled" ? "cancelled" : "done";
+      this.btwActiveIds.delete(turn.id);
+      this.emit({ type: "btwState", btw: this.btwState() });
+    }
   }
 
   private onToolUpdate(update: Record<string, unknown>, replay = false): void {

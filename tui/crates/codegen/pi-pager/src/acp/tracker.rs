@@ -1447,6 +1447,15 @@ impl AcpUpdateTracker {
                 scrollback.finish_running(entry_id);
             }
         }
+        let is_steered = chunk
+            .meta
+            .as_ref()
+            .and_then(|m| m.get(pi_acp_lib::extensions::steer::STEERED_META_KEY))
+            .and_then(|v| v.as_bool())
+            .unwrap_or(false);
+        if is_steered {
+            self.skip_next_user_echo = false;
+        }
         if self.skip_next_user_echo {
             self.skip_next_user_echo = false;
             if text.contains("<command-name>") {

@@ -5,6 +5,7 @@ from __future__ import annotations
 import asyncio
 import logging
 import time
+import uuid
 from collections.abc import Awaitable, Callable, Iterable, Mapping, Sequence
 from dataclasses import dataclass
 from pathlib import Path
@@ -203,6 +204,19 @@ class _TurnState:
     active_tools: list[AgentTool]
 
 
+@dataclass(frozen=True)
+class BtwContextSnapshot:
+    """Read-only snapshot of a session's LLM context for ephemeral ``/btw`` side chats.
+
+    Taken without acquiring the harness phase lock and without mutating session storage.
+    """
+
+    system_prompt: str
+    messages: list[AgentMessage]
+    model: Model
+    thinking_level: ThinkingLevel
+
+
 PendingWrite = dict[str, Any]
 
 
@@ -308,12 +322,16 @@ class AgentHarness:
         self.steering_mode = steering_mode
         self.follow_up_mode = follow_up_mode
         self.steer_queue: list[AgentMessage] = []
+        # In-memory tracking of steer message identity -> steer_id so subscribers can
+        # distinguish steered user messages without altering the pi v3 JSONL UserMessage schema.
+        self._steer_ids: dict[int, str] = {}
         self.follow_up_queue: list[AgentMessage] = []
         self.next_turn_queue: list[AgentMessage] = []
         self.pending_session_writes: list[PendingWrite] = []
         self._subscribers: list[Callable[[AgentHarnessEvent, Any | None], Any]] = []
         self._hooks: dict[str, list[Callable[[Any], Any]]] = {}
         self._run_abort_controller: _AbortController | None = None
+        self._abort_depth: int = 0
         self._cached_system_prompt: str | None = None
 
         # Phase 7: Extension API
@@ -1339,13 +1357,81 @@ class AgentHarness:
                 current = result.payload
         return current
 
-    async def _emit_queue_update(self) -> None:
+    async def _emit_queue_update(
+        self, *, undelivered_steer: list[AgentMessage] | None = None
+    ) -> None:
         await self._emit_any(
             QueueUpdateEvent(
                 steer=list(self.steer_queue),
                 followUp=list(self.follow_up_queue),
                 nextTurn=list(self.next_turn_queue),
+                undeliveredSteer=list(undelivered_steer) if undelivered_steer else [],
             )
+        )
+
+    async def _clear_undelivered_steers(self) -> list[AgentMessage]:
+        """Drop any user-steered messages still sitting in ``steer_queue`` when a run ends.
+
+        Preserves non-steered custom messages (e.g. background ``trigger_message`` items whose
+        identities are not in ``_steer_ids``). Emits a ``queue_update`` carrying
+        ``undeliveredSteer`` before removing their ``_steer_ids`` entries so subscribers can
+        correlate ``clearedSteerIds`` and restore drafts on the client.
+        """
+        undelivered = [msg for msg in self.steer_queue if id(msg) in self._steer_ids]
+        if not undelivered:
+            return []
+        self.steer_queue = [msg for msg in self.steer_queue if id(msg) not in self._steer_ids]
+        try:
+            await self._emit_queue_update(undelivered_steer=undelivered)
+        except Exception:
+            # The run is over and the queue is already clean: a failed notification must not
+            # replace the result or the error of the run.
+            logger.warning("queue_update for undelivered steers failed", exc_info=True)
+        finally:
+            for msg in undelivered:
+                self._steer_ids.pop(id(msg), None)
+        return undelivered
+
+    async def _compute_system_prompt(self, active_tools: list[AgentTool]) -> str:
+        system_prompt = "You are a helpful assistant."
+        if isinstance(self.system_prompt, str):
+            system_prompt = self.system_prompt
+        elif self.system_prompt:
+            system_prompt = await _maybe_await(
+                self.system_prompt(
+                    {
+                        "env": self.env,
+                        "session": self.session,
+                        "model": self.model,
+                        "thinking_level": self.thinking_level,
+                        "tools": list(self._tools.values()),
+                        "active_tools": active_tools,
+                        "deferred_tool_names": self.deferred_tool_names,
+                        "resources": self.resources,
+                    }
+                )
+            )
+        return build_harness_system_prompt(system_prompt, self.resources)
+
+    async def snapshot_context_for_btw(self) -> BtwContextSnapshot:
+        """Read-only snapshot of the current LLM context for an ephemeral ``/btw`` side chat.
+
+        Does not acquire the harness phase lock and never writes to session storage (a blank
+        ``DeferredJsonlSessionStorage`` stays unwritten on disk).
+        """
+        context = await self.session.build_context()
+        if self._cached_system_prompt is not None:
+            system_prompt = self._cached_system_prompt
+        else:
+            active_tools = [
+                self._tools[name] for name in self.active_tool_names if name in self._tools
+            ]
+            system_prompt = await self._compute_system_prompt(active_tools)
+        return BtwContextSnapshot(
+            system_prompt=system_prompt,
+            messages=list(context.messages),
+            model=self.model,
+            thinking_level=self.thinking_level,
         )
 
     async def _create_turn_state(self) -> _TurnState:
@@ -1356,25 +1442,7 @@ class AgentHarness:
         if self._cached_system_prompt is not None:
             system_prompt = self._cached_system_prompt
         else:
-            system_prompt = "You are a helpful assistant."
-            if isinstance(self.system_prompt, str):
-                system_prompt = self.system_prompt
-            elif self.system_prompt:
-                system_prompt = await _maybe_await(
-                    self.system_prompt(
-                        {
-                            "env": self.env,
-                            "session": self.session,
-                            "model": self.model,
-                            "thinking_level": self.thinking_level,
-                            "tools": list(self._tools.values()),
-                            "active_tools": active_tools,
-                            "deferred_tool_names": self.deferred_tool_names,
-                            "resources": self.resources,
-                        }
-                    )
-                )
-            system_prompt = build_harness_system_prompt(system_prompt, self.resources)
+            system_prompt = await self._compute_system_prompt(active_tools)
             self._cached_system_prompt = system_prompt
         return _TurnState(
             messages=list(context.messages),
@@ -1438,8 +1506,11 @@ class AgentHarness:
         if event.type == "message_end":
             assert isinstance(event, MessageEndEvent)
             await self.session.append_message(event.message)
-            await self._emit_any(event, signal)
-            await self._emit_hook(event)
+            try:
+                await self._emit_any(event, signal)
+                await self._emit_hook(event)
+            finally:
+                self._steer_ids.pop(id(event.message), None)
             return
         if event.type == "turn_end":
             assert isinstance(event, TurnEndEvent)
@@ -1671,8 +1742,8 @@ class AgentHarness:
 
         controller = _AbortController()
         self._run_abort_controller = controller
-        if self._closed:
-            # close() ran while this turn was still being set up, so it found no run to abort.
+        if self._closed or self._abort_depth > 0:
+            # close() or begin_abort() ran while this turn was still being set up.
             controller.abort()
 
         def get_turn_state() -> _TurnState:
@@ -1712,6 +1783,7 @@ class AgentHarness:
         finally:
             self._run_abort_controller = None
             await self._flush_pending_session_writes()
+            await self._clear_undelivered_steers()
 
         for message in reversed(new_messages):
             if getattr(message, "role", None) == "assistant":
@@ -1751,6 +1823,7 @@ class AgentHarness:
             await self.wait_turn_barriers()
         except asyncio.CancelledError:
             self._set_phase("idle")
+            await self._clear_undelivered_steers()
             raise
         try:
             return await self._execute_turn(
@@ -1758,16 +1831,53 @@ class AgentHarness:
             )
         except AgentHarnessError:
             self._set_phase("idle")
+            await self._clear_undelivered_steers()
             raise
         except Exception as e:
             self._set_phase("idle")
+            await self._clear_undelivered_steers()
             raise normalize_harness_error(e, "unknown") from e
 
-    async def steer(self, text: str, images: list[ImageContent] | None = None) -> None:
-        if self.phase == "idle":
-            raise AgentHarnessError("invalid_state", "Cannot steer while idle")
-        self.steer_queue.append(_create_user_message(text, images))
+    @property
+    def is_aborting(self) -> bool:
+        """Whether an abort is currently in progress for this harness."""
+        return self._abort_depth > 0 or (
+            self._run_abort_controller is not None and self._run_abort_controller.signal.aborted
+        )
+
+    def begin_abort(self) -> None:
+        """Synchronously mark the harness as aborting before spawning ``abort()``.
+
+        Closes the window where a concurrent ``steer()`` could be accepted after ``session/cancel``
+        arrives but before the scheduled ``abort()`` task starts executing.
+        """
+        self._abort_depth += 1
+        if self._run_abort_controller is not None:
+            self._run_abort_controller.abort()
+
+    async def steer(
+        self,
+        text: str,
+        images: list[ImageContent] | None = None,
+        *,
+        steer_id: str | None = None,
+    ) -> str:
+        if self._closed or self.phase == "idle" or self.is_aborting:
+            raise AgentHarnessError("invalid_state", "Cannot steer while idle or aborting")
+        message = _create_user_message(text, images)
+        sid = steer_id or str(uuid.uuid4())
+        self._steer_ids[id(message)] = sid
+        self.steer_queue.append(message)
         await self._emit_queue_update()
+        return sid
+
+    def steer_id_for(self, message: AgentMessage) -> str | None:
+        """Return the in-memory steer_id for a steered UserMessage, or ``None``."""
+        return self._steer_ids.get(id(message))
+
+    def is_steered_message(self, message: AgentMessage) -> bool:
+        """Whether *message* was enqueued via ``steer()`` (not a normal opening prompt)."""
+        return id(message) in self._steer_ids
 
     async def follow_up(self, text: str, images: list[ImageContent] | None = None) -> None:
         if self.phase == "idle":
@@ -1871,28 +1981,33 @@ class AgentHarness:
     async def wait_for_idle(self) -> None:
         await self._idle_event.wait()
 
-    async def abort(self) -> dict[str, list[AgentMessage]]:
+    async def abort(self, *, _from_begin: bool = False) -> dict[str, list[AgentMessage]]:
         from pi_agent_harness.types import AbortEvent
 
+        if not _from_begin:
+            self.begin_abort()
         cleared_steer = list(self.steer_queue)
         cleared_follow_up = list(self.follow_up_queue)
         self.steer_queue.clear()
         self.follow_up_queue.clear()
-        if self._run_abort_controller:
-            self._run_abort_controller.abort()
 
         errors: list[Exception] = []
-        for step in (
-            self._emit_queue_update,
-            self.wait_for_idle,
-            lambda: self._emit_any(
-                AbortEvent(clearedSteer=cleared_steer, clearedFollowUp=cleared_follow_up)
-            ),
-        ):
-            try:
-                await step()
-            except Exception as e:
-                errors.append(e)
+        try:
+            for step in (
+                self._emit_queue_update,
+                self.wait_for_idle,
+                lambda: self._emit_any(
+                    AbortEvent(clearedSteer=cleared_steer, clearedFollowUp=cleared_follow_up)
+                ),
+            ):
+                try:
+                    await step()
+                except Exception as e:
+                    errors.append(e)
+        finally:
+            for message in cleared_steer:
+                self._steer_ids.pop(id(message), None)
+            self._abort_depth = max(0, self._abort_depth - 1)
         self._raise_hook_errors(errors)
         return {"cleared_steer": cleared_steer, "cleared_follow_up": cleared_follow_up}
 

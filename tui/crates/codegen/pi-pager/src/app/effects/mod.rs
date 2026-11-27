@@ -822,6 +822,105 @@ pub(crate) fn execute(
                 }
             });
         }
+        Effect::SteerSession {
+            agent_id,
+            session_id,
+            steer_id,
+            prompt_blocks,
+            display_text,
+        } => {
+            let tx = acp_tx.clone();
+            tasks.spawn(async move {
+                let req = pi_acp_lib::extensions::steer::SteerSessionRequest {
+                    session_id: session_id.0.to_string(),
+                    prompt: prompt_blocks,
+                    steer_id: Some(steer_id.clone()),
+                };
+                let ext = match serde_json::value::to_raw_value(&req) {
+                    Ok(raw) => acp::ExtRequest::new(
+                        pi_acp_lib::extensions::steer::STEER_METHOD,
+                        raw.into(),
+                    ),
+                    Err(error) => {
+                        return TaskResult::SteerSessionComplete {
+                            agent_id,
+                            steer_id,
+                            display_text,
+                            result: Err(sanitize_user_error(&error.to_string())),
+                        };
+                    }
+                };
+                let result = match acp_send(ext, &tx).await {
+                    Ok(resp) => serde_json::to_value(&resp)
+                        .and_then(serde_json::from_value::<pi_acp_lib::extensions::steer::SteerSessionResponse>)
+                        .map_err(|e| sanitize_user_error(&e.to_string())),
+                    Err(error) => Err(sanitize_user_error(&error.to_string())),
+                };
+                TaskResult::SteerSessionComplete {
+                    agent_id,
+                    steer_id,
+                    display_text,
+                    result,
+                }
+            });
+        }
+        Effect::SendBtw {
+            agent_id,
+            session_id,
+            btw_id,
+            question,
+            history,
+        } => {
+            let tx = acp_tx.clone();
+            tasks.spawn(async move {
+                let req = pi_acp_lib::extensions::btw::BtwRequest {
+                    session_id: session_id.0.to_string(),
+                    btw_id: btw_id.clone(),
+                    prompt: vec![acp::ContentBlock::Text(acp::TextContent::new(question))],
+                    history,
+                };
+                let ext = match serde_json::value::to_raw_value(&req) {
+                    Ok(raw) => {
+                        acp::ExtRequest::new(pi_acp_lib::extensions::btw::BTW_METHOD, raw.into())
+                    }
+                    Err(error) => {
+                        return TaskResult::BtwComplete {
+                            agent_id,
+                            btw_id,
+                            result: Err(sanitize_user_error(&error.to_string())),
+                        };
+                    }
+                };
+                let result = match acp_send(ext, &tx).await {
+                    Ok(resp) => serde_json::to_value(&resp)
+                        .and_then(serde_json::from_value::<pi_acp_lib::extensions::btw::BtwResponse>)
+                        .map_err(|e| sanitize_user_error(&e.to_string())),
+                    Err(error) => Err(sanitize_user_error(&error.to_string())),
+                };
+                TaskResult::BtwComplete {
+                    agent_id,
+                    btw_id,
+                    result,
+                }
+            });
+        }
+        Effect::CancelBtw { session_id, btw_id } => {
+            let tx = acp_tx.clone();
+            tasks.spawn(async move {
+                let req = pi_acp_lib::extensions::btw::BtwCancelRequest {
+                    session_id: session_id.0.to_string(),
+                    btw_id,
+                };
+                if let Ok(raw) = serde_json::value::to_raw_value(&req) {
+                    let ext = acp::ExtRequest::new(
+                        pi_acp_lib::extensions::btw::BTW_CANCEL_METHOD,
+                        raw.into(),
+                    );
+                    let _ = acp_send(ext, &tx).await;
+                }
+                TaskResult::BtwCancelComplete
+            });
+        }
     }
     (false, meta)
 }

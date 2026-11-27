@@ -433,6 +433,7 @@ class QueueUpdateEvent(BaseModel):
     steer: list[AgentMessage]
     followUp: list[AgentMessage]
     nextTurn: list[AgentMessage]
+    undeliveredSteer: list[AgentMessage] = Field(default_factory=list)
 
 
 class SavePointEvent(BaseModel):

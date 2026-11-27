@@ -351,6 +351,9 @@ impl AgentView {
         use crate::scrollback::block::RenderBlock;
         use crate::scrollback::blocks::BtwBlock;
         use crate::views::btw_overlay::BtwOverlayState;
+        let cancel_btw = self.active_btw_id.take();
+        self.active_btw_question = None;
+        self.active_btw_answer.clear();
         if let Some(BtwOverlayState::Done {
             question, content, ..
         }) = self.btw_state.take()
@@ -363,6 +366,12 @@ impl AgentView {
         self.minimal_btw_lifecycle = None;
         self.btw_focused = false;
         self.clear_btw_drag_state();
+        if let (Some(btw_id), Some(session_id)) = (cancel_btw, self.session.session_id.clone()) {
+            return InputOutcome::Action(crate::app::actions::Action::CancelBtw {
+                session_id,
+                btw_id,
+            });
+        }
         InputOutcome::Changed
     }
 

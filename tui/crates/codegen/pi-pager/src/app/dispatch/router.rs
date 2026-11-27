@@ -475,6 +475,9 @@ pub(crate) fn dispatch(action: Action, app: &mut AppView) -> Vec<Effect> {
                 after: crate::app::actions::AfterSessionDelete::Stay,
             }]
         }
+        Action::CancelBtw { session_id, btw_id } => {
+            vec![Effect::CancelBtw { session_id, btw_id }]
+        }
         Action::NewSessionAnswered {
             worktree,
             persist_mode,

@@ -545,6 +545,8 @@ pub struct AppView {
     /// back into the input box. Gated by `GROK_CANCEL_REWIND` env /
     /// `[features] cancel_rewind` config / remote settings flag.
     pub cancel_rewind_enabled: bool,
+    /// Optional `pi/*` capabilities advertised by the agent (`steer`, `btw`).
+    pub pi_capabilities: pi_acp_lib::extensions::steer::PiCapabilities,
     /// Stateful prompt widget rendered on the welcome screen (persists input across frames).
     pub welcome_prompt: PromptWidget,
     /// The single slash-command MRU/recency store. Owned here and injected
@@ -1167,6 +1169,7 @@ impl AppView {
             session_picker_grouped: false,
             scheduler_background_loops_seed: true,
             cancel_rewind_enabled: true,
+            pi_capabilities: Default::default(),
             keyboard_normalizer: KeyboardNormalizer::from_terminal_context(),
             voice_mode_enabled: false,
             voice_ui_active: false,

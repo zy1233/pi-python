@@ -100,6 +100,8 @@ pub struct AcpConnection {
     pub auth_meta: Option<serde_json::Value>,
     /// Whether cancel-rewind is enabled (resolved by shell from config layers).
     pub cancel_rewind_enabled: bool,
+    /// Optional `pi/*` capabilities advertised in `InitializeResponse._meta["pi/capabilities"]`.
+    pub pi_capabilities: pi_acp_lib::extensions::steer::PiCapabilities,
     /// `AuthManager` for pager-side authenticated channels (voice STT/TTS).
     ///
     /// Built off the local `auth.json`; resolves a fresh bearer per request via
@@ -215,6 +217,7 @@ pub async fn connect(cancel: &CancellationToken, flags: ConnectFlags) -> Result<
         default_auth_method_id,
         available_commands,
         cancel_rewind_enabled,
+        pi_capabilities,
     ) = match initialize(&tx, &flags).await {
         Ok(initialized) => initialized,
         // What `initialize` saw is a closed channel; the bridge knows why it closed.
@@ -257,6 +260,7 @@ pub async fn connect(cancel: &CancellationToken, flags: ConnectFlags) -> Result<
         auth_start_mode,
         auth_meta,
         cancel_rewind_enabled,
+        pi_capabilities,
         auth_manager,
     })
 }
@@ -313,10 +317,15 @@ fn build_initialize_meta(flags: &ConnectFlags) -> serde_json::Value {
 
 /// Build `client_capabilities.meta`.
 ///
-/// Phase 4: do not advertise grok `legacy ext RPC` capabilities. Python is standard-ACP
-/// only and ignores vendor `_meta`.
+/// Advertises the documented `pi/capabilities` extension flags supported by `zypi`
+/// (X9 `steer`, X10 `btw`) while omitting legacy vendor extension keys.
 fn client_capabilities_meta(_flags: &ConnectFlags) -> serde_json::Value {
-    serde_json::json!({})
+    serde_json::json!({
+        "pi/capabilities": {
+            "steer": true,
+            "btw": true,
+        }
+    })
 }
 
 /// Parse `defaultAuthMethodId` from `InitializeResponse.meta`.
@@ -340,6 +349,7 @@ async fn initialize(
     Option<acp::AuthMethodId>,
     Vec<acp::AvailableCommand>,
     bool,
+    pi_acp_lib::extensions::steer::PiCapabilities,
 )> {
     let req = acp::InitializeRequest::new(acp::ProtocolVersion::V1)
         .client_capabilities(
@@ -381,6 +391,9 @@ async fn initialize(
         .and_then(|v| v.as_bool())
         .unwrap_or(true);
 
+    let pi_capabilities =
+        pi_acp_lib::extensions::steer::PiCapabilities::from_meta(resp.meta.as_ref());
+
     let default_auth_method_id = parse_default_auth_method_id(resp.meta.as_ref());
 
     Ok((
@@ -390,6 +403,7 @@ async fn initialize(
         default_auth_method_id,
         available_commands,
         cancel_rewind_enabled,
+        pi_capabilities,
     ))
 }
 
@@ -840,7 +854,10 @@ mod tests {
     #[test]
     fn client_capabilities_meta_omits_vendor_x_ai_keys() {
         let meta = client_capabilities_meta(&ConnectFlags::default());
-        assert!(meta.as_object().is_some_and(|o| o.is_empty()));
+        assert_eq!(
+            meta["pi/capabilities"],
+            serde_json::json!({"steer": true, "btw": true})
+        );
         let with_hunk = client_capabilities_meta(&ConnectFlags {
             hunk_tracker_mode: Some("mixed".into()),
             status_line: true,

@@ -29,6 +29,8 @@ import {
   MAX_IMAGES,
   MAX_IMAGE_DATA_CHARS,
   type AvatarState,
+  type BtwState,
+  type BtwTurnView,
   type HostMessage,
   type ImageAttachment,
   type ImageMimeType,
@@ -81,13 +83,14 @@ const banner = el("section", { class: "banner" });
 const transcript = el("main", { class: "transcript", dataset: { testid: "transcript" } });
 const copyStatus = el("span", { class: "sr-only", role: "status" });
 const inputLabel = el("label", { class: "sr-only", for: "chat-input", text: "Message to zycode" });
+const DEFAULT_PLACEHOLDER =
+  "Ask zycode (@ to mention, / for commands, or use the @ and / buttons with an input method; Enter to send, Shift+Enter for a new line)";
 const input = el("textarea", {
   id: "chat-input",
   class: "input",
   ariaAutocomplete: "list",
 });
-input.placeholder =
-  "Ask zycode (@ to mention, / for commands, or use the @ and / buttons with an input method; Enter to send, Shift+Enter for a new line)";
+input.placeholder = DEFAULT_PLACEHOLDER;
 input.rows = 3;
 const popover = el("div", {
   id: "composer-menu",
@@ -96,12 +99,63 @@ const popover = el("div", {
 });
 popover.tabIndex = -1;
 const popoverStatus = el("span", { class: "sr-only", role: "status" });
+const pendingSteerBar = el("div", {
+  class: "pending-steers",
+  role: "status",
+  ariaLabel: "Queued steering instructions",
+  dataset: { testid: "pending-steers" },
+  hidden: true,
+});
 const chipsBar = el("div", {
   class: "composer-chips",
   role: "list",
   ariaLabel: "References and images",
   hidden: true,
 });
+const btwCloseButton = el("button", {
+  class: "btw-close secondary",
+  type: "button",
+  text: "×",
+  ariaLabel: "Close BTW side chat",
+  title: "Close BTW side chat (Esc)",
+});
+const btwHeader = el(
+  "div",
+  { class: "btw-head" },
+  el(
+    "div",
+    { class: "btw-title-wrap" },
+    el("strong", { class: "btw-title", text: "BTW · Side chat" }),
+    el("span", { class: "btw-subtitle", text: "not saved to main chat" }),
+  ),
+  btwCloseButton,
+);
+const btwTurnsEl = el("div", { class: "btw-turns" });
+const btwInput = el("input", {
+  class: "btw-input",
+  type: "text",
+  ariaLabel: "BTW follow-up question",
+});
+btwInput.placeholder = "Ask a follow-up in BTW… (Enter to ask, Esc to close)";
+const btwAskButton = el("button", {
+  class: "secondary btw-ask-btn",
+  type: "button",
+  text: "Ask",
+});
+const btwFooter = el("div", { class: "btw-footer" }, btwInput, btwAskButton);
+const btwPanel = el(
+  "section",
+  {
+    class: "btw-panel",
+    role: "region",
+    ariaLabel: "BTW side chat",
+    dataset: { testid: "btw-panel" },
+    hidden: true,
+  },
+  btwHeader,
+  btwTurnsEl,
+  btwFooter,
+);
 const mentionTriggerButton = el("button", {
   class: "trigger-btn secondary",
   type: "button",
@@ -132,8 +186,19 @@ const composerBar = el(
   el("div", { class: "composer-triggers" }, mentionTriggerButton, slashTriggerButton),
   el("div", { class: "actions" }, stopButton, sendButton),
 );
-const composer = el("footer", { class: "composer" }, jumpBottomButton, popover, popoverStatus, chipsBar, inputLabel, input, composerBar);
-root.append(header, banner, transcript, composer);
+const composer = el(
+  "footer",
+  { class: "composer" },
+  jumpBottomButton,
+  popover,
+  popoverStatus,
+  pendingSteerBar,
+  chipsBar,
+  inputLabel,
+  input,
+  composerBar,
+);
+root.append(header, banner, transcript, btwPanel, composer);
 
 /**
  * The text of an answer is drawn at most once in this time. A draw reads the whole text again and makes
@@ -201,6 +266,7 @@ type ToolEntry = {
 const MAX_PERSISTED_OPEN_DETAILS = 500;
 
 let state: StateMessage = { type: "state", status: "stopped", canRestart: true };
+let btwState: BtwState | null = null;
 let avatars: AvatarState = {};
 let thoughtClockTimer: number | undefined;
 const messageEls = new Map<string, MessageEntry>();
@@ -679,12 +745,198 @@ function renderBanner(): void {
   }
 }
 
+const BTW_INPUT_RE = /^\s*\/btw(?:\s|$)/i;
+
+function isBtwInput(text: string): boolean {
+  return BTW_INPUT_RE.test(text);
+}
+
+function canSubmitNow(): boolean {
+  if (state.status === "ready") return true;
+  if (state.status === "busy") {
+    return state.supportsSteer === true || isBtwInput(input.value);
+  }
+  return false;
+}
+
+function syncSendButton(): void {
+  const busy = state.status === "busy";
+  const btw = isBtwInput(input.value);
+  sendButton.disabled = !canSubmitNow();
+  if (busy && state.supportsSteer === true && !btw) {
+    sendButton.textContent = "Steer";
+    sendButton.title = "Queue a steering instruction for the next turn boundary";
+  } else {
+    sendButton.textContent = "Send";
+    sendButton.title = "";
+  }
+}
+
+function renderPendingSteers(): void {
+  const items = state.pendingSteers ?? [];
+  pendingSteerBar.replaceChildren();
+  pendingSteerBar.hidden = items.length === 0;
+  if (items.length === 0) return;
+  pendingSteerBar.append(
+    el("span", { class: "pending-steer-label", text: items.length === 1 ? "Queued steer" : `Queued steers (${items.length})` }),
+  );
+  const list = el("div", { class: "pending-steer-list" });
+  for (const item of items) {
+    list.append(el("div", { class: "pending-steer-item", text: item.text, title: item.text }));
+  }
+  pendingSteerBar.append(list);
+}
+
+interface BtwTurnDom {
+  article: HTMLElement;
+  stopBtn: HTMLButtonElement;
+  copyBtn: HTMLButtonElement;
+  thoughtDetails: HTMLElement;
+  thoughtBody: HTMLElement;
+  answerEl: HTMLElement;
+  errorEl: HTMLElement;
+  renderedAnswer: string;
+  renderedThought: string;
+  renderedStatus: BtwTurnView["status"] | "";
+  renderedError: string;
+  renderedShowThinking: boolean;
+}
+
+const btwTurnNodes = new Map<string, BtwTurnDom>();
+
+function createBtwTurnDom(turn: BtwTurnView): BtwTurnDom {
+  const stopBtn = button("Stop", () => send({ type: "btwCancel", btwId: turn.id }), "secondary btw-stop-btn");
+  const copyBtn = copyButton(turn.answer, "Copy BTW answer", "btw-copy", "Copy");
+  const headActions = el("div", { class: "btw-turn-actions" }, stopBtn, copyBtn);
+  const qRow = el("div", { class: "btw-q-row" }, el("div", { class: "btw-q", text: turn.question }), headActions);
+  const thoughtBody = el("div", { class: "thought-body" });
+  const thoughtDetails = el("details", { class: "thought btw-thought" }, el("summary", { text: "Thinking" }), thoughtBody);
+  const answerEl = el("div", { class: "btw-a body" });
+  answerEl.setAttribute("aria-live", "polite");
+  const errorEl = el("div", { class: "btw-error" });
+  const article = el(
+    "article",
+    { class: `btw-turn ${turn.status}`, dataset: { btwId: turn.id } },
+    qRow,
+    thoughtDetails,
+    answerEl,
+    errorEl,
+  );
+  return {
+    article,
+    stopBtn,
+    copyBtn,
+    thoughtDetails,
+    thoughtBody,
+    answerEl,
+    errorEl,
+    renderedAnswer: "\0",
+    renderedThought: "\0",
+    renderedStatus: "",
+    renderedError: "\0",
+    renderedShowThinking: true,
+  };
+}
+
+function patchBtwTurnDom(dom: BtwTurnDom, turn: BtwTurnView): void {
+  const showThinking = state.showThinking !== false;
+  if (dom.renderedStatus !== turn.status) {
+    dom.article.className = `btw-turn ${turn.status}`;
+    dom.stopBtn.hidden = turn.status !== "streaming";
+  }
+  const hasAnswer = turn.answer !== "";
+  dom.copyBtn.hidden = !hasAnswer;
+  if (dom.renderedAnswer !== turn.answer) {
+    dom.copyBtn.dataset.copy = turn.answer;
+  }
+  if (dom.renderedThought !== turn.thought || dom.renderedShowThinking !== showThinking) {
+    const showThoughtBox = turn.thought !== "" && showThinking;
+    dom.thoughtDetails.hidden = !showThoughtBox;
+    if (showThoughtBox && dom.renderedThought !== turn.thought) {
+      dom.thoughtBody.textContent = turn.thought;
+    }
+    dom.renderedThought = turn.thought;
+    dom.renderedShowThinking = showThinking;
+  }
+  if (dom.renderedAnswer !== turn.answer || dom.renderedStatus !== turn.status) {
+    if (hasAnswer) {
+      fill(dom.answerEl, turn.answer);
+    } else if (turn.status === "streaming") {
+      dom.answerEl.replaceChildren(el("span", { class: "btw-status-text", text: "Thinking…" }));
+    } else if (turn.status === "cancelled") {
+      dom.answerEl.replaceChildren(el("span", { class: "btw-status-text", text: "Cancelled." }));
+    } else {
+      dom.answerEl.replaceChildren();
+    }
+    dom.renderedAnswer = turn.answer;
+  }
+  const errText = turn.status === "error" && turn.error ? turn.error : "";
+  if (dom.renderedError !== errText) {
+    dom.errorEl.hidden = errText === "";
+    dom.errorEl.textContent = errText;
+    dom.renderedError = errText;
+  }
+  dom.renderedStatus = turn.status;
+}
+
+function renderBtwPanel(): void {
+  const open = btwState !== null && btwState.turns.length > 0;
+  const wasHidden = btwPanel.hidden;
+  const wasNearBottom = wasHidden || btwTurnsEl.scrollHeight - btwTurnsEl.scrollTop - btwTurnsEl.clientHeight <= 40;
+  btwPanel.hidden = !open;
+  if (!open || !btwState) {
+    if (btwTurnNodes.size > 0) {
+      btwTurnNodes.clear();
+      btwTurnsEl.replaceChildren();
+    }
+    return;
+  }
+  const activeIds = new Set(btwState.turns.map((turn) => turn.id));
+  for (const [id, dom] of btwTurnNodes) {
+    if (!activeIds.has(id)) {
+      dom.article.remove();
+      btwTurnNodes.delete(id);
+    }
+  }
+  let addedNewTurn = false;
+  for (const turn of btwState.turns) {
+    let dom = btwTurnNodes.get(turn.id);
+    if (!dom) {
+      dom = createBtwTurnDom(turn);
+      btwTurnNodes.set(turn.id, dom);
+      btwTurnsEl.append(dom.article);
+      addedNewTurn = true;
+    }
+    patchBtwTurnDom(dom, turn);
+  }
+  const canAsk = state.status === "ready" || state.status === "busy";
+  btwInput.disabled = !canAsk;
+  btwAskButton.disabled = !canAsk;
+  if (wasNearBottom || addedNewTurn) {
+    btwTurnsEl.scrollTop = btwTurnsEl.scrollHeight;
+  }
+}
+
 function renderComposer(): void {
   const canType = state.status === "ready" || state.status === "busy";
   input.disabled = !canType;
   mentionTriggerButton.disabled = !canType;
   slashTriggerButton.disabled = !canType;
-  sendButton.disabled = state.status !== "ready";
+  if (state.status === "busy") {
+    if (state.supportsSteer && state.supportsBtw) {
+      input.placeholder = "Steer the agent, or type /btw <question> for a side chat (Enter to send)";
+    } else if (state.supportsSteer) {
+      input.placeholder = "Steer the agent at the next turn boundary (Enter to send)";
+    } else if (state.supportsBtw) {
+      input.placeholder = "Type /btw <question> for a side chat while the agent works";
+    } else {
+      input.placeholder = DEFAULT_PLACEHOLDER;
+    }
+  } else {
+    input.placeholder = DEFAULT_PLACEHOLDER;
+  }
+  syncSendButton();
+  renderPendingSteers();
   stopButton.hidden = state.status !== "busy" && state.status !== "cancelling";
   stopButton.disabled = state.status === "cancelling";
   if (!canType) closePopover();
@@ -814,6 +1066,7 @@ function applyState(next: StateMessage): void {
   renderHeader();
   renderBanner();
   renderComposer();
+  if (btwState) renderBtwPanel();
   if (menuOpen && (activeTrigger?.kind === "slash" || activeTrigger?.kind === "slash-arg")) {
     refreshOpenMenu();
   }
@@ -823,10 +1076,14 @@ function fill(node: HTMLElement, text: string): void {
   node.replaceChildren(...renderBlocks(parseMarkdown(text)));
 }
 
-function addUser(id: string, text: string): void {
-  const author = el("div", { class: "msg-author" }, createAvatarEl("user"), el("div", { class: "who", text: "You" }));
+function addUser(id: string, text: string, steered?: boolean): void {
+  const authorParts: Node[] = [createAvatarEl("user"), el("div", { class: "who", text: "You" })];
+  if (steered) {
+    authorParts.push(el("span", { class: "badge steered", text: "Steered" }));
+  }
+  const author = el("div", { class: "msg-author" }, ...authorParts);
   const head = el("div", { class: "msg-head" }, author, copyButton(text, "Copy message", "msg-copy", "Copy"));
-  transcript.append(el("article", { class: "msg user" }, head, el("div", { class: "body", text })));
+  transcript.append(el("article", { class: steered ? "msg user steered" : "msg user" }, head, el("div", { class: "body", text })));
   messageEls.delete(id);
 }
 
@@ -1217,7 +1474,7 @@ function addNotice(level: string, text: string, actions?: NoticeAction[]): HTMLE
 function renderItem(item: TranscriptItem): void {
   switch (item.type) {
     case "user":
-      addUser(item.id, item.text);
+      addUser(item.id, item.text, item.steered);
       return;
     case "agent": {
       setAgentText(item.id, item.text, item.thought);
@@ -1310,7 +1567,7 @@ function onHostMessage(message: HostMessage): void {
       resetTranscript(message.transcript);
       return;
     case "userMessage":
-      addUser(message.id, message.text);
+      addUser(message.id, message.text, message.steered);
       break;
     case "agentText":
     case "agentThought": {
@@ -1391,10 +1648,24 @@ function onHostMessage(message: HostMessage): void {
       const nextPos = before.length + inserted.length;
       input.setSelectionRange(nextPos, nextPos);
       addAttachment(item);
+      syncSendButton();
       saveWebviewState();
       input.focus();
       return;
     }
+    case "restoreDraft": {
+      if (message.text.trim() !== "") {
+        input.value = input.value.trim() === "" ? message.text : `${message.text}\n${input.value}`;
+        input.setSelectionRange(input.value.length, input.value.length);
+        syncSendButton();
+        saveWebviewState();
+      }
+      return;
+    }
+    case "btwState":
+      btwState = message.btw;
+      renderBtwPanel();
+      return;
   }
   scrollToEnd();
 }
@@ -1957,6 +2228,7 @@ function restoreHistoryDraft(): void {
   historyDraft = undefined;
   input.setSelectionRange(input.value.length, input.value.length);
   renderChips();
+  syncSendButton();
   saveStateThrottled.request();
 }
 
@@ -1977,12 +2249,13 @@ function submit(): void {
         }
         renderChips();
         syncImageStateNotice(false);
+        syncSendButton();
         saveWebviewState();
       }
       return;
     }
   }
-  if (state.status !== "ready") return;
+  if (!canSubmitNow()) return;
   if (imageAttachments.length > 0 && state.supportsImages === false) {
     addNotice("warning", "This agent does not support image attachments.");
     scrollToEnd();
@@ -2004,11 +2277,38 @@ function submit(): void {
   imageAttachments = [];
   renderChips();
   syncImageStateNotice(false);
+  syncSendButton();
   saveWebviewState();
+}
+
+function submitBtwFollowUp(): void {
+  const question = btwInput.value.trim();
+  if (question === "") return;
+  btwInput.value = "";
+  send({ type: "btwAsk", text: question });
 }
 
 sendButton.addEventListener("click", submit);
 stopButton.addEventListener("click", () => send({ type: "cancel" }));
+btwCloseButton.addEventListener("click", () => {
+  send({ type: "btwClose" });
+  input.focus();
+});
+btwAskButton.addEventListener("click", submitBtwFollowUp);
+btwPanel.addEventListener("keydown", (event) => {
+  if (event.key !== "Escape" || event.isComposing || event.keyCode === 229) return;
+  event.preventDefault();
+  send({ type: "btwClose" });
+  input.focus();
+});
+btwInput.addEventListener("keydown", (event) => {
+  const composing = event.isComposing || event.keyCode === 229;
+  if (composing) return;
+  if (event.key === "Enter" && !event.shiftKey) {
+    event.preventDefault();
+    submitBtwFollowUp();
+  }
+});
 
 input.addEventListener("paste", (event) => {
   if (input.disabled) return;
@@ -2154,6 +2454,7 @@ input.addEventListener("input", () => {
     historyEdited = true;
   }
   syncAttachmentsWithInput();
+  syncSendButton();
   saveStateThrottled.request();
   updateTrigger();
 });
@@ -2223,6 +2524,12 @@ input.addEventListener("keydown", (event) => {
     return;
   }
 
+  if (event.key === "Escape" && btwState !== null && btwState.turns.length > 0) {
+    event.preventDefault();
+    send({ type: "btwClose" });
+    return;
+  }
+
   if (event.key === "Escape" && !menuOpen && state.status !== "busy" && historyIndex >= 0 && historyDraft !== undefined) {
     event.preventDefault();
     restoreHistoryDraft();
@@ -2243,6 +2550,7 @@ input.addEventListener("keydown", (event) => {
         input.value = sentHistory[historyIndex]!;
         input.setSelectionRange(input.value.length, input.value.length);
         syncAttachmentsWithInput();
+        syncSendButton();
         saveStateThrottled.request();
         return;
       }
@@ -2254,6 +2562,7 @@ input.addEventListener("keydown", (event) => {
       input.value = sentHistory[historyIndex]!;
       input.setSelectionRange(input.value.length, input.value.length);
       syncAttachmentsWithInput();
+      syncSendButton();
       saveStateThrottled.request();
       return;
     }
@@ -2269,6 +2578,7 @@ input.addEventListener("keydown", (event) => {
         input.value = sentHistory[historyIndex]!;
         input.setSelectionRange(input.value.length, input.value.length);
         syncAttachmentsWithInput();
+        syncSendButton();
         saveStateThrottled.request();
       } else {
         restoreHistoryDraft();
@@ -2282,18 +2592,10 @@ input.addEventListener("keydown", (event) => {
     submit();
   }
 });
-transcript.addEventListener("click", (event) => {
+
+function handleMarkdownContainerClick(event: MouseEvent): void {
   const target = event.target;
   if (!(target instanceof Element)) return;
-  const avatarBtn = target.closest<HTMLElement>(".avatar-slot[data-role]");
-  if (avatarBtn) {
-    const role = avatarBtn.dataset.role;
-    if (role === "user" || role === "assistant") {
-      event.preventDefault();
-      send({ type: "pickAvatar", role });
-      return;
-    }
-  }
   const link = target.closest("a[data-url]");
   if (link instanceof HTMLElement && link.dataset.url) {
     event.preventDefault();
@@ -2311,6 +2613,23 @@ transcript.addEventListener("click", (event) => {
     event.preventDefault();
     void writeClipboard(copyTarget.dataset.copy).then((ok) => reportCopy(copyTarget, ok));
   }
+}
+
+btwPanel.addEventListener("click", handleMarkdownContainerClick);
+
+transcript.addEventListener("click", (event) => {
+  const target = event.target;
+  if (!(target instanceof Element)) return;
+  const avatarBtn = target.closest<HTMLElement>(".avatar-slot[data-role]");
+  if (avatarBtn) {
+    const role = avatarBtn.dataset.role;
+    if (role === "user" || role === "assistant") {
+      event.preventDefault();
+      send({ type: "pickAvatar", role });
+      return;
+    }
+  }
+  handleMarkdownContainerClick(event);
 });
 
 window.addEventListener("message", (event: MessageEvent<HostMessage>) => onHostMessage(event.data));

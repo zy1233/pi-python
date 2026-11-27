@@ -219,6 +219,7 @@ fn pick(options: &[acp::PermissionOption], answer: Answer) -> acp::RequestPermis
 struct Traffic {
     updates: Mutex<Vec<acp::SessionNotification>>,
     questions: Mutex<Vec<acp::RequestPermissionRequest>>,
+    ext_notifications: Mutex<Vec<(String, String)>>,
     unexpected: Mutex<Vec<String>>,
 }
 
@@ -261,6 +262,7 @@ struct Live {
     answer: Arc<Mutex<Answer>>,
     advertised_auth_methods: usize,
     needs_login: bool,
+    pi_capabilities: pi_acp_lib::extensions::steer::PiCapabilities,
 }
 
 impl Live {
@@ -287,6 +289,7 @@ impl Live {
             answer,
             advertised_auth_methods: connection.auth_methods.len(),
             needs_login: connection.needs_login,
+            pi_capabilities: connection.pi_capabilities,
         }
     }
 
@@ -340,6 +343,10 @@ async fn pump(mut rx: AcpClientRx, answer: Arc<Mutex<Answer>>, traffic: Arc<Traf
             }
             // A notification asks for nothing, and a client may ignore the ones it does not know.
             AcpClientMessage::ExtNotification(args) => {
+                traffic.ext_notifications.lock().unwrap().push((
+                    args.request.method.to_string(),
+                    args.request.params.get().to_string(),
+                ));
                 let _ = args.response_tx.send(Ok(()));
             }
             // What the pager did not offer to serve (files, terminals): the agent must not ask.
@@ -1293,4 +1300,224 @@ async fn wait_for_pid(pidfile: &Path) -> u32 {
         assert!(Instant::now() < deadline, "the tool never started");
         tokio::time::sleep(Duration::from_millis(50)).await;
     }
+}
+
+/// Real Rust↔Python wire check for X9 (`pi/session/steer`) and X10 (`pi/session/btw`):
+/// verifies `InitializeResponse._meta["pi/capabilities"]`, idle `pi/session/steer` response,
+/// and streaming `pi/session/btw` + `pi/btw_update` without polluting session history.
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+#[serial_test::serial(pi_agent)]
+async fn steer_and_btw_work_over_real_stdio_pipes() {
+    use pi_acp_lib::extensions::btw::{
+        BTW_METHOD, BTW_UPDATE_NOTIFICATION, BtwRequest, BtwResponse, BtwUpdateKind,
+        BtwUpdateNotification,
+    };
+    use pi_acp_lib::extensions::steer::{
+        STEER_METHOD, SteerSessionRequest, SteerSessionResponse,
+    };
+
+    let Some(python) = python() else { return };
+    use_cli_agent(&python);
+    let cwd = tempfile::tempdir().unwrap();
+
+    let live = Live::start(Answer::Cancelled).await;
+    assert!(
+        live.pi_capabilities.steer,
+        "agent must advertise pi/capabilities.steer"
+    );
+    assert!(
+        live.pi_capabilities.btw,
+        "agent must advertise pi/capabilities.btw"
+    );
+
+    let session = new_session(&live.tx, cwd.path()).await.session_id;
+
+    // Idle steer returns queued=false, reason="idle".
+    let steer_req = SteerSessionRequest {
+        session_id: session.0.to_string(),
+        prompt: vec![acp::ContentBlock::Text(acp::TextContent::new(
+            "switch to pytest",
+        ))],
+        steer_id: Some("e2e-steer-1".into()),
+    };
+    let raw_steer = serde_json::value::to_raw_value(&steer_req).unwrap();
+    let raw_resp = wire(
+        "pi/session/steer",
+        acp_send(acp::ExtRequest::new(STEER_METHOD, raw_steer.into()), &live.tx),
+    )
+    .await;
+    let steer_resp: SteerSessionResponse =
+        serde_json::from_value(serde_json::to_value(&raw_resp).unwrap()).unwrap();
+    assert!(!steer_resp.queued);
+    assert_eq!(steer_resp.reason.as_deref(), Some("idle"));
+
+    // /btw streams pi/btw_update deltas and completes with end_turn.
+    let btw_req = BtwRequest {
+        session_id: session.0.to_string(),
+        btw_id: "e2e-btw-1".into(),
+        prompt: vec![acp::ContentBlock::Text(acp::TextContent::new(
+            "quick side question",
+        ))],
+        history: vec![],
+    };
+    let raw_btw = serde_json::value::to_raw_value(&btw_req).unwrap();
+    let raw_btw_resp = wire(
+        "pi/session/btw",
+        acp_send(acp::ExtRequest::new(BTW_METHOD, raw_btw.into()), &live.tx),
+    )
+    .await;
+    let btw_resp: BtwResponse =
+        serde_json::from_value(serde_json::to_value(&raw_btw_resp).unwrap()).unwrap();
+    assert_eq!(btw_resp.session_id, session.0.as_ref());
+    assert_eq!(btw_resp.btw_id, "e2e-btw-1");
+    assert_eq!(btw_resp.stop_reason, "end_turn");
+    assert_eq!(btw_resp.error, None);
+
+    live.traffic
+        .until("pi/btw_update terminal notification", |t| {
+            t.ext_notifications
+                .lock()
+                .unwrap()
+                .iter()
+                .any(|(m, raw)| {
+                    m == BTW_UPDATE_NOTIFICATION
+                        && serde_json::from_str::<BtwUpdateNotification>(raw)
+                            .is_ok_and(|u| u.btw_id == "e2e-btw-1" && u.kind == BtwUpdateKind::Done)
+                })
+        })
+        .await;
+
+    let deltas: String = live
+        .traffic
+        .ext_notifications
+        .lock()
+        .unwrap()
+        .iter()
+        .filter(|(m, _)| m == BTW_UPDATE_NOTIFICATION)
+        .filter_map(|(_, raw)| serde_json::from_str::<BtwUpdateNotification>(raw).ok())
+        .filter(|u| u.btw_id == "e2e-btw-1" && u.kind == BtwUpdateKind::TextDelta)
+        .map(|u| u.delta)
+        .collect();
+    assert_eq!(deltas, MOCK_REPLY);
+
+    live.stop().await;
+}
+
+/// Real stdio E2E while a tool is actively running: mid-turn `pi/session/steer` queues,
+/// `pi/session/btw` completes in parallel without waiting for the tool, and `session/cancel`
+/// clears the unconsumed steer with `clearedByAbort: true` and `clearedSteerIds`.
+#[cfg(target_os = "linux")]
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+#[serial_test::serial(pi_agent)]
+async fn mid_turn_steer_abort_restore_and_btw_while_busy_over_real_stdio_pipes() {
+    use pi_acp_lib::extensions::btw::{
+        BTW_METHOD, BTW_UPDATE_NOTIFICATION, BtwRequest, BtwResponse, BtwUpdateKind,
+        BtwUpdateNotification,
+    };
+    use pi_acp_lib::extensions::steer::{
+        QUEUE_UPDATE_NOTIFICATION, QueueUpdateNotification, STEER_METHOD, SteerSessionRequest,
+        SteerSessionResponse,
+    };
+
+    let Some(python) = python() else { return };
+    let cwd = tempfile::tempdir().unwrap();
+    let pidfile = cwd.path().join("tool.pid");
+    use_tool_agent(&python, "always-approve", None, &pidfile);
+
+    let live = Live::start(Answer::Cancelled).await;
+    let session = new_session(&live.tx, cwd.path()).await.session_id;
+
+    let running = tokio::spawn({
+        let tx = live.tx.clone();
+        let session = session.clone();
+        async move { acp_send(prompt_request(&session, "run slow tool"), &tx).await }
+    });
+    let tool_pid = wait_for_pid(&pidfile).await;
+    let alive = |pid: u32| Path::new(&format!("/proc/{pid}")).exists();
+    assert!(alive(tool_pid));
+
+    // 1. Mid-turn steer queues while the bash tool is running.
+    let steer_req = SteerSessionRequest {
+        session_id: session.0.to_string(),
+        prompt: vec![acp::ContentBlock::Text(acp::TextContent::new(
+            "focus on unit tests",
+        ))],
+        steer_id: Some("e2e-busy-steer".into()),
+    };
+    let raw_steer = serde_json::value::to_raw_value(&steer_req).unwrap();
+    let raw_steer_resp = wire(
+        "pi/session/steer (busy)",
+        acp_send(acp::ExtRequest::new(STEER_METHOD, raw_steer.into()), &live.tx),
+    )
+    .await;
+    let steer_resp: SteerSessionResponse =
+        serde_json::from_value(serde_json::to_value(&raw_steer_resp).unwrap()).unwrap();
+    assert!(steer_resp.queued);
+    assert_eq!(steer_resp.queue_length, Some(1));
+
+    // 2. /btw completes in parallel while the bash tool is STILL alive!
+    let btw_req = BtwRequest {
+        session_id: session.0.to_string(),
+        btw_id: "e2e-busy-btw".into(),
+        prompt: vec![acp::ContentBlock::Text(acp::TextContent::new(
+            "what is running?",
+        ))],
+        history: vec![],
+    };
+    let raw_btw = serde_json::value::to_raw_value(&btw_req).unwrap();
+    let raw_btw_resp = wire(
+        "pi/session/btw (busy)",
+        acp_send(acp::ExtRequest::new(BTW_METHOD, raw_btw.into()), &live.tx),
+    )
+    .await;
+    let btw_resp: BtwResponse =
+        serde_json::from_value(serde_json::to_value(&raw_btw_resp).unwrap()).unwrap();
+    assert_eq!(btw_resp.stop_reason, "end_turn");
+    assert!(alive(tool_pid), "btw must finish while main tool is still running");
+
+    live.traffic
+        .until("pi/btw_update done (busy)", |t| {
+            t.ext_notifications
+                .lock()
+                .unwrap()
+                .iter()
+                .any(|(m, raw)| {
+                    m == BTW_UPDATE_NOTIFICATION
+                        && serde_json::from_str::<BtwUpdateNotification>(raw).is_ok_and(|u| {
+                            u.btw_id == "e2e-busy-btw" && u.kind == BtwUpdateKind::Done
+                        })
+                })
+        })
+        .await;
+
+    // 3. session/cancel ends the running tool and emits pi/queue_update with clearedByAbort=true.
+    wire(
+        "session/cancel",
+        acp_send(acp::CancelNotification::new(session.clone()), &live.tx),
+    )
+    .await;
+    let reply = tokio::time::timeout(WIRE_TIMEOUT, running)
+        .await
+        .expect("cancelled prompt returned")
+        .expect("prompt task")
+        .expect("session/prompt");
+    assert_eq!(reply.stop_reason, acp::StopReason::Cancelled);
+
+    live.traffic
+        .until("pi/queue_update clearedByAbort", |t| {
+            t.ext_notifications
+                .lock()
+                .unwrap()
+                .iter()
+                .any(|(m, raw)| {
+                    m == QUEUE_UPDATE_NOTIFICATION
+                        && serde_json::from_str::<QueueUpdateNotification>(raw).is_ok_and(|u| {
+                            u.cleared_by_abort
+                                && u.cleared_steer_ids.iter().any(|id| id == "e2e-busy-steer")
+                        })
+                })
+        })
+        .await;
+
+    live.stop().await;
 }

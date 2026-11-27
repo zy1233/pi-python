@@ -285,6 +285,7 @@ pub(super) fn dispatch_send_prompt_inner(
     let ask_user_question_timeout_enabled_from_app = app.ask_user_question_timeout_enabled;
     let voice_stt_language_from_app = app.voice_config.language.clone();
     let scheduler_background_loops_seed = app.scheduler_background_loops_seed;
+    let pi_capabilities = app.pi_capabilities;
     let Some(agent) = app.agents.get_mut(&id) else {
         return vec![];
     };
@@ -310,6 +311,66 @@ pub(super) fn dispatch_send_prompt_inner(
     let recorded_as_command = !literal && consume_input && trimmed.starts_with('/');
     if recorded_as_command {
         agent.record_prompt_in_history(trimmed);
+    }
+
+    // Handle `/btw <question>` directly so it runs ephemerally even while the
+    // main turn is busy (without enqueueing into `pending_prompts` or touching
+    // the main session transcript).
+    if !literal && trimmed.starts_with('/') {
+        if let Some(invocation) = crate::slash::parse_invocation(trimmed)
+            && invocation.token.eq_ignore_ascii_case("btw")
+        {
+            if consume_input {
+                agent.prompt.set_text("");
+                agent.note_draft_consumed();
+            }
+            if !pi_capabilities.btw {
+                push_and_page_flip(
+                    &mut agent.scrollback,
+                    RenderBlock::system("This agent does not support /btw side chat."),
+                );
+                return vec![];
+            }
+            let question = invocation.args.trim();
+            if question.is_empty() {
+                push_and_page_flip(
+                    &mut agent.scrollback,
+                    RenderBlock::system("Usage: /btw <question>"),
+                );
+                return vec![];
+            }
+            let Some(session_id) = agent.session.session_id.clone() else {
+                push_and_page_flip(
+                    &mut agent.scrollback,
+                    RenderBlock::system("No active session yet."),
+                );
+                return vec![];
+            };
+            let mut out = Vec::new();
+            if let Some(prev_btw_id) = agent.active_btw_id.take() {
+                out.push(Effect::CancelBtw {
+                    session_id: session_id.clone(),
+                    btw_id: prev_btw_id,
+                });
+            }
+            let btw_id = uuid::Uuid::new_v4().to_string();
+            let q = question.to_string();
+            agent.active_btw_id = Some(btw_id.clone());
+            agent.active_btw_question = Some(q.clone());
+            agent.active_btw_answer.clear();
+            agent.btw_state =
+                Some(crate::views::btw_overlay::BtwOverlayState::Loading { question: q.clone() });
+            agent.btw_focused = false;
+            crate::app::acp_handler::trim_btw_history(&mut agent.btw_history);
+            out.push(Effect::SendBtw {
+                agent_id: id,
+                session_id,
+                btw_id,
+                question: q,
+                history: agent.btw_history.clone(),
+            });
+            return out;
+        }
     }
 
     let mut effects = Vec::new();
@@ -511,6 +572,30 @@ pub(super) fn dispatch_send_prompt_inner(
         // binds.
         if is_follow_up && agent.session.session_id.is_some() {
             agent.clear_follow_ups();
+        }
+
+        if pi_capabilities.steer
+            && !is_follow_up
+            && agent.session.state.is_busy()
+            && let Some(session_id) = agent.session.session_id.clone()
+        {
+            if consume_input {
+                agent.prompt.set_text("");
+                agent.note_draft_consumed();
+                if !recorded_as_command {
+                    agent.record_prompt_in_history(&text);
+                }
+            }
+            let steer_id = uuid::Uuid::new_v4().to_string();
+            agent.pending_steers.push((steer_id.clone(), text.clone()));
+            effects.push(Effect::SteerSession {
+                agent_id: id,
+                session_id,
+                steer_id,
+                prompt_blocks: vec![acp::ContentBlock::Text(acp::TextContent::new(text.clone()))],
+                display_text: text,
+            });
+            return effects;
         }
 
         // Composer-recognized slash tokens at submit time: styles the
@@ -735,6 +820,8 @@ pub(super) fn handle_prompt_response(
                 agent.reauth_stashed_prompt = Some(prompt);
             }
         }
+
+        agent.pending_steers.clear();
 
         // qtrace: turn end on this client. This clears current_prompt_id
         // and (briefly) returns the client to Idle — the start of the

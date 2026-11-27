@@ -5,6 +5,7 @@ from __future__ import annotations
 import asyncio
 import importlib.metadata
 import logging
+import re
 import uuid
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass, field, replace
@@ -71,6 +72,13 @@ from pi_agent_cli.auto_mode import (
     unknown_judge,
 )
 from pi_agent_cli.auto_reasons import Reason
+from pi_agent_cli.btw import (
+    BTW_MAX_CONCURRENT_PER_SESSION,
+    BtwAbortController,
+    BtwResult,
+    parse_btw_history,
+    run_btw,
+)
 from pi_agent_cli.client_mcp import client_mcp_servers, mcp_extension_installed
 from pi_agent_cli.config import (
     CliConfig,
@@ -87,7 +95,12 @@ from pi_agent_cli.context_usage import (
     turn_context_tokens,
     usage_update,
 )
-from pi_agent_cli.events import project_event, project_message_replay
+from pi_agent_cli.events import (
+    _user_message_text,
+    project_event,
+    project_message_replay,
+    project_steered_user_message,
+)
 from pi_agent_cli.extension_notices import failed_extensions_notice
 from pi_agent_cli.extension_trust import (
     NoticeReason,
@@ -152,6 +165,16 @@ logger = logging.getLogger(__name__)
 
 # The package this agent ships in. Its version is the version of the release.
 _DISTRIBUTION = "pi-agent-cli-lc"
+_LITERAL_BTW_RE = re.compile(r"^\s*/btw(?:\s|$)", re.IGNORECASE)
+
+
+def _client_supports_btw(capabilities: ClientCapabilities | None) -> bool:
+    """Whether the client opted into X10 ``/btw`` via ``clientCapabilities._meta``."""
+    if capabilities is None:
+        return False
+    meta = capabilities.field_meta or {}
+    pi_caps = meta.get("pi/capabilities")
+    return isinstance(pi_caps, Mapping) and pi_caps.get("btw") is True
 
 
 def _installed_version() -> str:
@@ -238,11 +261,14 @@ class PiAcpAgent(Agent):
         self._context_used: dict[str, int] = {}
         self._client_capabilities: ClientCapabilities | None = None
         self._client_info: Implementation | None = None
+        self._client_supports_btw: bool = False
         self._extensions: list[Any] = extensions or []
         self._commands_advertised: set[str] = set()
         self._background_tasks: set[asyncio.Task[Any]] = set()
         self._permission_locks: dict[str, asyncio.Lock] = {}
         self._prompts_in_flight: dict[str, int] = {}
+        # Sessions whose run has ended (``agent_end``) while their ``prompt()`` has not returned.
+        self._run_over: set[str] = set()
         self._trust: dict[str, _SessionTrust] = {}
         self._project_locks: dict[str, asyncio.Lock] = {}
         # Held while a session is created under an id the client chose, so two requests for the
@@ -268,6 +294,10 @@ class PiAcpAgent(Agent):
         # meant "no question" before): their entry message says what the setting means now.
         self._auto_from_config: set[str] = set()
         self._mode_lock = asyncio.Lock()
+        # In-flight ephemeral ``/btw`` side-chat tasks keyed by ``(session_id, btw_id)``.
+        self._btw_tasks: dict[
+            tuple[str, str], tuple[asyncio.Task[Any] | None, BtwAbortController]
+        ] = {}
 
     def on_connect(self, conn: Client) -> None:
         self._conn = conn
@@ -281,6 +311,7 @@ class PiAcpAgent(Agent):
     ) -> InitializeResponse:
         self._client_capabilities = client_capabilities
         self._client_info = client_info
+        self._client_supports_btw = _client_supports_btw(client_capabilities)
         remote_mcp = mcp_extension_installed()
         setup_method = (
             setup_auth_method(client_capabilities, self._home) if self._offers_setup else None
@@ -303,6 +334,12 @@ class PiAcpAgent(Agent):
             ),
             auth_methods=[setup_method] if setup_method is not None else [],
             agent_info=_AGENT_INFO,
+            field_meta={
+                "pi/capabilities": {
+                    "steer": True,
+                    "btw": True,
+                }
+            },
         )
 
     def _refresh_config(self) -> None:
@@ -458,10 +495,12 @@ class PiAcpAgent(Agent):
 
     def _release_session(self, session_id: str) -> AgentHarness | None:
         """Forget the in-memory state of *session_id* and return its harness, if any."""
+        self._cancel_session_btw_tasks(session_id)
         self._session_models.pop(session_id, None)
         self._context_used.pop(session_id, None)
         self._session_cwds.pop(session_id, None)
         self._reserved_ids.discard(session_id)
+        self._run_over.discard(session_id)
         harness = self._harnesses.pop(session_id, None)
         self._permission_locks.pop(session_id, None)
         self._drop_trust(session_id)
@@ -491,26 +530,49 @@ class PiAcpAgent(Agent):
         **kwargs: Any,
     ) -> PromptResponse:
         harness = self._require_harness(session_id)
-        # Until the user has answered the question about the project, nothing of it is
-        # loaded, and a prompt would run without it (and then again with it, differently).
-        if not await self._wait_for_trust(session_id, harness):
-            return PromptResponse(stop_reason="cancelled")
-        # An extension may still be setting up what the turn needs (the tools of an MCP server
-        # that is starting). The wait ends when it is done, or given up, or on ``session/cancel``.
-        if not await self._wait_for_turn_barriers(session_id, harness):
-            return PromptResponse(stop_reason="cancelled")
-        # Fallback: re-advertise commands if the deferred task was missed.
-        if session_id not in self._commands_advertised:
-            await self._advertise_commands(session_id)
-        await self._refuse_id_taken_meanwhile(session_id, harness)
-        text, images = _prompt_to_text_images(prompt)
-        auto = self._autos.get(session_id)
-        if auto is not None:
-            auto.note_user_message(text)
-        message = await self._run_prompt(session_id, harness, text, images)
-        if message is None:
-            return PromptResponse(stop_reason="cancelled")
-        return PromptResponse(stop_reason=_stop_reason(message))
+        in_flight = self._prompts_in_flight
+        in_flight[session_id] = in_flight.get(session_id, 0) + 1
+        self._run_over.discard(session_id)
+        try:
+            # Until the user has answered the question about the project, nothing of it is
+            # loaded, and a prompt would run without it (and then again with it, differently).
+            if not await self._wait_for_trust(session_id, harness):
+                return PromptResponse(stop_reason="cancelled")
+            # An extension may still be setting up what the turn needs (an MCP server starting).
+            # The wait ends when it is done, or given up, or on ``session/cancel``.
+            if not await self._wait_for_turn_barriers(session_id, harness):
+                return PromptResponse(stop_reason="cancelled")
+            # Fallback: re-advertise commands if the deferred task was missed.
+            if session_id not in self._commands_advertised:
+                await self._advertise_commands(session_id)
+            await self._refuse_id_taken_meanwhile(session_id, harness)
+            text, images = _prompt_to_text_images(prompt)
+            if (
+                _LITERAL_BTW_RE.match(text)
+                and "btw" not in harness.extension_registry.get_commands()
+            ):
+                if self._conn is not None:
+                    await self._conn.session_update(
+                        session_id=session_id,
+                        update=update_agent_message_text(
+                            "/btw side chat requires a client that supports pi/session/btw "
+                            "(such as zypi or the zycode VS Code extension). Nothing was sent "
+                            "to the main session."
+                        ),
+                    )
+                return PromptResponse(stop_reason="end_turn")
+            auto = self._autos.get(session_id)
+            if auto is not None:
+                auto.note_user_message(text)
+            message = await self._run_prompt(session_id, harness, text, images)
+            if message is None:
+                return PromptResponse(stop_reason="cancelled")
+            return PromptResponse(stop_reason=_stop_reason(message))
+        finally:
+            in_flight[session_id] -= 1
+            if not in_flight[session_id]:
+                del in_flight[session_id]
+                self._run_over.discard(session_id)
 
     async def _run_prompt(
         self, session_id: str, harness: AgentHarness, text: str, images: list[ImageContent]
@@ -524,23 +586,17 @@ class PiAcpAgent(Agent):
         with such a turn therefore waits for it instead of failing. A prompt that finds
         another one of the client's own in flight is a client error and is refused as busy.
         """
-        in_flight = self._prompts_in_flight
-        in_flight[session_id] = in_flight.get(session_id, 0) + 1
-        try:
-            while True:
-                try:
-                    return await harness.prompt(text, images or None)
-                except Exception as exc:
-                    if not _is_busy(exc):
-                        raise
-                    if in_flight[session_id] > 1:
-                        raise RequestError.invalid_params({"reason": "busy"}) from exc
-                if not await self._wait_until_idle(session_id, harness):
-                    return None
-        finally:
-            in_flight[session_id] -= 1
-            if not in_flight[session_id]:
-                del in_flight[session_id]
+        while True:
+            self._run_over.discard(session_id)
+            try:
+                return await harness.prompt(text, images or None)
+            except Exception as exc:
+                if not _is_busy(exc):
+                    raise
+                if self._prompts_in_flight.get(session_id, 0) > 1:
+                    raise RequestError.invalid_params({"reason": "busy"}) from exc
+            if not await self._wait_until_idle(session_id, harness):
+                return None
 
     async def cancel(self, session_id: str, **kwargs: Any) -> None:
         state = self._trust.get(session_id)
@@ -557,7 +613,8 @@ class PiAcpAgent(Agent):
         harness = self._harnesses.get(session_id)
         if harness is None:
             return
-        task = asyncio.create_task(harness.abort())
+        harness.begin_abort()
+        task = asyncio.create_task(harness.abort(_from_begin=True))
         self._abort_tasks.add(task)
         task.add_done_callback(self._abort_tasks.discard)
 
@@ -641,7 +698,275 @@ class PiAcpAgent(Agent):
             if metadata is not None:
                 await self._repo.delete(metadata)
             return {"sessionId": session_id, "deleted": True}
+        if method == "pi/session/steer":
+            return await self._handle_steer(params)
+        if method == "pi/session/btw":
+            return await self._handle_btw(params)
+        if method == "pi/session/btw_cancel":
+            return await self._handle_btw_cancel(params)
         raise RequestError.method_not_found(method)
+
+    def _cancel_session_btw_tasks(self, session_id: str) -> None:
+        keys = [key for key in self._btw_tasks if key[0] == session_id]
+        for key in keys:
+            entry = self._btw_tasks.pop(key, None)
+            if entry is None:
+                continue
+            task, controller = entry
+            controller.abort()
+            if task is not None and not task.done():
+                task.cancel()
+
+    async def _send_ext_notification(self, method: str, params: dict[str, Any]) -> None:
+        if self._conn is None:
+            return
+        send = getattr(self._conn, "ext_notification", None)
+        if send is None:
+            return
+        try:
+            await send(method, params)
+        except Exception:
+            logger.debug("Ignoring ext_notification %s delivery failure", method, exc_info=True)
+
+    async def _emit_queue_update(
+        self,
+        session_id: str,
+        harness: AgentHarness,
+        steer_messages: Sequence[Any],
+        *,
+        cleared_by_abort: bool = False,
+        cleared_steer_ids: list[str] | None = None,
+    ) -> None:
+        items: list[dict[str, str]] = []
+        for msg in steer_messages:
+            sid = harness.steer_id_for(msg) or ""
+            preview = _user_message_text(msg).strip().replace("\n", " ")
+            if len(preview) > 120:
+                preview = preview[:120] + "..."
+            items.append({"steerId": sid, "preview": preview})
+        payload: dict[str, Any] = {
+            "sessionId": session_id,
+            "steer": items,
+            "clearedByAbort": cleared_by_abort,
+        }
+        if cleared_steer_ids:
+            payload["clearedSteerIds"] = cleared_steer_ids
+        await self._send_ext_notification("pi/queue_update", payload)
+
+    async def _handle_steer(self, params: dict[str, Any]) -> dict[str, Any]:
+        session_id_raw = params.get("sessionId", params.get("session_id"))
+        if not isinstance(session_id_raw, str) or not session_id_raw.strip():
+            raise RequestError.invalid_params(
+                {"reason": "sessionId is required", "method": "pi/session/steer"}
+            )
+        session_id = session_id_raw.strip()
+        harness = self._require_harness(session_id)
+        raw_prompt = params.get("prompt")
+        if not isinstance(raw_prompt, list) or not raw_prompt:
+            raise RequestError.invalid_params(
+                {"reason": "prompt must be a non-empty list", "method": "pi/session/steer"}
+            )
+        text, images = _prompt_to_text_images(raw_prompt)
+        if not text.strip() and not images:
+            raise RequestError.invalid_params(
+                {
+                    "reason": "prompt must contain text or image content",
+                    "method": "pi/session/steer",
+                }
+            )
+        raw_steer_id = params.get("steerId", params.get("steer_id"))
+        steer_id = (
+            raw_steer_id.strip()
+            if isinstance(raw_steer_id, str) and raw_steer_id.strip()
+            else str(uuid.uuid4())
+        )
+
+        trust = self._trust.get(session_id)
+        if trust is not None and not trust.settled.is_set():
+            return {
+                "sessionId": session_id,
+                "steerId": steer_id,
+                "queued": False,
+                "reason": "waiting_for_trust",
+            }
+        if harness.is_aborting:
+            return {
+                "sessionId": session_id,
+                "steerId": steer_id,
+                "queued": False,
+                "reason": "aborting",
+            }
+        if harness.phase == "idle":
+            # ``waiting_for_barriers``: a prompt is in flight and its run has not started yet.
+            # Once the run has ended, the prompt response is only moments away: a steer now
+            # is plain ``idle`` and the client sends it as a normal prompt (S3).
+            waiting = self._prompts_in_flight.get(session_id, 0) > 0 and (
+                session_id not in self._run_over
+            )
+            reason = "waiting_for_barriers" if waiting else "idle"
+            return {
+                "sessionId": session_id,
+                "steerId": steer_id,
+                "queued": False,
+                "reason": reason,
+            }
+        try:
+            assigned_id = await harness.steer(text, images or None, steer_id=steer_id)
+        except AgentHarnessError as exc:
+            if exc.code == "invalid_state":
+                return {
+                    "sessionId": session_id,
+                    "steerId": steer_id,
+                    "queued": False,
+                    "reason": "aborting" if harness.is_aborting else "idle",
+                }
+            raise
+        return {
+            "sessionId": session_id,
+            "steerId": assigned_id,
+            "queued": True,
+            "queueLength": len(harness.steer_queue),
+        }
+
+    async def _handle_btw(self, params: dict[str, Any]) -> dict[str, Any]:
+        session_id_raw = params.get("sessionId", params.get("session_id"))
+        if not isinstance(session_id_raw, str) or not session_id_raw.strip():
+            raise RequestError.invalid_params(
+                {"reason": "sessionId is required", "method": "pi/session/btw"}
+            )
+        session_id = session_id_raw.strip()
+        harness = self._require_harness(session_id)
+
+        raw_btw_id = params.get("btwId", params.get("btw_id"))
+        if not isinstance(raw_btw_id, str) or not raw_btw_id.strip():
+            raise RequestError.invalid_params(
+                {"reason": "btwId is required", "method": "pi/session/btw"}
+            )
+        btw_id = raw_btw_id.strip()
+
+        raw_prompt = params.get("prompt")
+        if not isinstance(raw_prompt, list) or not raw_prompt:
+            raise RequestError.invalid_params(
+                {"reason": "prompt must be a non-empty list", "method": "pi/session/btw"}
+            )
+        text, images = _prompt_to_text_images(raw_prompt)
+        if not text.strip() and not images:
+            raise RequestError.invalid_params(
+                {"reason": "prompt must contain text or image content", "method": "pi/session/btw"}
+            )
+        try:
+            history = parse_btw_history(params.get("history"))
+        except ValueError as exc:
+            raise RequestError.invalid_params(
+                {"reason": str(exc), "method": "pi/session/btw"}
+            ) from exc
+
+        key = (session_id, btw_id)
+        if key in self._btw_tasks:
+            raise RequestError.invalid_params(
+                {"reason": "btwId is already in flight", "method": "pi/session/btw"}
+            )
+        active_for_session = sum(1 for sid, _ in self._btw_tasks if sid == session_id)
+        if active_for_session >= BTW_MAX_CONCURRENT_PER_SESSION:
+            raise RequestError.invalid_params(
+                {"reason": "too many concurrent btw requests", "method": "pi/session/btw"}
+            )
+
+        controller = BtwAbortController()
+        # Reserve the concurrency & duplicate-id slot synchronously BEFORE the first await
+        # so parallel requests on an uncached session cannot bypass the limit or overwrite keys.
+        self._btw_tasks[key] = (None, controller)
+        try:
+            snapshot = await harness.snapshot_context_for_btw()
+            if controller.signal.aborted:
+                result = BtwResult(stop_reason="cancelled")
+            else:
+                btw_cfg = self._config.btw
+                btw_thinking: ThinkingLevel = (
+                    snapshot.thinking_level if btw_cfg.thinking == "inherit" else "off"
+                )
+                if self._config.reasoning is False:
+                    btw_thinking = "off"
+
+                override_choice = self._choice_by_id(btw_cfg.model) if btw_cfg.model else None
+                if override_choice is not None:
+                    btw_model = model_for_choice(override_choice, reasoning=(btw_thinking != "off"))
+                    btw_api_key = api_key_for_choice(override_choice)
+                else:
+                    btw_model = replace(snapshot.model, reasoning=(btw_thinking != "off"))
+                    btw_api_key = harness.get_api_key
+
+                async def _on_btw_update(kind: str, delta: str) -> None:
+                    await self._send_ext_notification(
+                        "pi/btw_update",
+                        {
+                            "sessionId": session_id,
+                            "btwId": btw_id,
+                            "kind": kind,
+                            "delta": delta,
+                            "error": None,
+                        },
+                    )
+
+                task = asyncio.create_task(
+                    run_btw(
+                        snapshot=snapshot,
+                        question=text,
+                        stream_fn=self._stream_fn,
+                        model=btw_model,
+                        thinking_level=btw_thinking,
+                        get_api_key=btw_api_key,
+                        images=images or None,
+                        history=history,
+                        on_update=_on_btw_update,
+                        abort_controller=controller,
+                        timeout_seconds=btw_cfg.timeout_seconds,
+                    )
+                )
+                self._btw_tasks[key] = (task, controller)
+                result = await task
+        finally:
+            self._btw_tasks.pop(key, None)
+
+        terminal_kind = "error" if result.stop_reason == "error" else "done"
+        await self._send_ext_notification(
+            "pi/btw_update",
+            {
+                "sessionId": session_id,
+                "btwId": btw_id,
+                "kind": terminal_kind,
+                "delta": "",
+                "error": result.error,
+                "stopReason": result.stop_reason,
+            },
+        )
+        return {
+            "sessionId": session_id,
+            "btwId": btw_id,
+            "stopReason": result.stop_reason,
+            "error": result.error,
+        }
+
+    async def _handle_btw_cancel(self, params: dict[str, Any]) -> dict[str, Any]:
+        session_id_raw = params.get("sessionId", params.get("session_id"))
+        btw_id_raw = params.get("btwId", params.get("btw_id"))
+        if not isinstance(session_id_raw, str) or not session_id_raw.strip():
+            raise RequestError.invalid_params(
+                {"reason": "sessionId is required", "method": "pi/session/btw_cancel"}
+            )
+        if not isinstance(btw_id_raw, str) or not btw_id_raw.strip():
+            raise RequestError.invalid_params(
+                {"reason": "btwId is required", "method": "pi/session/btw_cancel"}
+            )
+        session_id = session_id_raw.strip()
+        btw_id = btw_id_raw.strip()
+        entry = self._btw_tasks.get((session_id, btw_id))
+        if entry is not None:
+            task, controller = entry
+            controller.abort()
+            if task is not None and not task.done():
+                task.cancel()
+        return {"sessionId": session_id, "btwId": btw_id, "cancelled": True}
 
     async def ext_notification(self, method: str, params: dict[str, Any]) -> None:
         """``pi/yolo_mode_changed`` (the TUI's mode setting): the mode of every open session, and
@@ -1043,6 +1368,51 @@ class PiAcpAgent(Agent):
         mode = await self._start_mode(session_id, auto, meta)
 
         async def on_event(event: Any, signal: Any | None = None) -> None:
+            etype = getattr(event, "type", None)
+            if etype == "agent_end":
+                self._run_over.add(session_id)
+            if etype == "message_start":
+                msg = getattr(event, "message", None)
+                if msg is not None and harness.is_steered_message(msg):
+                    steered_text = _user_message_text(msg)
+                    if steered_text:
+                        auto.note_user_message(steered_text)
+            elif etype == "message_end":
+                msg = getattr(event, "message", None)
+                if msg is not None and harness.is_steered_message(msg) and self._conn is not None:
+                    chunk = project_steered_user_message(msg, harness.steer_id_for(msg))
+                    if chunk is not None:
+                        await self._conn.session_update(session_id=session_id, update=chunk)
+            elif etype == "queue_update":
+                undelivered = getattr(event, "undeliveredSteer", None) or ()
+                if undelivered:
+                    cleared_ids = [
+                        sid for msg in undelivered if (sid := harness.steer_id_for(msg)) is not None
+                    ]
+                    await self._emit_queue_update(
+                        session_id,
+                        harness,
+                        getattr(event, "steer", ()) or (),
+                        cleared_by_abort=True,
+                        cleared_steer_ids=cleared_ids,
+                    )
+                else:
+                    await self._emit_queue_update(
+                        session_id, harness, getattr(event, "steer", ()) or ()
+                    )
+            elif etype == "abort":
+                cleared = getattr(event, "clearedSteer", None) or ()
+                if cleared:
+                    cleared_ids = [
+                        sid for msg in cleared if (sid := harness.steer_id_for(msg)) is not None
+                    ]
+                    await self._emit_queue_update(
+                        session_id,
+                        harness,
+                        (),
+                        cleared_by_abort=True,
+                        cleared_steer_ids=cleared_ids,
+                    )
             await self._emit_updates(session_id, event)
             await self._report_context_use(session_id, event)
 
@@ -1431,6 +1801,17 @@ class PiAcpAgent(Agent):
                 continue
             seen_names.add(cmd_name)
             available.append(ac)
+        if self._client_supports_btw and "btw" not in seen_names:
+            seen_names.add("btw")
+            available.append(
+                AvailableCommand(
+                    name="btw",
+                    description="Ask a quick side question without polluting the main chat",
+                    input=AvailableCommandInput(
+                        root=UnstructuredCommandInput(hint="<question>"),
+                    ),
+                )
+            )
         if not available:
             return
         logger.debug(

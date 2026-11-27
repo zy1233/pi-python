@@ -244,6 +244,23 @@ class CodemodeConfig:
         }
 
 
+BtwThinkingMode = Literal["off", "inherit"]
+_VALID_BTW_THINKING: set[str] = {"off", "inherit"}
+DEFAULT_BTW_TIMEOUT_SECONDS = 120.0
+MIN_BTW_TIMEOUT_SECONDS = 5.0
+MAX_BTW_TIMEOUT_SECONDS = 600.0
+
+
+@dataclass(frozen=True)
+class BtwConfig:
+    """The ``[btw]`` table of ``agent.toml``: settings for ephemeral ``/btw`` side chats."""
+
+    model: str = ""
+    thinking: BtwThinkingMode = "off"
+    timeout_seconds: float = DEFAULT_BTW_TIMEOUT_SECONDS
+    notes: tuple[str, ...] = ()
+
+
 @dataclass(frozen=True)
 class CliConfig:
     permission: PermissionMode = "ask"
@@ -292,6 +309,7 @@ class CliConfig:
     models: tuple[ModelChoice, ...] = ()
     auto: AutoConfig = field(default_factory=AutoConfig)
     codemode: CodemodeConfig = field(default_factory=CodemodeConfig)
+    btw: BtwConfig = field(default_factory=BtwConfig)
 
     @property
     def model_reasoning(self) -> bool:
@@ -355,6 +373,12 @@ class CliConfig:
         means the model of the session, and that is never unknown. With such an id the model
         step has no model to ask, and every call that needs a judge asks (``model.no_model``)."""
         wanted = self.auto.model
+        return bool(wanted) and all(choice.id != wanted for choice in self.model_choices())
+
+    def btw_model_is_unknown(self) -> bool:
+        """``[btw] model`` names an id that no ``[model]`` or ``[[models]]`` entry has. Empty
+        means the session model. When unknown, ``/btw`` falls back to the session model."""
+        wanted = self.btw.model
         return bool(wanted) and all(choice.id != wanted for choice in self.model_choices())
 
 
@@ -589,6 +613,9 @@ def _from_toml(data: dict[str, Any]) -> CliConfig:
     codemode = _codemode_config(data.get("codemode"))
     if codemode.notes:
         auto = replace(auto, notes=(*auto.notes, *codemode.notes))
+    btw = _btw_config(data.get("btw"))
+    if btw.notes:
+        auto = replace(auto, notes=(*auto.notes, *btw.notes))
 
     config = CliConfig(
         permission=permission,  # type: ignore[arg-type]
@@ -621,6 +648,7 @@ def _from_toml(data: dict[str, Any]) -> CliConfig:
         models=tuple(models),
         auto=auto,
         codemode=codemode,
+        btw=btw,
     )
     if config.auto_model_is_unknown():
         note = (
@@ -628,7 +656,17 @@ def _from_toml(data: dict[str, Any]) -> CliConfig:
             "[[models]]. The model step cannot run, and Auto asks about every command that the "
             "rules cannot prove."
         )
-        config = replace(config, auto=replace(auto, notes=(*auto.notes, note)))
+        config = replace(config, auto=replace(config.auto, notes=(*config.auto.notes, note)))
+    if config.btw_model_is_unknown():
+        note = (
+            f'model in [btw] is "{btw.model}", which is not the id of a model in [model] or '
+            "[[models]]. /btw falls back to the session model."
+        )
+        config = replace(
+            config,
+            btw=replace(config.btw, notes=(*config.btw.notes, note)),
+            auto=replace(config.auto, notes=(*config.auto.notes, note)),
+        )
     return config
 
 
@@ -872,6 +910,61 @@ def _codemode_config(value: object) -> CodemodeConfig:
         timeout_seconds=timeout_seconds,
         max_tool_calls=max_tool_calls,
         max_output_kb=max_output_kb,
+        notes=tuple(notes),
+    )
+
+
+_BTW_KEYS = frozenset({"model", "thinking", "timeout_seconds"})
+
+
+def _btw_config(value: object) -> BtwConfig:
+    """The ``[btw]`` table. Invalid entries fall back to defaults and record ``notes``."""
+    if value is None:
+        return BtwConfig()
+    if not isinstance(value, dict):
+        return BtwConfig(notes=("btw in agent.toml is not a table, and it is ignored.",))
+    notes: list[str] = []
+    for key in value:
+        if key not in _BTW_KEYS:
+            notes.append(f'The key "{key}" in [btw] is not known, and it is ignored.')
+
+    model = ""
+    raw_model = value.get("model")
+    if raw_model is not None:
+        if isinstance(raw_model, str):
+            model = raw_model.strip()
+        else:
+            notes.append("model in [btw] must be a string. The agent uses the session model.")
+
+    thinking: BtwThinkingMode = "off"
+    raw_thinking = value.get("thinking")
+    if raw_thinking is not None:
+        normalized = raw_thinking.strip().lower() if isinstance(raw_thinking, str) else ""
+        if normalized in _VALID_BTW_THINKING:
+            thinking = normalized  # type: ignore[assignment]
+        else:
+            notes.append('thinking in [btw] must be "off" or "inherit". The agent uses "off".')
+
+    timeout_seconds = DEFAULT_BTW_TIMEOUT_SECONDS
+    raw_timeout = value.get("timeout_seconds")
+    if raw_timeout is not None:
+        if (
+            isinstance(raw_timeout, (int, float))
+            and not isinstance(raw_timeout, bool)
+            and MIN_BTW_TIMEOUT_SECONDS <= float(raw_timeout) <= MAX_BTW_TIMEOUT_SECONDS
+        ):
+            timeout_seconds = float(raw_timeout)
+        else:
+            notes.append(
+                f"timeout_seconds in [btw] must be a number from "
+                f"{int(MIN_BTW_TIMEOUT_SECONDS)} to {int(MAX_BTW_TIMEOUT_SECONDS)}. "
+                f"The agent uses {DEFAULT_BTW_TIMEOUT_SECONDS:g} seconds."
+            )
+
+    return BtwConfig(
+        model=model,
+        thinking=thinking,
+        timeout_seconds=timeout_seconds,
         notes=tuple(notes),
     )
 
