@@ -492,6 +492,17 @@ fn handle_ext_notification(notif: &acp::ExtNotification, app: &mut AppView) -> b
     false
 }
 
+/// Puts steer text that the agent did not take back into the prompt box, in front of what the
+/// user has typed since, so that nothing is lost.
+pub(crate) fn restore_into_draft(agent: &mut crate::app::agent_view::AgentView, text: &str) {
+    let existing = agent.prompt.text();
+    if existing.trim().is_empty() {
+        agent.prompt.set_text(text);
+    } else {
+        agent.prompt.set_text(&format!("{text}\n{existing}"));
+    }
+}
+
 fn handle_queue_update_notification(notif: &acp::ExtNotification, app: &mut AppView) -> bool {
     let Ok(update) = serde_json::from_str::<pi_acp_lib::extensions::steer::QueueUpdateNotification>(
         notif.params.get(),
@@ -527,15 +538,7 @@ fn handle_queue_update_notification(notif: &acp::ExtNotification, app: &mut AppV
             texts
         };
         if !restored.is_empty() {
-            let restored_text = restored.join("\n");
-            let existing = agent.prompt.text();
-            if existing.trim().is_empty() {
-                agent.prompt.set_text(&restored_text);
-            } else {
-                agent
-                    .prompt
-                    .set_text(&format!("{restored_text}\n{existing}"));
-            }
+            restore_into_draft(agent, &restored.join("\n"));
         }
         return true;
     }

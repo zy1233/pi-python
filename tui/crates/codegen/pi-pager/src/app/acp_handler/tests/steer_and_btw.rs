@@ -142,3 +142,68 @@ fn busy_submit_emits_steer_and_btw_runs_in_parallel_without_queueing() {
     assert_eq!(agent.btw_history[0].text, "what failed?");
     assert_eq!(agent.btw_history[1].text, "exit 137 is OOM");
 }
+
+fn steer_complete(
+    result: Result<pi_acp_lib::extensions::steer::SteerSessionResponse, String>,
+) -> Action {
+    Action::TaskComplete(crate::app::actions::TaskResult::SteerSessionComplete {
+        agent_id: AgentId(0),
+        steer_id: "st-1".to_string(),
+        display_text: "focus on tests".to_string(),
+        result,
+    })
+}
+
+#[test]
+fn rejected_steer_is_prepended_to_a_non_empty_draft_and_never_dropped() {
+    use pi_acp_lib::extensions::steer::SteerSessionResponse;
+
+    let rejected = |reason: &str| SteerSessionResponse {
+        session_id: "s-steer-rejected".to_string(),
+        steer_id: "st-1".to_string(),
+        queued: false,
+        queue_length: None,
+        reason: Some(reason.to_string()),
+    };
+    for result in [
+        Ok(rejected("aborting")),
+        Ok(rejected("waiting_for_barriers")),
+        Err("boom".to_string()),
+    ] {
+        let mut app = make_app_with_agent("s-steer-rejected");
+        let id = AgentId(0);
+        {
+            let agent = app.agents.get_mut(&id).unwrap();
+            agent
+                .pending_steers
+                .push(("st-1".to_string(), "focus on tests".to_string()));
+            agent.prompt.set_text("already typing something");
+        }
+        dispatch(steer_complete(result), &mut app);
+        let agent = &app.agents[&id];
+        assert!(agent.pending_steers.is_empty());
+        assert_eq!(
+            agent.prompt.text(),
+            "focus on tests\nalready typing something"
+        );
+    }
+}
+
+#[test]
+fn rejected_steer_fills_an_empty_draft() {
+    use pi_acp_lib::extensions::steer::SteerSessionResponse;
+
+    let mut app = make_app_with_agent("s-steer-empty");
+    let id = AgentId(0);
+    dispatch(
+        steer_complete(Ok(SteerSessionResponse {
+            session_id: "s-steer-empty".to_string(),
+            steer_id: "st-1".to_string(),
+            queued: false,
+            queue_length: None,
+            reason: Some("aborting".to_string()),
+        })),
+        &mut app,
+    );
+    assert_eq!(app.agents[&id].prompt.text(), "focus on tests");
+}

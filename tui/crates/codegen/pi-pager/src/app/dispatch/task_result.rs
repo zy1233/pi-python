@@ -384,18 +384,14 @@ pub(super) fn dispatch_task_result(result: TaskResult, app: &mut AppView) -> Vec
                 }
                 Ok(resp) => {
                     agent.pending_steers.retain(|(id, _)| id != &steer_id);
-                    if agent.prompt.text().trim().is_empty() {
-                        agent.prompt.set_text(&display_text);
-                    }
+                    crate::app::acp_handler::restore_into_draft(agent, &display_text);
                     let reason = resp.reason.unwrap_or_else(|| "rejected".to_string());
                     app.show_toast(&format!("Steer not queued: {reason}"));
                     vec![]
                 }
                 Err(error) => {
                     agent.pending_steers.retain(|(id, _)| id != &steer_id);
-                    if agent.prompt.text().trim().is_empty() {
-                        agent.prompt.set_text(&display_text);
-                    }
+                    crate::app::acp_handler::restore_into_draft(agent, &display_text);
                     app.show_toast(&format!("Steer failed: {error}"));
                     vec![]
                 }
