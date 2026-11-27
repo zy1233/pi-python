@@ -130,6 +130,11 @@ interface PendingIdleFallback {
   images: readonly ImageAttachment[];
 }
 
+/** The one text that is sent, and restored if the send does not start: they must be equal. */
+function joinIdleFallbackTexts(queued: readonly PendingIdleFallback[]): string {
+  return queued.map((item) => item.text).join("\n\n");
+}
+
 export const ALWAYS_APPROVE_WARNING = {
   message: "Turn on Always approve?",
   detail:
@@ -1324,7 +1329,7 @@ export class ChatController {
       const queued = this.pendingIdleFallbacks;
       this.pendingIdleFallbacks = [];
       if (stopReason === "cancelled" || this.status !== "ready") {
-        this.emit({ type: "restoreDraft", text: queued.map((item) => item.text).join("\n") });
+        this.emit({ type: "restoreDraft", text: joinIdleFallbackTexts(queued) });
       } else {
         void this.sendIdleFallbacks(queued);
       }
@@ -1333,13 +1338,13 @@ export class ChatController {
 
   /** Sends every steer that the agent refused as `idle` as one prompt, in the order typed (S3). */
   private async sendIdleFallbacks(queued: readonly PendingIdleFallback[]): Promise<void> {
-    const text = queued.map((item) => item.text).join("\n\n");
+    const text = joinIdleFallbackTexts(queued);
     const mentions = queued.flatMap((item) => item.mentions);
     const images = queued.flatMap((item) => item.images);
     const sent = await this.send(text, mentions, images);
     if (!sent) {
       this.pushNotice("info", "Could not send the queued message. It is back in the input.");
-      this.emit({ type: "restoreDraft", text: queued.map((item) => item.text).join("\n") });
+      this.emit({ type: "restoreDraft", text: joinIdleFallbackTexts(queued) });
     }
   }
 

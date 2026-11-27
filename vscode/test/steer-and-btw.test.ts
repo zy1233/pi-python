@@ -1,4 +1,4 @@
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { parsePiCapabilities } from "../src/core/acp-connection.js";
 import { buildTrimmedBtwHistory } from "../src/core/chat-controller.js";
@@ -240,6 +240,27 @@ describe("ChatController steer and /btw", () => {
     );
     expect(ofType(messages, "restoreDraft")).toHaveLength(0);
     expect(controller.stateMessage().pendingSteers).toBeUndefined();
+  });
+
+  it("restores the idle-fallback text with the same separator as the send when the send does not start", async () => {
+    const { controller, messages } = startRig({ FAKE_STEER_BTW: "1" });
+    await controller.start();
+
+    const turn = controller.send("steer-idle-race");
+    await waitFor(
+      () => ofType(messages, "agentText").some((m) => m.text.includes("finishing")),
+      "steer-idle-race finishing chunk",
+    );
+    expect(await controller.send("first fallback")).toBe(true);
+    expect(await controller.send("second fallback")).toBe(true);
+
+    const sendSpy = vi.spyOn(controller, "send");
+    sendSpy.mockImplementationOnce(async () => false);
+    await turn;
+    await waitFor(() => ofType(messages, "restoreDraft").length > 0, "restoreDraft after failed send");
+
+    expect(sendSpy).toHaveBeenCalledWith("first fallback\n\nsecond fallback", [], []);
+    expect(ofType(messages, "restoreDraft").at(-1)?.text).toBe("first fallback\n\nsecond fallback");
   });
 
   it("disables steer capability and restores draft when agent returns method-not-found (-32601)", async () => {
