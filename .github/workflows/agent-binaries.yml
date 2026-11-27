@@ -140,9 +140,13 @@ jobs:
           cache: pip
       - name: Install the packages and PyInstaller
         shell: bash
+        # The pins: no release takes a LangChain, OpenAI or pydantic that nobody tested.
+        # `packaging/agent/constraints.in` has the packages of this step and the command that
+        # makes `constraints.txt` again (docs/specs/2026-10-31-agent-binaries.md, section 2.3).
+        # `cryptography<49`: no wheel for macOS x86_64 after 48 (the reason is in constraints.in).
         run: >-
-          pip install "pyinstaller~=6.22" pytest pytest-asyncio
-          . ./packages/pi-agent-harness ./packages/pi-agent-cli ./packages/pi-web-access
+          pip install -c packaging/agent/constraints.txt "pyinstaller~=6.22" pytest pytest-asyncio
+          "cryptography<49" . ./packages/pi-agent-harness ./packages/pi-agent-cli ./packages/pi-web-access
           ./packages/pi-goal-x ./packages/pi-dynamic-workflows ./packages/pi-mcp ./packages/pi-codemode
       - name: Build
         shell: bash

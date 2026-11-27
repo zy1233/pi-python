@@ -67,6 +67,40 @@ PyInstaller's start-up program puts its library folder first in `LD_LIBRARY_PATH
 that the agent starts (`bash`, `git`) would then load the bundle's `libssl` or `libz`. `entry.py`
 restores the variable that the agent had at start. The smoke test checks it.
 
+### 2.3 The versions in the program (pins)
+
+The packages of the repository have lower bounds only (and an upper bound `<2` for the LangChain
+packages), so a build with no pins takes the newest version of every dependency that exists on
+the day of the build: LangChain, OpenAI, pydantic, `httpx`, `mcp`. Nobody tested that mix, and the
+program that a user runs would change with the date of the build, not with a commit.
+
+The `build` job of `agent-binaries.yml` therefore installs with
+`pip install -c packaging/agent/constraints.txt`. The file pins every package that the build pulls
+in, PyInstaller included, with one resolution for all five platforms (`uv pip compile --universal`,
+Python 3.12; the environment markers stay in the file). `packaging/agent/constraints.in` is the
+input and holds the command to make the file again. The two lists of packages (the `.in` file and
+the install step) must be the same; `scripts/tests/test_agent_constraints.py` checks that, checks
+that each pin is inside the bounds of the `pyproject.toml` files, and checks that the install step
+uses the file.
+
+Make the pins again when you add a package to the build, when a bound changes, or on purpose to
+move to newer versions. A move is a normal change: run `pytest` and `packaging/agent/smoke.py`
+with the new pins first. The `platform-tests` job and `ci.yml` do not use the pins: they must show
+what the newest versions do to the code.
+
+Each pin needs a wheel for all five platforms. A package that has only a source archive is built
+on the runner, and that needs a compiler. `constraints.in` has the command that checks this for
+each platform (`uv pip install --dry-run --python-platform … --only-binary :all:`); run it after
+you make the pins again. The first run (2026-11-27) found that `cryptography` 49 and 50 have no
+macOS x86_64 wheel (PyPI has `arm64` wheels only; 48.x has `universal2` wheels), so the `.in` file
+and the install step both have `cryptography<49`. `mcp` needs the package (through
+`pyjwt[crypto]`). Take the bound away when a release has a wheel for that platform again.
+
+LangChain classes are also a risk in a second way. The adapters override private methods of
+`ChatOpenAI` and `ChatDeepSeek` (`openai_reasoning.py`, `deepseek_replay.py`).
+`pi_agent_core/tests/test_langchain_private_api.py` reads their signatures, so a LangChain release
+that changes one fails there, with the name of the method, and not in a request.
+
 ## 3. The workflow
 
 `.github/workflows/agent-binaries.yml`. It does not touch `release.yml`.

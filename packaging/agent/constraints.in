@@ -1,0 +1,45 @@
+# What the build of `zycode-agent` installs: the `build` job of `.github/workflows/agent-binaries.yml`,
+# step "Install the packages and PyInstaller". Keep the two lists the same
+# (`scripts/tests/test_agent_constraints.py` checks it).
+#
+# `constraints.txt` (next to this file) pins every package that this list pulls in. Make it again
+# when a package is added here, when a bound in a `pyproject.toml` changes, or when the pins must
+# move. Run it from the root of the repository (the paths below are relative to it):
+#
+#   uv pip compile packaging/agent/constraints.in --universal --python-version 3.12 \
+#       --no-emit-package pi-agent-core-lc --no-emit-package pi-agent-harness-lc \
+#       --no-emit-package pi-agent-cli-lc --no-emit-package pi-web-access-py \
+#       --no-emit-package pi-goal-x-py --no-emit-package pi-dynamic-workflows-py \
+#       --no-emit-package pi-mcp-py --no-emit-package pi-codemode-py \
+#       -o packaging/agent/constraints.txt
+#
+# Then do these checks:
+#
+# 1. Every pin needs a wheel for each of the five platforms of the build. A package with only a
+#    source archive is built on the runner, and that needs a compiler (Rust for `cryptography`).
+#    Run this once for each value of `--python-platform` (x86_64-manylinux_2_28,
+#    aarch64-manylinux_2_28, aarch64-apple-darwin, x86_64-apple-darwin, x86_64-pc-windows-msvc),
+#    from the root of the repository, in an environment of Python 3.12. It must end with no error:
+#
+#      uv pip install --dry-run --python-platform <platform> --python-version 3.12 \
+#          --only-binary :all: -c packaging/agent/constraints.txt -r packaging/agent/constraints.in
+#
+# 2. Run the tests (`pytest`) and the smoke test (`packaging/agent/smoke.py`) with the new pins.
+#
+# `docs/specs/2026-10-31-agent-binaries.md` (section 2.3) says why the build has pins.
+pyinstaller~=6.22
+pytest
+pytest-asyncio
+# macOS x86_64 has no wheel of `cryptography` 49 and later (PyPI, 2026-11-27: 48.0.0 has `universal2`
+# wheels, 49.0.0 and 50.0.2 have `arm64` wheels only), so the `darwin-x86_64` build would compile
+# it with Rust. `mcp` needs it (through `pyjwt[crypto]`). Take the bound away when a release has a
+# wheel for that platform again, and run check 1 above.
+cryptography<49
+.
+./packages/pi-agent-harness
+./packages/pi-agent-cli
+./packages/pi-web-access
+./packages/pi-goal-x
+./packages/pi-dynamic-workflows
+./packages/pi-mcp
+./packages/pi-codemode

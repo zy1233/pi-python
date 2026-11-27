@@ -26,7 +26,11 @@ classifiers = [
 ]
 dependencies = [
     "pydantic>=2.0",
-    "langchain-core>=0.3.0",
+    # The LangChain packages have an upper bound: `pi_agent_core/adapters/` overrides private
+    # methods of LangChain classes (`openai_reasoning.py`, `deepseek_replay.py`), and a new major
+    # release can change them. `pi_agent_core/tests/test_langchain_private_api.py` reads the
+    # signatures. Raise a bound only after that test and the adapter tests pass on the new major.
+    "langchain-core>=0.3.0,<2",
     "typing-extensions>=4.6",
 ]
 
@@ -38,15 +42,15 @@ Issues = "https://github.com/zy1233/pi-python/issues"
 Changelog = "https://github.com/zy1233/pi-python/blob/main/CHANGELOG.md"
 
 [project.optional-dependencies]
-openai = ["langchain-openai>=0.2.0"]
-anthropic = ["langchain-anthropic>=0.2.0"]
-deepseek = ["langchain-deepseek>=0.1.0"]
+openai = ["langchain-openai>=0.2.0,<2"]
+anthropic = ["langchain-anthropic>=0.2.0,<2"]
+deepseek = ["langchain-deepseek>=0.1.0,<2"]
 harness = ["pi-agent-harness-lc==1.1.0"]
 cli = ["pi-agent-cli-lc==1.1.0"]
 all = [
-    "langchain-openai>=0.2.0",
-    "langchain-anthropic>=0.2.0",
-    "langchain-deepseek>=0.1.0",
+    "langchain-openai>=0.2.0,<2",
+    "langchain-anthropic>=0.2.0,<2",
+    "langchain-deepseek>=0.1.0,<2",
     "pi-agent-harness-lc==1.1.0",
     "pi-agent-cli-lc==1.1.0",
 ]
