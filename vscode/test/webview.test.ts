@@ -2061,6 +2061,19 @@ describe.skipIf(!chrome || !built)("webview: P1 images, insertMention, saveAll, 
     });
   });
 
+  it("Escape in the main input closes an open /btw panel when the agent is idle", () => {
+    const out = run(`${state}
+      state({});
+      host({ type: "btwState", btw: { turns: [{ id: "btw-1", question: "why?", answer: "because", thought: "", status: "done" }] } });
+      const input = document.querySelector("textarea");
+      const panel = document.querySelector(".btw-panel");
+      const panelVisible = !panel.hidden;
+      input.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", bubbles: true }));
+      const posted = window.__posted.map((m) => m.type).filter((t) => t === "cancel" || t === "btwClose");
+      window.__result = { panelVisible, posted };`);
+    expect(out).toMatchObject({ ok: true, panelVisible: true, posted: ["btwClose"] });
+  });
+
   it("attaches pasted and dropped images as chips, supports removing an image chip, and submits image-only prompts", () => {
     const out = run(
       `${state}

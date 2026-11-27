@@ -2524,6 +2524,12 @@ input.addEventListener("keydown", (event) => {
     return;
   }
 
+  if (event.key === "Escape" && btwState !== null && btwState.turns.length > 0) {
+    event.preventDefault();
+    send({ type: "btwClose" });
+    return;
+  }
+
   if (event.key === "Escape" && !menuOpen && state.status !== "busy" && historyIndex >= 0 && historyDraft !== undefined) {
     event.preventDefault();
     restoreHistoryDraft();
