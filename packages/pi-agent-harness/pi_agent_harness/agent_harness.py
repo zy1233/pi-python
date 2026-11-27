@@ -192,6 +192,29 @@ class _AbortController:
 
 
 @dataclass
+class _SteerEntry:
+    """A user steer, tracked from ``steer()`` to the end of its message.
+
+    The map of entries has the ``id()`` of the message as its key. CPython can give the id of a
+    freed object to a new object, so a map that does not hold the message could take a later
+    message for a steer. The entry holds the message: while the entry exists, the id is taken.
+
+    ``state`` is:
+
+    - ``"pending"`` until the model sees the message. A steer that is still pending when a run
+      ends was never shown to the model, so the run reports it as undelivered. It does not matter
+      if the message is still in ``steer_queue`` or the loop took it out of the queue.
+    - ``"announced"`` after ``message_start`` of the message.
+    - ``"cleared"`` after ``abort()`` took the message out of the queue. ``abort()`` reports it,
+      and removes the entry after that report. The end of a run leaves the entry alone.
+    """
+
+    message: AgentMessage
+    steer_id: str
+    state: Literal["pending", "announced", "cleared"] = "pending"
+
+
+@dataclass
 class _TurnState:
     messages: list[AgentMessage]
     resources: AgentHarnessResources
@@ -322,16 +345,21 @@ class AgentHarness:
         self.steering_mode = steering_mode
         self.follow_up_mode = follow_up_mode
         self.steer_queue: list[AgentMessage] = []
-        # In-memory tracking of steer message identity -> steer_id so subscribers can
+        # In-memory tracking of steer message identity -> steer entry so subscribers can
         # distinguish steered user messages without altering the pi v3 JSONL UserMessage schema.
-        self._steer_ids: dict[int, str] = {}
+        self._steer_ids: dict[int, _SteerEntry] = {}
         self.follow_up_queue: list[AgentMessage] = []
         self.next_turn_queue: list[AgentMessage] = []
         self.pending_session_writes: list[PendingWrite] = []
         self._subscribers: list[Callable[[AgentHarnessEvent, Any | None], Any]] = []
         self._hooks: dict[str, list[Callable[[Any], Any]]] = {}
         self._run_abort_controller: _AbortController | None = None
+        # ``_abort_depth`` counts the aborts that are in progress (``is_aborting``).
+        # ``_abort_epoch`` counts all calls of ``begin_abort()``. A prompt notes the epoch when it
+        # starts, and ends as aborted if the epoch changed by the time its run begins: a cancel
+        # that came before the prompt is not for the prompt.
         self._abort_depth: int = 0
+        self._abort_epoch: int = 0
         self._cached_system_prompt: str | None = None
 
         # Phase 7: Extension API
@@ -1004,10 +1032,11 @@ class AgentHarness:
 
     async def _prompt_with_message(self, message: AgentMessage, text: str) -> AssistantMessage:
         """A turn that opens with *message* (a custom one): never a slash command."""
+        abort_epoch = self._abort_epoch
         if self.phase != "idle":
             raise AgentHarnessError("busy", "AgentHarness is busy")
         await self._ensure_extensions_loaded()
-        return await self._run_turn(text, None, message=message)
+        return await self._run_turn(text, None, message=message, abort_epoch=abort_epoch)
 
     @property
     def extension_registry(self) -> ExtensionRegistry:
@@ -1179,11 +1208,14 @@ class AgentHarness:
     def _set_phase(
         self, phase: Literal["idle", "turn", "compaction", "branch_summary", "retry"]
     ) -> None:
+        was_idle = self.phase == "idle"
         self.phase = phase
         if phase == "idle":
             self._idle_event.set()
-        else:
-            self._idle_event.clear()
+        elif was_idle:
+            # Each busy period gets its own event. A caller that holds the event of one period
+            # (``abort()``) waits for the end of that period, not for the end of a later one.
+            self._idle_event = asyncio.Event()
 
     def _validate_unique(self, names: list[str], message: str) -> None:
         duplicates = sorted({name for name in names if names.count(name) > 1})
@@ -1370,26 +1402,39 @@ class AgentHarness:
         )
 
     async def _clear_undelivered_steers(self) -> list[AgentMessage]:
-        """Drop any user-steered messages still sitting in ``steer_queue`` when a run ends.
+        """Report the user steers that the model never saw when a run ends.
+
+        A steer is undelivered when no ``message_start`` showed it to the model and ``abort()``
+        did not report it. That includes a steer that is still in ``steer_queue``, and a steer
+        that the loop took out of the queue and then lost: the loop takes the steers at the end of
+        a turn, and the check of ``max_turns`` at the start of the next turn can end the run
+        before the loop announces them.
 
         Preserves non-steered custom messages (e.g. background ``trigger_message`` items whose
         identities are not in ``_steer_ids``). Emits a ``queue_update`` carrying
         ``undeliveredSteer`` before removing their ``_steer_ids`` entries so subscribers can
         correlate ``clearedSteerIds`` and restore drafts on the client.
+
+        A run has no steer left when it ends, so every entry that exists now goes: also the entry
+        of a steer that the model saw and that did not reach ``message_end``. The entries that
+        ``abort()`` took stay: ``abort()`` still has to report them, and it removes them.
         """
-        undelivered = [msg for msg in self.steer_queue if id(msg) in self._steer_ids]
-        if not undelivered:
-            return []
-        self.steer_queue = [msg for msg in self.steer_queue if id(msg) not in self._steer_ids]
+        # The entries are in the order of the calls of ``steer()``: a steer that the loop took
+        # comes before the steers that are still in the queue.
+        entries = [(key, e) for key, e in self._steer_ids.items() if e.state != "cleared"]
+        undelivered = [entry.message for _, entry in entries if entry.state == "pending"]
+        if undelivered:
+            self.steer_queue = [msg for msg in self.steer_queue if id(msg) not in self._steer_ids]
         try:
-            await self._emit_queue_update(undelivered_steer=undelivered)
+            if undelivered:
+                await self._emit_queue_update(undelivered_steer=undelivered)
         except Exception:
             # The run is over and the queue is already clean: a failed notification must not
             # replace the result or the error of the run.
             logger.warning("queue_update for undelivered steers failed", exc_info=True)
         finally:
-            for msg in undelivered:
-                self._steer_ids.pop(id(msg), None)
+            for key, _ in entries:
+                self._steer_ids.pop(key, None)
         return undelivered
 
     async def _compute_system_prompt(self, active_tools: list[AgentTool]) -> str:
@@ -1503,6 +1548,11 @@ class AgentHarness:
                 await self.session.append_custom_entry(write["custom_type"], write.get("data"))
 
     async def _handle_agent_event(self, event: AgentEvent, signal: Any | None = None) -> None:
+        if event.type == "message_start":
+            # The model sees a steer from here on. Before this event, a run that ends reports it.
+            entry = self._steer_entry(event.message)
+            if entry is not None and entry.state == "pending":
+                entry.state = "announced"
         if event.type == "message_end":
             assert isinstance(event, MessageEndEvent)
             await self.session.append_message(event.message)
@@ -1702,8 +1752,12 @@ class AgentHarness:
         images: list[ImageContent] | None = None,
         *,
         message: AgentMessage | None = None,
+        abort_epoch: int,
     ) -> AssistantMessage:
-        """Run a turn opening with *message*, or with the user message *text* makes."""
+        """Run a turn opening with *message*, or with the user message *text* makes.
+
+        *abort_epoch* is the value of ``_abort_epoch`` when the prompt began (see ``prompt()``).
+        """
         active_turn_state = turn_state
         messages: list[AgentMessage] = [
             message if message is not None else _create_user_message(text, images)
@@ -1742,8 +1796,10 @@ class AgentHarness:
 
         controller = _AbortController()
         self._run_abort_controller = controller
-        if self._closed or self._abort_depth > 0:
-            # close() or begin_abort() ran while this turn was still being set up.
+        if self._closed or self._abort_epoch != abort_epoch:
+            # close(), or a cancel that came after the prompt began, ran while this turn was still
+            # being set up. A cancel from before the prompt does not count (``_abort_depth`` would
+            # count it while the ``abort()`` of that cancel is still in progress).
             controller.abort()
 
         def get_turn_state() -> _TurnState:
@@ -1791,6 +1847,10 @@ class AgentHarness:
         raise AgentHarnessError("invalid_state", "AgentHarness prompt completed without assistant")
 
     async def prompt(self, text: str, images: list[ImageContent] | None = None) -> AssistantMessage:
+        # A cancel that comes after this line ends this prompt, also while the run is still being
+        # set up. A cancel that came before it is for an earlier prompt, and its ``abort()``
+        # may still be in progress: it must not end this one.
+        abort_epoch = self._abort_epoch
         if self._closed:
             raise AgentHarnessError("invalid_state", "AgentHarness is closed")
         if self.phase != "idle":
@@ -1806,7 +1866,7 @@ class AgentHarness:
             return dispatched
 
         text = self._expand_skill_command(text)
-        return await self._run_turn(text, images)
+        return await self._run_turn(text, images, abort_epoch=abort_epoch)
 
     async def _run_turn(
         self,
@@ -1814,7 +1874,10 @@ class AgentHarness:
         images: list[ImageContent] | None = None,
         *,
         message: AgentMessage | None = None,
+        abort_epoch: int | None = None,
     ) -> AssistantMessage:
+        if abort_epoch is None:
+            abort_epoch = self._abort_epoch
         self._set_phase("turn")
         try:
             # Before the tool list is built: what an extension still sets up in the background
@@ -1827,7 +1890,11 @@ class AgentHarness:
             raise
         try:
             return await self._execute_turn(
-                await self._create_turn_state(), text, images, message=message
+                await self._create_turn_state(),
+                text,
+                images,
+                message=message,
+                abort_epoch=abort_epoch,
             )
         except AgentHarnessError:
             self._set_phase("idle")
@@ -1852,6 +1919,7 @@ class AgentHarness:
         arrives but before the scheduled ``abort()`` task starts executing.
         """
         self._abort_depth += 1
+        self._abort_epoch += 1
         if self._run_abort_controller is not None:
             self._run_abort_controller.abort()
 
@@ -1866,18 +1934,31 @@ class AgentHarness:
             raise AgentHarnessError("invalid_state", "Cannot steer while idle or aborting")
         message = _create_user_message(text, images)
         sid = steer_id or str(uuid.uuid4())
-        self._steer_ids[id(message)] = sid
+        self._steer_ids[id(message)] = _SteerEntry(message, sid)
         self.steer_queue.append(message)
         await self._emit_queue_update()
         return sid
 
+    def _steer_entry(self, message: AgentMessage) -> _SteerEntry | None:
+        """The entry of *message* if *message* itself is a steer, else ``None``.
+
+        An entry holds its message, so no other object has the same ``id()`` while the entry
+        exists. The test ``entry.message is message`` stays as a second guard: the answer decides
+        if Auto gets a text as a text of the user.
+        """
+        entry = self._steer_ids.get(id(message))
+        if entry is None or entry.message is not message:
+            return None
+        return entry
+
     def steer_id_for(self, message: AgentMessage) -> str | None:
         """Return the in-memory steer_id for a steered UserMessage, or ``None``."""
-        return self._steer_ids.get(id(message))
+        entry = self._steer_entry(message)
+        return entry.steer_id if entry is not None else None
 
     def is_steered_message(self, message: AgentMessage) -> bool:
         """Whether *message* was enqueued via ``steer()`` (not a normal opening prompt)."""
-        return id(message) in self._steer_ids
+        return self._steer_entry(message) is not None
 
     async def follow_up(self, text: str, images: list[ImageContent] | None = None) -> None:
         if self.phase == "idle":
@@ -1986,16 +2067,26 @@ class AgentHarness:
 
         if not _from_begin:
             self.begin_abort()
+        # The run that this abort ends: the busy period that is now, or the idle that is now. A
+        # run that starts later is another run. ``wait_for_idle()`` would wait for it, and
+        # ``is_aborting`` would stay true for all of it.
+        idle_event = self._idle_event
         cleared_steer = list(self.steer_queue)
         cleared_follow_up = list(self.follow_up_queue)
         self.steer_queue.clear()
         self.follow_up_queue.clear()
+        for message in cleared_steer:
+            # The event ``abort`` below reports these steers. The end of the run must not do it
+            # again, and must not remove the entries before that event.
+            entry = self._steer_entry(message)
+            if entry is not None:
+                entry.state = "cleared"
 
         errors: list[Exception] = []
         try:
             for step in (
                 self._emit_queue_update,
-                self.wait_for_idle,
+                idle_event.wait,
                 lambda: self._emit_any(
                     AbortEvent(clearedSteer=cleared_steer, clearedFollowUp=cleared_follow_up)
                 ),

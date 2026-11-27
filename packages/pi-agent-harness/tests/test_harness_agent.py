@@ -14,6 +14,7 @@ from pi_agent_core.types import (
     AgentToolResult,
     BeforeToolCallResult,
     DoneEvent,
+    ErrorEvent,
     Model,
     StartEvent,
     StreamOptions,
@@ -630,6 +631,321 @@ async def test_steer_still_queued_is_cleared_when_should_stop_after_turn_ends_th
     assert harness.steer_queue == []
     assert harness._steer_ids == {}
     assert cleared == [["stop-1"]]
+
+
+def _hold_tool(started, release) -> SimpleTool:
+    """The ``echo`` tool of ``_tool_once_stream``: it runs until the test sets *release*."""
+
+    class EchoParams(BaseModel):
+        message: str = ""
+
+    async def hold(_id, params, signal, on_update):
+        started.set()
+        await release.wait()
+        return AgentToolResult(content=[{"type": "text", "text": "ok"}], details={})
+
+    return SimpleTool("echo", "", "Echo", EchoParams, hold)
+
+
+@pytest.mark.asyncio
+async def test_steer_taken_by_the_loop_is_reported_when_max_turns_ends_the_run():
+    """The loop takes the steers out of the queue at the end of a turn. When ``max_turns`` then
+    ends the run, the model never saw the steer: it is reported, not lost."""
+    import asyncio
+
+    tool_started = asyncio.Event()
+    release_tool = asyncio.Event()
+    harness = AgentHarness(
+        session=await _memory_session(),
+        model=_model(),
+        stream_fn=_tool_once_stream,
+        tools=[_hold_tool(tool_started, release_tool)],
+        max_turns=1,
+    )
+    polls = 0
+
+    def patch(config) -> None:
+        original = config.get_steering_messages
+
+        async def poll():
+            nonlocal polls
+            polls += 1
+            messages = await original()
+            if polls == 2:
+                # After the turn-end poll took "taken-1": a second steer stays in the queue.
+                await harness.steer("late", steer_id="late-2")
+            return messages
+
+        config.get_steering_messages = poll
+
+    _patch_loop_config(harness, patch)
+    undelivered: list[list[str | None]] = []
+    shown: list[str] = []
+
+    def listener(event, signal=None):
+        if event.type == "queue_update" and event.undeliveredSteer:
+            undelivered.append([harness.steer_id_for(m) for m in event.undeliveredSteer])
+        if event.type == "message_start" and getattr(event.message, "role", None) == "user":
+            shown.append(_user_text(event.message))
+
+    harness.subscribe(listener)
+    run_task = asyncio.create_task(harness.prompt("go"))
+    await asyncio.wait_for(tool_started.wait(), timeout=5.0)
+    await harness.steer("taken", steer_id="taken-1")
+    release_tool.set()
+    result = await asyncio.wait_for(run_task, timeout=5.0)
+
+    assert result.stopReason == "error"
+    assert shown == ["go"]  # the model never saw a steer
+    # Both are reported, in the order of the calls of ``steer()``.
+    assert undelivered == [["taken-1", "late-2"]]
+    assert harness.phase == "idle"
+    assert harness.steer_queue == []
+    assert harness._steer_ids == {}
+
+
+@pytest.mark.asyncio
+async def test_steer_that_the_model_saw_is_not_reported_as_undelivered():
+    import asyncio
+
+    tool_started = asyncio.Event()
+    release_tool = asyncio.Event()
+    harness = AgentHarness(
+        session=await _memory_session(),
+        model=_model(),
+        stream_fn=_tool_once_stream,
+        tools=[_hold_tool(tool_started, release_tool)],
+    )
+    undelivered: list[object] = []
+    shown: list[str] = []
+
+    def listener(event, signal=None):
+        if event.type == "queue_update" and event.undeliveredSteer:
+            undelivered.append(event.undeliveredSteer)
+        if event.type == "message_start" and getattr(event.message, "role", None) == "user":
+            shown.append(_user_text(event.message))
+
+    harness.subscribe(listener)
+    run_task = asyncio.create_task(harness.prompt("go"))
+    await asyncio.wait_for(tool_started.wait(), timeout=5.0)
+    await harness.steer("redirect", steer_id="seen-1")
+    release_tool.set()
+    result = await asyncio.wait_for(run_task, timeout=5.0)
+
+    assert result.stopReason == "stop"
+    assert shown == ["go", "redirect"]
+    assert undelivered == []
+    assert harness._steer_ids == {}
+
+
+@pytest.mark.asyncio
+async def test_steer_entry_holds_its_message_so_the_id_cannot_be_reused():
+    """The map of steers has ``id(message)`` as key. If it did not hold the message, CPython could
+    give the id of a freed steer to a new message (a tool result, say), and the harness would
+    take that message for a steer."""
+    import asyncio
+    import gc
+    import weakref
+
+    tool_started = asyncio.Event()
+    release_tool = asyncio.Event()
+    harness = AgentHarness(
+        session=await _memory_session(),
+        model=_model(),
+        stream_fn=_tool_once_stream,
+        tools=[_hold_tool(tool_started, release_tool)],
+    )
+    run_task = asyncio.create_task(harness.prompt("go"))
+    await asyncio.wait_for(tool_started.wait(), timeout=5.0)
+    await harness.steer("will be dropped", steer_id="held-1")
+    queued = harness.steer_queue[0]
+    ref = weakref.ref(queued)
+
+    harness.steer_queue.clear()  # nothing else holds the message now
+    del queued
+    gc.collect()
+    assert ref() is not None  # the entry holds it: its id stays taken
+    assert harness.steer_id_for(ref()) == "held-1"
+    # A message that is not a steer is not a steer, whatever its id is.
+    other = UserMessage(content="other", timestamp=1)
+    assert harness.steer_id_for(other) is None
+    assert harness.is_steered_message(other) is False
+
+    release_tool.set()
+    await asyncio.wait_for(run_task, timeout=5.0)
+    assert harness._steer_ids == {}
+
+
+@pytest.mark.asyncio
+async def test_aborted_steer_is_reported_once_and_its_id_is_readable_in_the_abort_event():
+    """``abort()`` reports the steers that it took out of the queue. The end of the run must not
+    report them a second time, and it must not remove their ids before the ``abort`` event."""
+    import asyncio
+
+    tool_started = asyncio.Event()
+    release_tool = asyncio.Event()
+    harness = AgentHarness(
+        session=await _memory_session(),
+        model=_model(),
+        stream_fn=_tool_once_stream,
+        tools=[_hold_tool(tool_started, release_tool)],
+    )
+    undelivered: list[object] = []
+    abort_ids: list[list[str | None]] = []
+
+    def listener(event, signal=None):
+        if event.type == "queue_update" and event.undeliveredSteer:
+            undelivered.append(event.undeliveredSteer)
+        if event.type == "abort":
+            abort_ids.append([harness.steer_id_for(m) for m in event.clearedSteer])
+
+    harness.subscribe(listener)
+    run_task = asyncio.create_task(harness.prompt("go"))
+    await asyncio.wait_for(tool_started.wait(), timeout=5.0)
+    await harness.steer("to abort", steer_id="abort-1")
+    abort_task = asyncio.create_task(harness.abort())
+    await asyncio.sleep(0)
+    release_tool.set()
+    await asyncio.wait_for(abort_task, timeout=5.0)
+    await asyncio.wait_for(run_task, timeout=5.0)
+
+    assert undelivered == []
+    assert abort_ids == [["abort-1"]]
+    assert harness._steer_ids == {}
+
+
+async def _signal_aware_stream(model, context, options=None):
+    """Like ``langchain_stream``: a turn that starts with an aborted signal ends as aborted."""
+    signal = getattr(options, "signal", None)
+    if signal is None or not getattr(signal, "aborted", False):
+        return await mock_text_stream(model, context, options)
+    stream = AssistantMessageEventStream()
+    partial = _base_partial(model)
+    partial.stopReason = "aborted"
+    partial.errorMessage = "Operation aborted"
+    stream.push(StartEvent(partial=partial.model_copy(deep=True)))
+    stream.push(
+        ErrorEvent(
+            partial=partial.model_copy(deep=True),
+            reason="aborted",
+            error_message="Operation aborted",
+        )
+    )
+    stream.set_final_message(partial)
+    stream.end()
+    return stream
+
+
+def _hold_first_queue_update(harness: AgentHarness):
+    """Make the first ``queue_update`` wait, as a write to a slow client waits.
+
+    ``abort()`` sends one before it does anything else, so its task is then in progress for as
+    long as the test wants. Returns ``(reached, release)``: two events.
+    """
+    import asyncio
+
+    reached = asyncio.Event()
+    release = asyncio.Event()
+    waited = False
+
+    async def listener(event, signal=None):
+        nonlocal waited
+        if event.type == "queue_update" and not waited:
+            waited = True
+            reached.set()
+            await release.wait()
+
+    harness.subscribe(listener)
+    return reached, release
+
+
+@pytest.mark.asyncio
+async def test_cancel_while_idle_does_not_end_the_next_prompt():
+    """``session/cancel`` of a turn that is over is not for the next prompt, also while the
+    ``abort()`` of that cancel is still in progress."""
+    import asyncio
+
+    harness = AgentHarness(
+        session=await _memory_session(), model=_model(), stream_fn=_signal_aware_stream
+    )
+    reached, release = _hold_first_queue_update(harness)
+
+    # What ``PiAcpAgent.cancel`` does.
+    harness.begin_abort()
+    abort_task = asyncio.create_task(harness.abort(_from_begin=True))
+    await asyncio.wait_for(reached.wait(), timeout=5.0)
+    assert harness.is_aborting  # the abort of the old cancel is still in progress
+
+    result = await asyncio.wait_for(harness.prompt("a new question"), timeout=5.0)
+
+    assert result.stopReason == "stop"
+    release.set()
+    await asyncio.wait_for(abort_task, timeout=5.0)
+    assert not harness.is_aborting
+
+
+@pytest.mark.asyncio
+async def test_cancel_while_idle_does_not_wait_for_the_next_run():
+    """The ``abort()`` of a cancel that came while idle has nothing to wait for. It must not wait
+    for a run that starts later, and ``is_aborting`` must not stay true for that run: a steer
+    for that run is not refused."""
+    import asyncio
+
+    tool_started = asyncio.Event()
+    release_tool = asyncio.Event()
+    harness = AgentHarness(
+        session=await _memory_session(),
+        model=_model(),
+        stream_fn=_tool_once_stream,
+        tools=[_hold_tool(tool_started, release_tool)],
+    )
+    reached, release = _hold_first_queue_update(harness)
+
+    harness.begin_abort()
+    abort_task = asyncio.create_task(harness.abort(_from_begin=True))
+    await asyncio.wait_for(reached.wait(), timeout=5.0)
+    run_task = asyncio.create_task(harness.prompt("a long run"))
+    await asyncio.wait_for(tool_started.wait(), timeout=5.0)
+
+    release.set()
+    await asyncio.wait_for(abort_task, timeout=5.0)  # the run is still going
+
+    assert harness.phase == "turn"
+    assert not harness.is_aborting
+    await harness.steer("still accepted")
+    release_tool.set()
+    result = await asyncio.wait_for(run_task, timeout=5.0)
+    assert result.stopReason == "stop"
+
+
+@pytest.mark.asyncio
+async def test_cancel_while_the_run_is_being_set_up_still_ends_the_prompt():
+    """The other side: a cancel that comes after the prompt began ends it, also when the run has
+    no abort controller yet."""
+    import asyncio
+
+    hook_started = asyncio.Event()
+    release_hook = asyncio.Event()
+
+    async def slow_hook(event):
+        hook_started.set()
+        await release_hook.wait()
+
+    harness = AgentHarness(
+        session=await _memory_session(), model=_model(), stream_fn=_signal_aware_stream
+    )
+    harness.on("before_agent_start", slow_hook)
+    run_task = asyncio.create_task(harness.prompt("a question"))
+    await asyncio.wait_for(hook_started.wait(), timeout=5.0)
+
+    harness.begin_abort()
+    abort_task = asyncio.create_task(harness.abort(_from_begin=True))
+    release_hook.set()
+    result = await asyncio.wait_for(run_task, timeout=5.0)
+    await asyncio.wait_for(abort_task, timeout=5.0)
+
+    assert result.stopReason == "aborted"
+    assert not harness.is_aborting
 
 
 @pytest.mark.asyncio

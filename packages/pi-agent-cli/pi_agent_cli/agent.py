@@ -1373,7 +1373,14 @@ class PiAcpAgent(Agent):
                 self._run_over.add(session_id)
             if etype == "message_start":
                 msg = getattr(event, "message", None)
-                if msg is not None and harness.is_steered_message(msg):
+                # Auto gets only what the user typed, never the text of the assistant or of a tool
+                # (invariant 9b). ``is_steered_message`` tests the identity of the message; the
+                # role is a second guard, and ``_user_message_text`` reads any role.
+                if (
+                    msg is not None
+                    and getattr(msg, "role", None) == "user"
+                    and harness.is_steered_message(msg)
+                ):
                     steered_text = _user_message_text(msg)
                     if steered_text:
                         auto.note_user_message(steered_text)
