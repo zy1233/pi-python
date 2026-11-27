@@ -332,7 +332,6 @@ class AgentHarness:
         self._hooks: dict[str, list[Callable[[Any], Any]]] = {}
         self._run_abort_controller: _AbortController | None = None
         self._abort_depth: int = 0
-        self._queue_drain_rolled_back: bool = False
         self._cached_system_prompt: str | None = None
 
         # Phase 7: Extension API
@@ -1384,6 +1383,10 @@ class AgentHarness:
         self.steer_queue = [msg for msg in self.steer_queue if id(msg) not in self._steer_ids]
         try:
             await self._emit_queue_update(undelivered_steer=undelivered)
+        except Exception:
+            # The run is over and the queue is already clean: a failed notification must not
+            # replace the result or the error of the run.
+            logger.warning("queue_update for undelivered steers failed", exc_info=True)
         finally:
             for msg in undelivered:
                 self._steer_ids.pop(id(msg), None)
@@ -1481,8 +1484,6 @@ class AgentHarness:
                 await self._emit_queue_update()
             except Exception:
                 queue[:0] = messages
-                if queue is self.steer_queue:
-                    self._queue_drain_rolled_back = True
                 raise
         return messages
 
@@ -1739,7 +1740,6 @@ class AgentHarness:
                     messages.extend(extra)
                 system_prompt = getattr(before_result, "system_prompt", system_prompt)
 
-        self._queue_drain_rolled_back = False
         controller = _AbortController()
         self._run_abort_controller = controller
         if self._closed or self._abort_depth > 0:
@@ -1783,8 +1783,7 @@ class AgentHarness:
         finally:
             self._run_abort_controller = None
             await self._flush_pending_session_writes()
-            if not self._queue_drain_rolled_back:
-                await self._clear_undelivered_steers()
+            await self._clear_undelivered_steers()
 
         for message in reversed(new_messages):
             if getattr(message, "role", None) == "assistant":
@@ -1816,7 +1815,6 @@ class AgentHarness:
         *,
         message: AgentMessage | None = None,
     ) -> AssistantMessage:
-        self._queue_drain_rolled_back = False
         self._set_phase("turn")
         try:
             # Before the tool list is built: what an extension still sets up in the background
@@ -1833,13 +1831,11 @@ class AgentHarness:
             )
         except AgentHarnessError:
             self._set_phase("idle")
-            if not self._queue_drain_rolled_back:
-                await self._clear_undelivered_steers()
+            await self._clear_undelivered_steers()
             raise
         except Exception as e:
             self._set_phase("idle")
-            if not self._queue_drain_rolled_back:
-                await self._clear_undelivered_steers()
+            await self._clear_undelivered_steers()
             raise normalize_harness_error(e, "unknown") from e
 
     @property

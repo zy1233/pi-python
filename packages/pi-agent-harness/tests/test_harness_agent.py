@@ -433,7 +433,12 @@ async def test_steer_queue_drains_and_rolls_back_on_emit_failure():
 
     assert result.stopReason == "error"
     assert "steer drain boom" in (result.errorMessage or "")
-    assert [_user_text(m) for m in harness.steer_queue] == ["steered"]
+    assert "steered" not in seen
+    assert harness.steer_queue == []
+    assert harness._steer_ids == {}
+
+    seen.clear()
+    await harness.prompt("next")
     assert "steered" not in seen
 
 
