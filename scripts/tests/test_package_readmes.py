@@ -51,7 +51,7 @@ def test_readme_of_a_package_has_only_absolute_links(pyproject: Path):
 
     assert relative == [], (
         f"{readme.relative_to(REPO_ROOT)} has links that PyPI cannot follow: {relative}. "
-        "Use the full https://github.com/zy1233/pi-python/blob/main/... address."
+        "Use the full https://github.com/zy1233/zycode/blob/main/... address."
     )
 
 

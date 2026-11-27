@@ -1,6 +1,6 @@
 # pi-goal-x-py
 
-Goal-driven planning extension for [pi-python](https://github.com/zy1233/pi-python).
+Goal-driven planning extension for [zycode](https://github.com/zy1233/zycode).
 
 Python port of [pi-goal-x](https://www.npmjs.com/package/pi-goal-x).
 
@@ -27,4 +27,4 @@ steps and track progress using `goal_update` and `goal_complete` tools.
   `goal_complete`, it is reminded, at most twice (`pi_goal_x.MAX_COMPLETION_REMINDERS`). The count
   starts again when a step is reopened or a new goal begins.
 
-Details: [Phase 7 spec, section 6](https://github.com/zy1233/pi-python/blob/main/docs/specs/2026-09-22-phase7-extension-api-design.md).
+Details: [Phase 7 spec, section 6](https://github.com/zy1233/zycode/blob/main/docs/specs/2026-09-22-phase7-extension-api-design.md).

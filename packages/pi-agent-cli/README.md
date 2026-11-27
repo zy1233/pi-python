@@ -3,7 +3,7 @@
 Standard [Agent Client Protocol (ACP)](https://agentclientprotocol.com/) agent over `pi-agent-harness`. It is the agent of [zycode](https://zycode.dev), an open-source coding agent for your terminal and your editor.
 
 - stdio entry: `python -m pi_agent_cli` (or console script `pi-agent-cli`). The console script `pi-agent-cli-lc` has the name of the package, so `uvx pi-agent-cli-lc` works too (from 0.7.0). `uvx --from pi-agent-cli-lc pi-agent-cli` works with every release
-- Zed: see "In Zed (custom agent)" in the [repository README](https://github.com/zy1233/pi-python#in-zed-custom-agent)
+- Zed: see "In Zed (custom agent)" in the [repository README](https://github.com/zy1233/zycode#in-zed-custom-agent)
 - headless one-shot: `python -m pi_agent_cli -p "..."` 
 - Headless prompt overrides (override `agent.toml` `[prompt]`): `--system-prompt`, `--system-prompt-file`, `--append-system-prompt` / `--rules`, `--append-system-prompt-file`, `--no-context-files`
 - Version: `python -m pi_agent_cli --version` prints `pi-agent-cli <version>` and exits 0. It reads no config.
@@ -19,4 +19,4 @@ pip install pi-agent-cli-lc
 pip install pi-agent-core-lc[deepseek]
 ```
 
-See the [repository README](https://github.com/zy1233/pi-python#install) for development setup and Windows/WSL notes.
+See the [repository README](https://github.com/zy1233/zycode#install) for development setup and Windows/WSL notes.

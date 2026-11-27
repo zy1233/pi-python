@@ -259,7 +259,7 @@ DEFAULT_REAL_RUNS = 3
 KEY_VARIABLE = "OPENROUTER_API_KEY"
 OPENROUTER_BASE = "https://openrouter.ai/api/v1"
 # The default Python agent string is refused (HTTP 403) by this provider.
-USER_AGENT = "pi-python-auto-eval/1 (+https://github.com/zy1233/pi-python)"
+USER_AGENT = "pi-python-auto-eval/1 (+https://github.com/zy1233/zycode)"
 # When a response gives no cost, the cap counts this much (USD for each token): above any small
 # model, so that the cap is never too loose.
 ESTIMATE_IN_USD = 10e-6

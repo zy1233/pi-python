@@ -1,6 +1,6 @@
 # pi-mcp-py
 
-An extension for [pi-python](https://github.com/zy1233/pi-python). It connects the MCP servers that an
+An extension for [zycode](https://github.com/zy1233/zycode). It connects the MCP servers that an
 ACP client (an editor such as Zed) passes to the agent, and gives their tools to the model.
 
 The agent itself has no MCP client. Without this package, the servers that the editor passes are not

@@ -2,6 +2,7 @@
 
 > Date: 2026-11-15 (updated 2026-11-19)  
 > Status: **Sent upstream on 2026-11-19: [`omacom/omarchy#19501`](https://github.com/omacom/omarchy/pull/19501) (4 commits, 14 files, ready for review). The staging PR in the fork is `zy1233/omarchy#1`.** Before this, a review (2026-11-16) found two defects: `latest` resolved to the oldest release, and the agent id `zycode` was not the name of a command (the command is `zypi`). Both are fixed (commit `67fb4fe`). A test run then showed a third defect: the shell tests could write into a real zycode home (commit `6b1fb25`). On 2026-11-19 the branch was rebased on `quattro` (`fc781d3`) and got a fourth commit, because upstream had added a launcher for each agent. Sections 2 to 5 show the first three commits, as they were before the rebase. Section 6 has the rebase, the fourth commit, and the tests on a real Omarchy system.  
+> Rename (2026-11-27): the repository `zy1233/pi-python` is now `zy1233/zycode`. The addresses in the text of the PR (release downloads and the list of releases) use the new name. The old addresses redirect. The records of tests that ran before the rename keep the old name.  
 > Upstream target: `omacom/omarchy` (`quattro` branch)  
 > Component: Omarchy desktop coding agent menu & launcher  
 
@@ -88,14 +89,14 @@ zycode-linux-x86_64-1.0.0.tar.gz
 
 In `etc/mise/conf.d/omarchy-tools.toml`:
 ```toml
-"http:zycode" = { version = "latest", lazy = true, auto_update = "4h", lazy_bins = ["zypi"], minimum_release_age = "0s", platforms_linux_x64_url = "https://github.com/zy1233/pi-python/releases/download/v{{ version }}/zycode-linux-x86_64-{{ version }}.tar.gz", platforms_linux_arm64_url = "https://github.com/zy1233/pi-python/releases/download/v{{ version }}/zycode-linux-aarch64-{{ version }}.tar.gz", version_list_url = "https://api.github.com/repos/zy1233/pi-python/releases", version_json_path = ".[].tag_name", version_order = "semver" }
+"http:zycode" = { version = "latest", lazy = true, auto_update = "4h", lazy_bins = ["zypi"], minimum_release_age = "0s", platforms_linux_x64_url = "https://github.com/zy1233/zycode/releases/download/v{{ version }}/zycode-linux-x86_64-{{ version }}.tar.gz", platforms_linux_arm64_url = "https://github.com/zy1233/zycode/releases/download/v{{ version }}/zycode-linux-aarch64-{{ version }}.tar.gz", version_list_url = "https://api.github.com/repos/zy1233/zycode/releases", version_json_path = ".[].tag_name", version_order = "semver" }
 ```
 
 Key configuration points:
 - `lazy = true`: `mise reshim --system` makes a shim for each name in `lazy_bins`. The first run through the shim installs the newest version and then starts it.
 - `lazy_bins = ["zypi"]`: Only `zypi` is a command. `zycode-agent` stays beside it in the mise install directory, and `zypi` starts it from there. The saved default-agent name is `zypi` too, because `omarchy-agent` checks the saved name as a command and runs it. `zycode` is an alias.
 - `auto_update = "4h"`: Updates check every 4 hours alongside other self-updating agent CLIs.
-- `version_list_url` and `version_json_path`: Queries `https://api.github.com/repos/zy1233/pi-python/releases` and takes `.tag_name`. Mise removes the `v` prefix of tags such as `v1.0.0`.
+- `version_list_url` and `version_json_path`: Queries `https://api.github.com/repos/zy1233/zycode/releases` and takes `.tag_name`. Mise removes the `v` prefix of tags such as `v1.0.0`.
 - `version_order = "semver"`: Mise takes the last entry of a version list as the newest. GitHub lists releases newest first. Without this option, `latest` is `0.1.0`. With it, mise sorts the list by semver, and `latest` is `1.0.0`. Pre-releases stay out of the list unless `prerelease = true`.
 - `{{ version }}`, with spaces: The form `{{version}}` gives a mise deprecation warning (`legacy-version-template`).
 
@@ -159,7 +160,7 @@ index cee381040f6..ba35df44205 100755
 +  # as the newest, so the versions are ordered by semver to make "latest" the
 +  # newest release rather than the oldest.
 +  agent_tool="http:zycode"
-+  agent_package="$agent_tool[platforms_linux_x64_url=https://github.com/zy1233/pi-python/releases/download/v{{ version }}/zycode-linux-x86_64-{{ version }}.tar.gz,platforms_linux_arm64_url=https://github.com/zy1233/pi-python/releases/download/v{{ version }}/zycode-linux-aarch64-{{ version }}.tar.gz,version_list_url=https://api.github.com/repos/zy1233/pi-python/releases,version_json_path=.[].tag_name,version_order=semver]"
++  agent_package="$agent_tool[platforms_linux_x64_url=https://github.com/zy1233/zycode/releases/download/v{{ version }}/zycode-linux-x86_64-{{ version }}.tar.gz,platforms_linux_arm64_url=https://github.com/zy1233/zycode/releases/download/v{{ version }}/zycode-linux-aarch64-{{ version }}.tar.gz,version_list_url=https://api.github.com/repos/zy1233/zycode/releases,version_json_path=.[].tag_name,version_order=semver]"
 +  ;;
  *)
 -  echo "Usage: omarchy-default-agent <pi|omp|opencode|ori|claude|codex|grok|openclaw|agy|hermes|copilot|crush|cursor-agent|muse|kimi|qwen|dsh|mcode|kiro-cli|freebuff|kilo|devin|amp|commandcode>"
@@ -201,7 +202,7 @@ index b784d7198a9..8bcaf4c5106 100644
  hey-cli = { version = "latest", lazy = true, minimum_release_age = "0s" }
  "http:devin" = { version = "latest", lazy = true, auto_update = "4h", lazy_bins = ["devin"], minimum_release_age = "0s", platforms_linux_x64_url = "https://static.devin.ai/cli/{{ version }}/devin-{{ version }}-x86_64-unknown-linux.tar.gz", platforms_linux_arm64_url = "https://static.devin.ai/cli/{{ version }}/devin-{{ version }}-aarch64-unknown-linux.tar.gz", bin_path = "bin", version_list_url = "https://static.devin.ai/cli/current/manifest.json", version_json_path = ".version" }
  "http:kiro-cli" = { version = "latest", lazy = true, auto_update = "4h", lazy_bins = ["kiro-cli"], minimum_release_age = "0s", platforms_linux_x64_url = "https://prod.download.cli.kiro.dev/stable/{{version}}/kirocli-x86_64-linux.tar.gz", platforms_linux_arm64_url = "https://prod.download.cli.kiro.dev/stable/{{version}}/kirocli-aarch64-linux.tar.gz", version_list_url = "https://prod.download.cli.kiro.dev/stable/latest/manifest.json", version_json_path = ".version" }
-+"http:zycode" = { version = "latest", lazy = true, auto_update = "4h", lazy_bins = ["zypi"], minimum_release_age = "0s", platforms_linux_x64_url = "https://github.com/zy1233/pi-python/releases/download/v{{ version }}/zycode-linux-x86_64-{{ version }}.tar.gz", platforms_linux_arm64_url = "https://github.com/zy1233/pi-python/releases/download/v{{ version }}/zycode-linux-aarch64-{{ version }}.tar.gz", version_list_url = "https://api.github.com/repos/zy1233/pi-python/releases", version_json_path = ".[].tag_name", version_order = "semver" }
++"http:zycode" = { version = "latest", lazy = true, auto_update = "4h", lazy_bins = ["zypi"], minimum_release_age = "0s", platforms_linux_x64_url = "https://github.com/zy1233/zycode/releases/download/v{{ version }}/zycode-linux-x86_64-{{ version }}.tar.gz", platforms_linux_arm64_url = "https://github.com/zy1233/zycode/releases/download/v{{ version }}/zycode-linux-aarch64-{{ version }}.tar.gz", version_list_url = "https://api.github.com/repos/zy1233/zycode/releases", version_json_path = ".[].tag_name", version_order = "semver" }
  hunk = { version = "latest", lazy = true, minimum_release_age = "0s" }
  muse = { version = "latest", lazy = true, auto_update = "4h", minimum_release_age = "0s" }
  node = { version = "latest", lazy = true, minimum_release_age = "0s" }
@@ -255,7 +256,7 @@ index 57b877f82cf..35e34eb01a0 100644
  muse_package="muse"
 +# zycode is the name of the agent, and zypi is its command and its saved name.
 +zypi_tool="http:zycode"
-+zypi_package="$zypi_tool[platforms_linux_x64_url=https://github.com/zy1233/pi-python/releases/download/v{{ version }}/zycode-linux-x86_64-{{ version }}.tar.gz,platforms_linux_arm64_url=https://github.com/zy1233/pi-python/releases/download/v{{ version }}/zycode-linux-aarch64-{{ version }}.tar.gz,version_list_url=https://api.github.com/repos/zy1233/pi-python/releases,version_json_path=.[].tag_name,version_order=semver]"
++zypi_package="$zypi_tool[platforms_linux_x64_url=https://github.com/zy1233/zycode/releases/download/v{{ version }}/zycode-linux-x86_64-{{ version }}.tar.gz,platforms_linux_arm64_url=https://github.com/zy1233/zycode/releases/download/v{{ version }}/zycode-linux-aarch64-{{ version }}.tar.gz,version_list_url=https://api.github.com/repos/zy1233/zycode/releases,version_json_path=.[].tag_name,version_order=semver]"
  
  assert_lazy_stub() {
    local package=$1

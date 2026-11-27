@@ -247,6 +247,32 @@ flowchart LR
    - `web/` 合并后 `Workers Builds: zycode-web` 绿灯；
    - （可选）在 PyPI 上为 8 个包配置 OIDC Trusted Publishing（仓库名 `zycode`，workflow `release.yml`，environment `pypi`），随后移除 `PYPI_API_TOKEN`。
 
+#### 2.5.1 执行记录（2026-11-27）
+
+| 步骤 | 状态 | 记录 |
+|---|---|---|
+| 2. GitHub 改名 | 完成 | 仓库现在是 `zy1233/zycode`。仓库 ID `1246454160` 与所有者 ID `40223340` 没有变。`origin` 已指向新地址。 |
+| 3. Open VSX | 完成 | 条目不能编辑。旧条目已删除，新条目已建（`zy1233`、`zycode`、`vscode-extension.yml`、`vscode-publish`）。 |
+| 3. VS Marketplace | 完成 | 策略不能编辑，只能删除。先建新策略 `zycode`（仓库 ID `1246454160`，状态 Active），再删旧策略。两条同名策略可以并存，所以中间没有无策略的空窗。 |
+| 3. Cloudflare Workers Builds | 只读核对 | 连接按 `repo_id` `1246454160` 绑定，所以改名不影响它。保存的名称标签 `repo_name` 还是 `pi-python`。没有修改。 |
+| 4. 统一清理 | 完成（本提交） | 8 个 `pyproject.toml`、`release.yml`、`vscode/`、`web/`、两个 `README`、`docs/`、`CHANGELOG.md` 和两个脚本里的仓库 URL 与名称。 |
+| 4. `agentclientprotocol/registry#735` | 完成 | fork 分支 `zy1233/registry:add-zycode` 新增提交 `bfbf48b`：`repository`、`license_url` 与 5 个 `archive` 的 URL 改为 `zy1233/zycode`。`sha256` 没有变，与 `zy1233/zycode` 下发布资产的摘要逐个相同。PR 仍可合并，在等维护者。 |
+| 4. `omacom/omarchy#19501` | 完成 | fork 分支 `zy1233/omarchy:feat/add-zycode-agent` 新增提交 `1dcee41`：4 个文件里的 URL 改为 `zy1233/zycode`（`bin/omarchy-default-agent`、`etc/mise/conf.d/omarchy-tools.toml`、`manual/17-ai.md`、`test/shell.d/default-agent-test.sh`）。`~/.pi-python` 没有改。这个 PR 在改名前就与 `quattro` 冲突，这次没有处理。 |
+| 5. 验证门禁 | 部分完成 | 本地检查已通过。其余门禁见下面"还没有验证的项"。 |
+
+**更正（与 §2.1 到 §2.3 的原文相比）：**
+
+- **Marketplace 不一定会拒签。** 后台显示策略按仓库的永久 ID 校验。所以旧策略在改名后可能仍然有效。这一点没有实测。§2.2 表格里的"未更新前会拒签"可能只对 Open VSX 成立：按 Open VSX 的源码，它比对 `workflow_ref`，而 `workflow_ref` 含仓库名。这一点也没有实测。两条新注册都已建好，所以结果相同。
+- **两个注册表的条目都不能编辑。** §2.2.1 第 2 步的"若界面允许编辑"这一支不适用。
+- **Dry Run 不能证明 OIDC 注册。** `VS Code extension` 的 Dry Run（`publish` 不勾选）不会调用注册表。只有下一次真实发布能证明两条注册。
+- **Cloudflare 不用改。** 连接按 `repo_id` 绑定，只有名称标签是旧的。
+
+**还没有验证的项：**
+
+1. 改名后的真实发布（Open VSX 与 Marketplace）：下一次发布插件时验证。
+2. 改名后的 `Workers Builds: zycode-web` 构建：推送含 `web/` 改动的提交后验证。
+3. PyPI 项目页上的链接：下一次发布后才会更新。
+
 ---
 
 ## 3. 目标二：全平台架构设计（首期跨平台桌面 ADE App，远期移动端 App）

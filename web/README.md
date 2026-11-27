@@ -256,7 +256,7 @@ Cloudflare applies a saved change to the next build.
 
 | Setting                   | Value                                                | Reason                                                                             |
 | ------------------------- | ---------------------------------------------------- | ---------------------------------------------------------------------------------- |
-| Git repository            | `zy1233/pi-python`                                   | The GitHub App of Cloudflare has access to this one repository.                    |
+| Git repository            | `zy1233/zycode`                                      | The GitHub App of Cloudflare has access to this one repository.                    |
 | Production branch         | `main`                                               | A merge into `main` deploys the site.                                              |
 | Root directory            | `/web`                                               | The site is in a folder of a larger repository.                                    |
 | Build command             | `npm run check && npm run build`                     | The `&&` stops at the first error.                                                 |
@@ -267,6 +267,14 @@ Cloudflare applies a saved change to the next build.
 | Node.js                   | From `.node-version` (24)                            | Cloudflare reads the file. The web CI reads it too.                                |
 | npm                       | From `packageManager` in `package.json` (11.19.1)    | Cloudflare and the web CI install this version. Both use the same npm.             |
 | Build token               | Cloudflare made it when you connected the repository | The build needs a token to upload the files.                                       |
+
+The connection was made on 2026-10-30, when the repository was `zy1233/pi-python`. The
+repository was renamed to `zy1233/zycode` on 2026-11-27. Cloudflare keeps the repository by
+its id. The API of Cloudflare showed `repo_id` `1246454160` (the id did not change) and
+`repo_name` `pi-python` (the name that was saved at connection time). So the dashboard can
+still show the old name. The name is only a label. A build that starts after the rename is
+the proof that the connection still works. If a build cannot get the repository, connect
+the repository again under **Settings** and **Build**.
 
 ### No script from Cloudflare
 

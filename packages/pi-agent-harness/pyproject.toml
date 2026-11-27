@@ -32,10 +32,10 @@ dependencies = [
 ]
 
 [project.urls]
-Homepage = "https://github.com/zy1233/pi-python"
+Homepage = "https://github.com/zy1233/zycode"
 Website = "https://zycode.dev"
-Repository = "https://github.com/zy1233/pi-python"
-Issues = "https://github.com/zy1233/pi-python/issues"
+Repository = "https://github.com/zy1233/zycode"
+Issues = "https://github.com/zy1233/zycode/issues"
 
 [project.optional-dependencies]
 dev = ["pytest>=8.0", "pytest-asyncio>=0.24", "ruff>=0.11"]

@@ -2,11 +2,11 @@
 
 [![PyPI](https://img.shields.io/pypi/v/pi-agent-core-lc)](https://pypi.org/project/pi-agent-core-lc/)
 [![Python](https://img.shields.io/pypi/pyversions/pi-agent-core-lc)](https://pypi.org/project/pi-agent-core-lc/)
-[![License](https://img.shields.io/pypi/l/pi-agent-core-lc)](https://github.com/zy1233/pi-python/blob/main/LICENSE)
+[![License](https://img.shields.io/pypi/l/pi-agent-core-lc)](https://github.com/zy1233/zycode/blob/main/LICENSE)
 
 > Unofficial project: this repository is not affiliated with, endorsed by, or maintained by the official [pi](https://github.com/earendil-works/pi) project or its maintainers.
 
-Python port of [pi-agent-core](https://github.com/earendil-works/pi/tree/main/packages/agent) from the [pi](https://github.com/earendil-works/pi) project, with **LangChain** replacing `pi-ai` for LLM calls. It is the core agent loop and tool runtime underlying [zycode](https://zycode.dev) ([repository root](https://github.com/zy1233/pi-python)).
+Python port of [pi-agent-core](https://github.com/earendil-works/pi/tree/main/packages/agent) from the [pi](https://github.com/earendil-works/pi) project, with **LangChain** replacing `pi-ai` for LLM calls. It is the core agent loop and tool runtime underlying [zycode](https://zycode.dev) ([repository root](https://github.com/zy1233/zycode)).
 
 The loop semantics, event protocol, and tool execution are faithful ports of pi; LangChain is only a `StreamFn` boundary adapter — never a replacement for the agent loop.
 
@@ -162,7 +162,7 @@ agent = Agent(
 )
 ```
 
-Runnable version: [`examples/production_agent.py`](https://github.com/zy1233/pi-python/blob/main/examples/production_agent.py).
+Runnable version: [`examples/production_agent.py`](https://github.com/zy1233/zycode/blob/main/examples/production_agent.py).
 
 ## Built-in coding tools
 
@@ -251,16 +251,16 @@ Real-API validation (key via env only). A plain `pytest` leaves the `real_llm` t
 | Automated regression | `pytest -m real_llm -v` | `REAL_LLM_API_KEY`, optional `REAL_LLM_BASE_URL` / `REAL_LLM_MODEL` |
 | Provider matrix (OpenAI, Anthropic, DeepSeek, SiliconFlow) | `pytest -m real_llm pi_agent_core/tests/test_provider_matrix.py -v` | `OPENAI_API_KEY`, `ANTHROPIC_API_KEY`, `DEEPSEEK_API_KEY`, `REAL_LLM_API_KEY`; CI runs it weekly (`provider-matrix.yml`) |
 | Manual pre-release smoke | `python scripts/smoke_real_api.py` | `SMOKE_API_KEY` (or `REAL_LLM_API_KEY`), `SMOKE_BASE_URL`, `SMOKE_MODEL` |
-| **pi TUI foundation case** | `python scripts/smoke_pelican.py` | `REAL_LLM_API_KEY`; saves SVG to `~/.pi-python/benchmarks/pelican/` — see [PELCAN-BICYCLE.md](https://github.com/zy1233/pi-python/blob/main/docs/benchmarks/PELCAN-BICYCLE.md) |
+| **pi TUI foundation case** | `python scripts/smoke_pelican.py` | `REAL_LLM_API_KEY`; saves SVG to `~/.pi-python/benchmarks/pelican/` — see [PELCAN-BICYCLE.md](https://github.com/zy1233/zycode/blob/main/docs/benchmarks/PELCAN-BICYCLE.md) |
 
 Use `.venv-test-real` for pytest real-LLM tests; the smoke script can run from the main `.venv`.
 
 ## Related documentation
 
-- [Architecture & module design](https://github.com/zy1233/pi-python/blob/main/docs/DESIGN.md)
-- [Phase 1 original plan (historical)](https://github.com/zy1233/pi-python/blob/main/docs/PLAN/PLAN-PHASE1.md)
-- [Core-layer audit & Phase 2.5 enhancements](https://github.com/zy1233/pi-python/blob/main/docs/AUDIT/AUDIT-2026-07-02.md)
-- [Phase 2 spec — usage/cost, thinking/reasoning, `transform_messages`](https://github.com/zy1233/pi-python/blob/main/docs/specs/2026-05-25-phase2-production-enhancements-design.md)
-- [Phase 3.5 spec — built-in coding tools & LangChain adapter](https://github.com/zy1233/pi-python/blob/main/docs/specs/2026-07-03-phase3.5-tool-ecosystem-design.md)
-- Higher-level runtime: [`pi-agent-harness-lc`](https://github.com/zy1233/pi-python/blob/main/packages/pi-agent-harness/README.md)
-- Coding agent (zycode): [repository README](https://github.com/zy1233/pi-python)
+- [Architecture & module design](https://github.com/zy1233/zycode/blob/main/docs/DESIGN.md)
+- [Phase 1 original plan (historical)](https://github.com/zy1233/zycode/blob/main/docs/PLAN/PLAN-PHASE1.md)
+- [Core-layer audit & Phase 2.5 enhancements](https://github.com/zy1233/zycode/blob/main/docs/AUDIT/AUDIT-2026-07-02.md)
+- [Phase 2 spec — usage/cost, thinking/reasoning, `transform_messages`](https://github.com/zy1233/zycode/blob/main/docs/specs/2026-05-25-phase2-production-enhancements-design.md)
+- [Phase 3.5 spec — built-in coding tools & LangChain adapter](https://github.com/zy1233/zycode/blob/main/docs/specs/2026-07-03-phase3.5-tool-ecosystem-design.md)
+- Higher-level runtime: [`pi-agent-harness-lc`](https://github.com/zy1233/zycode/blob/main/packages/pi-agent-harness/README.md)
+- Coding agent (zycode): [repository README](https://github.com/zy1233/zycode)

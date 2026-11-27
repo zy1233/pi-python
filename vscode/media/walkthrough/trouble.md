@@ -6,4 +6,4 @@
 - **"Could not reach the model server".** Check the base URL in `agent.toml` and your network.
 - **The agent does not start.** Select **Show log** to read what the agent said.
 
-An example with all keys: `agent.example.toml` in the repository (https://github.com/zy1233/pi-python/blob/main/packages/pi-agent-cli/agent.example.toml).
+An example with all keys: `agent.example.toml` in the repository (https://github.com/zy1233/zycode/blob/main/packages/pi-agent-cli/agent.example.toml).

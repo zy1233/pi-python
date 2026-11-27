@@ -22,9 +22,9 @@ dependencies = [
 pi-codemode = "pi_codemode:activate"
 
 [project.urls]
-Homepage = "https://github.com/zy1233/pi-python"
+Homepage = "https://github.com/zy1233/zycode"
 Website = "https://zycode.dev"
-Repository = "https://github.com/zy1233/pi-python"
+Repository = "https://github.com/zy1233/zycode"
 
 [tool.hatch.build.targets.wheel]
 packages = ["pi_codemode"]

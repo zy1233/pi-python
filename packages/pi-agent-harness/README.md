@@ -2,9 +2,9 @@
 
 [![PyPI](https://img.shields.io/pypi/v/pi-agent-harness-lc)](https://pypi.org/project/pi-agent-harness-lc/)
 [![Python](https://img.shields.io/pypi/pyversions/pi-agent-harness-lc)](https://pypi.org/project/pi-agent-harness-lc/)
-[![License](https://img.shields.io/pypi/l/pi-agent-harness-lc)](https://github.com/zy1233/pi-python/blob/main/LICENSE)
+[![License](https://img.shields.io/pypi/l/pi-agent-harness-lc)](https://github.com/zy1233/zycode/blob/main/LICENSE)
 
-`pi-agent-harness-lc` (`pi_agent_harness`) is the higher-level harness runtime package for [`pi-agent-core-lc`](https://github.com/zy1233/pi-python/blob/main/pi_agent_core/README.md), corresponding to `packages/agent/src/harness` in the [pi](https://github.com/earendil-works/pi) project (unofficial Python port).
+`pi-agent-harness-lc` (`pi_agent_harness`) is the higher-level harness runtime package for [`pi-agent-core-lc`](https://github.com/zy1233/zycode/blob/main/pi_agent_core/README.md), corresponding to `packages/agent/src/harness` in the [pi](https://github.com/earendil-works/pi) project (unofficial Python port).
 
 ## What it provides
 
@@ -60,8 +60,8 @@ To make a custom role visible to the LLM, wrap `harness_convert_to_llm` (or pass
 
 ## Related documentation
 
-- [Phase 3 spec — AgentHarness design](https://github.com/zy1233/pi-python/blob/main/docs/specs/2026-07-03-phase3-agent-harness-design.md)
-- Harness batch audits: [H1 session](https://github.com/zy1233/pi-python/blob/main/docs/AUDIT/AUDIT-H1.md), [H2 runtime](https://github.com/zy1233/pi-python/blob/main/docs/AUDIT/AUDIT-H2.md), [H3 compaction](https://github.com/zy1233/pi-python/blob/main/docs/AUDIT/AUDIT-H3.md), [H4 skills/env](https://github.com/zy1233/pi-python/blob/main/docs/AUDIT/AUDIT-H4.md)
-- [Architecture & module design](https://github.com/zy1233/pi-python/blob/main/docs/DESIGN.md)
-- Core runtime: [`pi-agent-core-lc`](https://github.com/zy1233/pi-python/blob/main/pi_agent_core/README.md)
-- Coding agent (zycode): [repository README](https://github.com/zy1233/pi-python)
+- [Phase 3 spec — AgentHarness design](https://github.com/zy1233/zycode/blob/main/docs/specs/2026-07-03-phase3-agent-harness-design.md)
+- Harness batch audits: [H1 session](https://github.com/zy1233/zycode/blob/main/docs/AUDIT/AUDIT-H1.md), [H2 runtime](https://github.com/zy1233/zycode/blob/main/docs/AUDIT/AUDIT-H2.md), [H3 compaction](https://github.com/zy1233/zycode/blob/main/docs/AUDIT/AUDIT-H3.md), [H4 skills/env](https://github.com/zy1233/zycode/blob/main/docs/AUDIT/AUDIT-H4.md)
+- [Architecture & module design](https://github.com/zy1233/zycode/blob/main/docs/DESIGN.md)
+- Core runtime: [`pi-agent-core-lc`](https://github.com/zy1233/zycode/blob/main/pi_agent_core/README.md)
+- Coding agent (zycode): [repository README](https://github.com/zy1233/zycode)

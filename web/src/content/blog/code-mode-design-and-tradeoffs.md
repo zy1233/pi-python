@@ -16,7 +16,7 @@ translation: code-mode-design-and-tradeoffs-en
 1. **多轮串行工具调用的延迟与上下文膨胀**：传统循环里，模型读几个文件、跑几次搜索、再对结果做过滤聚合，往往要走三五轮 LLM 往返，而且中间大段原始输出会永久留在对话上下文里。
 2. **大规模 MCP 工具 Schema 的固定 Token 税**：如果会话挂载了多个 MCP server、几十上百个工具，把所有完整的 JSON Schema 每一轮都塞进请求体，上下文还没开始干活就已经烧掉数千 tokens。
 
-动手实现之前，我们先系统调研了上游 `pi` 1.0（`zycode` 的核心循环移植自 `pi`，但本作是非官方独立项目，与 `pi` 项目无隶属关系）与 Claude Code 的 Code Mode，并对照了 Python 生态里的 `pydantic-monty` 和 `python-quickjs-ng`。这篇文章分两部分记录调研结论与 `zycode` 的取舍——完整设计规格见仓库中的 [`docs/specs/2026-11-24-code-mode-design.md`](https://github.com/zy1233/pi-python/blob/main/docs/specs/2026-11-24-code-mode-design.md)。
+动手实现之前，我们先系统调研了上游 `pi` 1.0（`zycode` 的核心循环移植自 `pi`，但本作是非官方独立项目，与 `pi` 项目无隶属关系）与 Claude Code 的 Code Mode，并对照了 Python 生态里的 `pydantic-monty` 和 `python-quickjs-ng`。这篇文章分两部分记录调研结论与 `zycode` 的取舍——完整设计规格见仓库中的 [`docs/specs/2026-11-24-code-mode-design.md`](https://github.com/zy1233/zycode/blob/main/docs/specs/2026-11-24-code-mode-design.md)。
 
 ---
 
@@ -138,6 +138,6 @@ require_approval = false
 
 如果你感兴趣，可以直接阅读相关源码与文档：
 
-- 设计规格：[`docs/specs/2026-11-24-code-mode-design.md`](https://github.com/zy1233/pi-python/blob/main/docs/specs/2026-11-24-code-mode-design.md)
-- 扩展实现：[`packages/pi-codemode/`](https://github.com/zy1233/pi-python/tree/main/packages/pi-codemode)
-- 共享沙盒内核：[`pi_agent_core/sandbox/`](https://github.com/zy1233/pi-python/tree/main/pi_agent_core/sandbox)
+- 设计规格：[`docs/specs/2026-11-24-code-mode-design.md`](https://github.com/zy1233/zycode/blob/main/docs/specs/2026-11-24-code-mode-design.md)
+- 扩展实现：[`packages/pi-codemode/`](https://github.com/zy1233/zycode/tree/main/packages/pi-codemode)
+- 共享沙盒内核：[`pi_agent_core/sandbox/`](https://github.com/zy1233/zycode/tree/main/pi_agent_core/sandbox)

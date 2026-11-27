@@ -16,7 +16,7 @@ In `zycode` 1.1.0, we shipped a standalone extension package, `pi-codemode-py` (
 1. **Multi-turn ping-pong and context bloat**: In a standard tool loop, reading several files, running a few searches, and filtering the output burns multiple LLM round-trips—and leaves every raw intermediate payload permanently sitting in conversation history.
 2. **Fixed prompt-token tax from MCP tool schemas**: Attaching several MCP servers with dozens or hundreds of tools injects their full JSON schemas into every request before the model even begins working.
 
-Before writing code, we compared upstream `pi` 1.0 (`zycode` builds on a port of `pi-agent-core`, though it is an unofficial, independent project not affiliated with or endorsed by the `pi` project) and Claude Code's Code Mode, alongside Python-ecosystem options such as `pydantic-monty` and `python-quickjs-ng`. This post covers that comparison and the trade-offs we made in `zycode`. The full specification lives in [`docs/specs/2026-11-24-code-mode-design.md`](https://github.com/zy1233/pi-python/blob/main/docs/specs/2026-11-24-code-mode-design.md).
+Before writing code, we compared upstream `pi` 1.0 (`zycode` builds on a port of `pi-agent-core`, though it is an unofficial, independent project not affiliated with or endorsed by the `pi` project) and Claude Code's Code Mode, alongside Python-ecosystem options such as `pydantic-monty` and `python-quickjs-ng`. This post covers that comparison and the trade-offs we made in `zycode`. The full specification lives in [`docs/specs/2026-11-24-code-mode-design.md`](https://github.com/zy1233/zycode/blob/main/docs/specs/2026-11-24-code-mode-design.md).
 
 ---
 
@@ -136,6 +136,6 @@ From upstream `pi` 1.0, we adopted deferred tool discovery and compact in-sandbo
 
 Source and design references:
 
-- Design specification: [`docs/specs/2026-11-24-code-mode-design.md`](https://github.com/zy1233/pi-python/blob/main/docs/specs/2026-11-24-code-mode-design.md)
-- Extension package: [`packages/pi-codemode/`](https://github.com/zy1233/pi-python/tree/main/packages/pi-codemode)
-- Shared sandbox runtime: [`pi_agent_core/sandbox/`](https://github.com/zy1233/pi-python/tree/main/pi_agent_core/sandbox)
+- Design specification: [`docs/specs/2026-11-24-code-mode-design.md`](https://github.com/zy1233/zycode/blob/main/docs/specs/2026-11-24-code-mode-design.md)
+- Extension package: [`packages/pi-codemode/`](https://github.com/zy1233/zycode/tree/main/packages/pi-codemode)
+- Shared sandbox runtime: [`pi_agent_core/sandbox/`](https://github.com/zy1233/zycode/tree/main/pi_agent_core/sandbox)

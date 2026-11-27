@@ -270,6 +270,6 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         run: |
           gh release create "${{ github.ref_name }}" \
-            --title "pi-python ${{ github.ref_name }}" \
+            --title "zycode ${{ github.ref_name }}" \
             --notes-file /tmp/release-body.md \
             dist/* tui-bin/*

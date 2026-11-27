@@ -1,11 +1,11 @@
-# zycode (`pi-python`)
+# zycode
 
 [English](README.md) | 简体中文
 
-[![CI](https://github.com/zy1233/pi-python/actions/workflows/ci.yml/badge.svg)](https://github.com/zy1233/pi-python/actions/workflows/ci.yml)
+[![CI](https://github.com/zy1233/zycode/actions/workflows/ci.yml/badge.svg)](https://github.com/zy1233/zycode/actions/workflows/ci.yml)
 [![PyPI](https://img.shields.io/pypi/v/pi-agent-cli-lc)](https://pypi.org/project/pi-agent-cli-lc/)
 [![Python](https://img.shields.io/pypi/pyversions/pi-agent-cli-lc)](https://pypi.org/project/pi-agent-cli-lc/)
-[![License](https://img.shields.io/pypi/l/pi-agent-cli-lc)](https://github.com/zy1233/pi-python/blob/main/LICENSE)
+[![License](https://img.shields.io/pypi/l/pi-agent-cli-lc)](https://github.com/zy1233/zycode/blob/main/LICENSE)
 
 **zycode** 是一个面向终端与编辑器的开源编程智能体（Coding Agent）。它通过 stdio 使用标准的 [Agent Client Protocol (ACP)](https://agentclientprotocol.com) 协议，可在终端界面（`zypi`）、VS Code（`zycode.zycode`）、Zed 或无界面命令行（`-p`）中运行，底层基于模块化的 Python 智能体运行时构建。
 
@@ -46,7 +46,7 @@
 
 | 组件 | 状态 | 发布渠道 |
 |------|------|----------|
-| `zypi`（Rust 终端界面） | **稳定** | [GitHub Releases](https://github.com/zy1233/pi-python/releases)（Linux x86_64 与 aarch64、macOS arm64） |
+| `zypi`（Rust 终端界面） | **稳定** | [GitHub Releases](https://github.com/zy1233/zycode/releases)（Linux x86_64 与 aarch64、macOS arm64） |
 | `zycode.zycode`（VS Code 扩展） | **稳定** | [VS Code Marketplace](https://marketplace.visualstudio.com/items?itemName=zycode.zycode) 与 [Open VSX](https://open-vsx.org/extension/zycode/zycode)（五个平台；项目所有者已在 Windows 上测试 1.0.0 安装与 0.1.0→1.0.0 更新（2026-11-12），并于 2026-11-17 在 Windows 上用真实模型实测 1.4.0 的 `max` 思考等级与 Context 行；Windows 其余流程、macOS 与 Linux 真实 VS Code 环境尚未验证） |
 | `pi-agent-cli-lc` | **稳定** | [PyPI](https://pypi.org/project/pi-agent-cli-lc/) |
 | `pi-agent-core-lc` | **稳定** | [PyPI](https://pypi.org/project/pi-agent-core-lc/) |
@@ -90,12 +90,12 @@
 
 ### 终端界面（`zypi`）
 
-从 [GitHub Releases](https://github.com/zy1233/pi-python/releases) 下载完整独立包（同时包含 `zypi` 与 `zycode-agent`，无需 Python），或单独下载 Linux（`x86_64`、`aarch64`）/ macOS（`arm64`）的 `zypi` 二进制：
+从 [GitHub Releases](https://github.com/zy1233/zycode/releases) 下载完整独立包（同时包含 `zypi` 与 `zycode-agent`，无需 Python），或单独下载 Linux（`x86_64`、`aarch64`）/ macOS（`arm64`）的 `zypi` 二进制：
 
 ```bash
 # 方式一：完整独立包（内置 zypi 与 zycode-agent，无需安装 Python）
 # 以下为 Linux x86_64 示例；其他平台为 zycode-linux-aarch64-1.1.0.tar.gz 与 zycode-darwin-aarch64-1.1.0.tar.gz。
-curl -L -o zycode.tar.gz https://github.com/zy1233/pi-python/releases/download/v1.1.0/zycode-linux-x86_64-1.1.0.tar.gz
+curl -L -o zycode.tar.gz https://github.com/zy1233/zycode/releases/download/v1.1.0/zycode-linux-x86_64-1.1.0.tar.gz
 tar -xzf zycode.tar.gz
 sudo mv zypi zycode-agent /usr/local/bin/
 
@@ -108,7 +108,7 @@ zypi
 
 ```bash
 # 方式二：单独使用 zypi 二进制 + pip 安装的 Python 智能体
-curl -L -o zypi https://github.com/zy1233/pi-python/releases/latest/download/zypi-linux-x86_64
+curl -L -o zypi https://github.com/zy1233/zycode/releases/latest/download/zypi-linux-x86_64
 chmod +x zypi
 sudo mv zypi /usr/local/bin/
 

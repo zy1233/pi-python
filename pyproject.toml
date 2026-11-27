@@ -35,11 +35,11 @@ dependencies = [
 ]
 
 [project.urls]
-Homepage = "https://github.com/zy1233/pi-python"
+Homepage = "https://github.com/zy1233/zycode"
 Website = "https://zycode.dev"
-Repository = "https://github.com/zy1233/pi-python"
-Issues = "https://github.com/zy1233/pi-python/issues"
-Changelog = "https://github.com/zy1233/pi-python/blob/main/CHANGELOG.md"
+Repository = "https://github.com/zy1233/zycode"
+Issues = "https://github.com/zy1233/zycode/issues"
+Changelog = "https://github.com/zy1233/zycode/blob/main/CHANGELOG.md"
 
 [project.optional-dependencies]
 openai = ["langchain-openai>=0.2.0,<2"]

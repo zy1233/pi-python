@@ -1,7 +1,7 @@
 import type { Level, PackageId, WhereId } from '~/i18n/types';
 
 /** The GitHub repository. Every link to the source starts here. */
-export const repo = 'https://github.com/zy1233/pi-python';
+export const repo = 'https://github.com/zy1233/zycode';
 
 /**
  * The release that the install text names. Change it with each release.

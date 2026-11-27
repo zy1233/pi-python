@@ -1,11 +1,11 @@
-# zycode (`pi-python`)
+# zycode
 
 English | [简体中文](README.zh-CN.md)
 
-[![CI](https://github.com/zy1233/pi-python/actions/workflows/ci.yml/badge.svg)](https://github.com/zy1233/pi-python/actions/workflows/ci.yml)
+[![CI](https://github.com/zy1233/zycode/actions/workflows/ci.yml/badge.svg)](https://github.com/zy1233/zycode/actions/workflows/ci.yml)
 [![PyPI](https://img.shields.io/pypi/v/pi-agent-cli-lc)](https://pypi.org/project/pi-agent-cli-lc/)
 [![Python](https://img.shields.io/pypi/pyversions/pi-agent-cli-lc)](https://pypi.org/project/pi-agent-cli-lc/)
-[![License](https://img.shields.io/pypi/l/pi-agent-cli-lc)](https://github.com/zy1233/pi-python/blob/main/LICENSE)
+[![License](https://img.shields.io/pypi/l/pi-agent-cli-lc)](https://github.com/zy1233/zycode/blob/main/LICENSE)
 
 **zycode** is an open-source coding agent for your terminal and your editor. It speaks the standard [Agent Client Protocol (ACP)](https://agentclientprotocol.com) over stdio, runs in the terminal (`zypi`), in VS Code (`zycode.zycode`), in Zed, or headlessly (`-p`), and is built on a modular Python agent runtime.
 
@@ -44,7 +44,7 @@ Website: [zycode.dev](https://zycode.dev) ([中文](https://zycode.dev/zh/))
 
 | Component | Status | Distribution |
 |-----------|--------|--------------|
-| `zypi` (Rust TUI) | **Stable** | [GitHub Releases](https://github.com/zy1233/pi-python/releases) (Linux x86_64 and aarch64, macOS arm64) |
+| `zypi` (Rust TUI) | **Stable** | [GitHub Releases](https://github.com/zy1233/zycode/releases) (Linux x86_64 and aarch64, macOS arm64) |
 | `zycode.zycode` (VS Code extension) | **Stable** | [VS Code Marketplace](https://marketplace.visualstudio.com/items?itemName=zycode.zycode) and [Open VSX](https://open-vsx.org/extension/zycode/zycode) (five platforms; the project owner tested the install of 1.0.0 and the update from 0.1.0 to 1.0.0 on Windows on 2026-11-12, and 1.4.0 with a real model on Windows on 2026-11-17 (the `max` level and the Context row); the rest of the Windows flow, macOS and Linux in a real VS Code are not verified) |
 | `pi-agent-cli-lc` | **Stable** | [PyPI](https://pypi.org/project/pi-agent-cli-lc/) |
 | `pi-agent-core-lc` | **Stable** | [PyPI](https://pypi.org/project/pi-agent-core-lc/) |
@@ -88,12 +88,12 @@ Website: [zycode.dev](https://zycode.dev) ([中文](https://zycode.dev/zh/))
 
 ### Terminal UI (`zypi`)
 
-Download the standalone bundle (contains both `zypi` and `zycode-agent`; no Python required) or the standalone `zypi` binary for Linux (`x86_64`, `aarch64`) or macOS (`arm64`) from [GitHub Releases](https://github.com/zy1233/pi-python/releases):
+Download the standalone bundle (contains both `zypi` and `zycode-agent`; no Python required) or the standalone `zypi` binary for Linux (`x86_64`, `aarch64`) or macOS (`arm64`) from [GitHub Releases](https://github.com/zy1233/zycode/releases):
 
 ```bash
 # Option 1: Standalone bundle (zypi + zycode-agent; no Python required)
 # Linux x86_64 shown. Other targets: zycode-linux-aarch64-1.1.0.tar.gz, zycode-darwin-aarch64-1.1.0.tar.gz.
-curl -L -o zycode.tar.gz https://github.com/zy1233/pi-python/releases/download/v1.1.0/zycode-linux-x86_64-1.1.0.tar.gz
+curl -L -o zycode.tar.gz https://github.com/zy1233/zycode/releases/download/v1.1.0/zycode-linux-x86_64-1.1.0.tar.gz
 tar -xzf zycode.tar.gz
 sudo mv zypi zycode-agent /usr/local/bin/
 
@@ -106,7 +106,7 @@ The bundle file name holds the version, so the URL names the tag (`v1.1.0`), not
 
 ```bash
 # Option 2: zypi binary alone with the Python pip package
-curl -L -o zypi https://github.com/zy1233/pi-python/releases/latest/download/zypi-linux-x86_64
+curl -L -o zypi https://github.com/zy1233/zycode/releases/latest/download/zypi-linux-x86_64
 chmod +x zypi
 sudo mv zypi /usr/local/bin/
 

@@ -40,11 +40,11 @@ anthropic = ["pi-agent-core-lc[anthropic]==1.1.0"]
 deepseek = ["pi-agent-core-lc[deepseek]==1.1.0"]
 
 [project.urls]
-Homepage = "https://github.com/zy1233/pi-python"
+Homepage = "https://github.com/zy1233/zycode"
 Website = "https://zycode.dev"
-Repository = "https://github.com/zy1233/pi-python"
-Issues = "https://github.com/zy1233/pi-python/issues"
-Changelog = "https://github.com/zy1233/pi-python/blob/main/CHANGELOG.md"
+Repository = "https://github.com/zy1233/zycode"
+Issues = "https://github.com/zy1233/zycode/issues"
+Changelog = "https://github.com/zy1233/zycode/blob/main/CHANGELOG.md"
 
 [project.scripts]
 pi-agent-cli = "pi_agent_cli.__main__:main"

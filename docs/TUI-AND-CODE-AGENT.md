@@ -50,11 +50,11 @@ You can use the coding agent in two ways:
 
 ### 1. Standalone bundle (recommended — no Python required)
 
-Download the complete bundle `zycode-<target>-<version>.tar.gz` from [GitHub Releases](https://github.com/zy1233/pi-python/releases). The file name holds the version, so use the URL of that release (`releases/download/v<version>/...`). Do not use `releases/latest/download/...`: after the next release, "latest" points to a release that has no file of that name.
+Download the complete bundle `zycode-<target>-<version>.tar.gz` from [GitHub Releases](https://github.com/zy1233/zycode/releases). The file name holds the version, so use the URL of that release (`releases/download/v<version>/...`). Do not use `releases/latest/download/...`: after the next release, "latest" points to a release that has no file of that name.
 
 ```bash
 # Linux x86_64
-curl -L -o zycode.tar.gz https://github.com/zy1233/pi-python/releases/download/v1.1.0/zycode-linux-x86_64-1.1.0.tar.gz
+curl -L -o zycode.tar.gz https://github.com/zy1233/zycode/releases/download/v1.1.0/zycode-linux-x86_64-1.1.0.tar.gz
 tar -xzf zycode.tar.gz
 sudo mv zypi zycode-agent /usr/local/bin/
 
@@ -86,21 +86,21 @@ export PI_PYTHON=python3   # a Python that has pi-agent-cli-lc installed
 
 #### Option A: Download prebuilt binary (Linux x86_64, Linux aarch64, macOS arm64)
 
-Prebuilt binaries are attached to [GitHub Releases](https://github.com/zy1233/pi-python/releases).
+Prebuilt binaries are attached to [GitHub Releases](https://github.com/zy1233/zycode/releases).
 
 ```bash
 # Linux x86_64
-curl -L -o zypi https://github.com/zy1233/pi-python/releases/latest/download/zypi-linux-x86_64
+curl -L -o zypi https://github.com/zy1233/zycode/releases/latest/download/zypi-linux-x86_64
 chmod +x zypi
 sudo mv zypi /usr/local/bin/
 
 # Linux aarch64
-curl -L -o zypi https://github.com/zy1233/pi-python/releases/latest/download/zypi-linux-aarch64
+curl -L -o zypi https://github.com/zy1233/zycode/releases/latest/download/zypi-linux-aarch64
 chmod +x zypi
 sudo mv zypi /usr/local/bin/
 
 # macOS arm64
-curl -L -o zypi https://github.com/zy1233/pi-python/releases/latest/download/zypi-macos-arm64
+curl -L -o zypi https://github.com/zy1233/zycode/releases/latest/download/zypi-macos-arm64
 chmod +x zypi
 sudo mv zypi /usr/local/bin/
 ```

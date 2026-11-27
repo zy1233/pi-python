@@ -87,10 +87,18 @@ This record was added later, with the release PR of 1.6.0. The numbers come from
 - The Open VSX trusted publisher for `zycode` **is registered**: the owner said so on 2026-11-12. No one else has checked the registration, and no run of the workflow has used it, so the first publish is the first proof that the values match. A rehearsal run is not known.
   - Result (2026-11-12): the 1.0.0 run used the registration: Open VSX logged `Trusted publishing token issued`, then published the five files. The registration is proven.
 
+## The repository was renamed (2026-11-27)
+
+The GitHub repository `zy1233/pi-python` is now `zy1233/zycode`. The repository id (`1246454160`) and the owner id (`40223340`) did not change. The old address redirects to the new one.
+
+- Open VSX: an extension can have only one trusted publisher, and a registration cannot be edited. So the old registration was deleted and a new one was made: namespace `zycode`, extension `zycode`, provider GitHub, `zy1233` / `zycode`, workflow `vscode-extension.yml`, environment `vscode-publish`. The list now shows `zy1233/zycode · workflow: vscode-extension.yml · environment: vscode-publish`. Open VSX matches the repository id, the owner id, the `workflow_ref` claim and the environment (read in the source of Open VSX on 2026-11-27, not tested). The `workflow_ref` claim holds the name of the repository, so the old registration would have refused the token after the rename.
+- Marketplace: the page of a policy shows the repository as a name and an id (`zycode #1246454160`). Its tooltip says that the id is "used for trusted publishing validation". A new policy `zycode release` was made first (`zy1233` / `zycode`, workflow `vscode-extension.yml`, environment `vscode-publish`), and the page showed the same id as the old policy. Then the old policy, which showed `pi-python #1246454160`, was deleted. The old policy may have kept working after the rename, because the id did not change. Nobody tried it.
+- Not verified: no publish has run since the rename. A dry run (`publish` not ticked) builds and checks the VSIX files and calls no registry, so it does not test the two registrations. The first real publish is the first proof that both of them match the token.
+
 ## What is already set up
 
 - GitHub environment `vscode-publish`: required reviewer `zy1233` (self-review is allowed), deployments from `main` only, no secret.
-- Marketplace publisher `zycode`, with a Trusted Publishing policy `zycode release`: repository `zy1233/pi-python`, workflow `vscode-extension.yml`, environment `vscode-publish`.
+- Marketplace publisher `zycode`, with a Trusted Publishing policy `zycode release`: repository `zy1233/zycode`, workflow `vscode-extension.yml`, environment `vscode-publish`. The repository was renamed on 2026-11-27, and both registrations were made again (see "The repository was renamed").
 - Open VSX namespace `zycode` (you are the owner). Its trusted publisher for the extension `zycode` is registered (the owner said so on 2026-11-12; compare the values in "Before the run").
 - The workflow file `.github/workflows/vscode-extension.yml`. Its name must stay as it is: both registries name it. It publishes from `main` only, in the environment `vscode-publish`, with OIDC, and with no token.
 
@@ -109,7 +117,7 @@ This record was added later, with the release PR of 1.6.0. The numbers come from
    | Field | Value |
    |---|---|
    | Organization or User name | `zy1233` |
-   | Repository name | `pi-python` |
+   | Repository name | `zycode` |
    | Workflow filename | `vscode-extension.yml` |
    | Environment name | `vscode-publish` |
 
