@@ -321,7 +321,7 @@ flowchart TB
 2. **会话真源不变（Single Source of Truth）**
    - 严格沿用 **JSONL v3 Session Tree**（与 `pi` v3 字节兼容）作为持久化真源，确保 `pi-python` 与 `pi-rust` 之间会话 100% 无损互读互写。
 3. **安全与不变量继承**
-   - 完整继承 `AGENTS.md` 中的全部 9 条核心不变量（Invariant 8 声明式权限、Invariant 9 项目信任边界、Invariant 9b Auto fail-closed、Invariant 9c Auto 非沙箱免责）。
+   - 完整继承 `AGENTS.md` 中的全部核心不变量（Invariants 1–9 与 9b–9d，包括 Invariant 8 声明式权限、Invariant 9 项目信任边界、Invariant 9b Auto fail-closed、Invariant 9c Auto 非沙箱免责、Invariant 9d Auto 执行时逐条裁决）。
    - 桌面端本地 IPC 采用 OS 用户权限隔离（Unix `0600` Domain Socket / Windows Named Pipe ACL）+ 启动时随机 session token，防止本机网页跨站访问。
 
 ### 3.3 技术栈选型对比与推荐
