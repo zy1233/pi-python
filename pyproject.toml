@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "pi-agent-core-lc"
-version = "1.1.0"
+version = "1.2.0"
 description = "Python port of pi-agent-core with LangChain LLM adapter"
 readme = "pi_agent_core/README.md"
 requires-python = ">=3.11"
@@ -45,14 +45,14 @@ Changelog = "https://github.com/zy1233/zycode/blob/main/CHANGELOG.md"
 openai = ["langchain-openai>=0.2.0,<2"]
 anthropic = ["langchain-anthropic>=0.2.0,<2"]
 deepseek = ["langchain-deepseek>=0.1.0,<2"]
-harness = ["pi-agent-harness-lc==1.1.0"]
-cli = ["pi-agent-cli-lc==1.1.0"]
+harness = ["pi-agent-harness-lc==1.2.0"]
+cli = ["pi-agent-cli-lc==1.2.0"]
 all = [
     "langchain-openai>=0.2.0,<2",
     "langchain-anthropic>=0.2.0,<2",
     "langchain-deepseek>=0.1.0,<2",
-    "pi-agent-harness-lc==1.1.0",
-    "pi-agent-cli-lc==1.1.0",
+    "pi-agent-harness-lc==1.2.0",
+    "pi-agent-cli-lc==1.2.0",
 ]
 dev = ["pytest>=8.0", "pytest-asyncio>=0.24", "ruff>=0.16"]
 

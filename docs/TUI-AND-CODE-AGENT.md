@@ -1,6 +1,6 @@
 # TUI & Code-Agent Guide
 
-> **Status: Stable (1.1.0)** — The TUI (`zypi`) and coding agent (`pi_agent_cli` / `zycode-agent`) are production ready.
+> **Status: Stable (1.2.0)** — The TUI (`zypi`) and coding agent (`pi_agent_cli` / `zycode-agent`) are production ready.
 
 This document covers how to install, configure, and use the pi-python coding agent — both the headless Python CLI and the full-screen Rust TUI.
 
@@ -54,7 +54,7 @@ Download the complete bundle `zycode-<target>-<version>.tar.gz` from [GitHub Rel
 
 ```bash
 # Linux x86_64
-curl -L -o zycode.tar.gz https://github.com/zy1233/zycode/releases/download/v1.1.0/zycode-linux-x86_64-1.1.0.tar.gz
+curl -L -o zycode.tar.gz https://github.com/zy1233/zycode/releases/download/v1.2.0/zycode-linux-x86_64-1.2.0.tar.gz
 tar -xzf zycode.tar.gz
 sudo mv zypi zycode-agent /usr/local/bin/
 

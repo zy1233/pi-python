@@ -9,7 +9,7 @@ export const repo = 'https://github.com/zy1233/zycode';
  * The download commands name a tag, not "latest", because the file name holds the version:
  * after the next release, "latest" would point to a release that has no file of that name.
  */
-export const release = { version: '1.1.0', tag: 'v1.1.0' } as const;
+export const release = { version: '1.2.0', tag: 'v1.2.0' } as const;
 
 /** Links that do not change with the language. */
 export const links = {
