@@ -97,7 +97,7 @@
     "sessionId": "550e8400-...",
     "steerId": "c1f8b1c4-...",
     "queued": false,
-    "reason": "idle" // 或 "waiting_for_trust" | "waiting_for_barriers"
+    "reason": "idle" // 或 "aborting" | "waiting_for_trust" | "waiting_for_barriers"
   }
   ```
 

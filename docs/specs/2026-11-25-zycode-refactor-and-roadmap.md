@@ -1,7 +1,7 @@
 # zycode 全平台重构方案与 Roadmap
 
-> **状态**：设计草案（仅输出架构设计与演进路线图，暂不修改代码）  
-> **日期**：2026-11-25（2026-11-26 修订：新增重构前两项体验优化 `steer` 与 `/btw`，明确 `pi-python` 持续维护及 `pi-rust` v1 性能对比决策门禁）  
+> **状态**：Pre-Refactor（`steer` + `/btw`）已在 PR #157 实现；Phase 0–4 为架构设计与演进路线图  
+> **日期**：2026-11-25（2026-11-26 修订：同步 Pre-Refactor `steer` 与 `/btw` 最终落地协议与安全语义，明确 `pi-python` 持续维护及 `pi-rust` v1 性能对比决策门禁）  
 > **基线事实**：`zy1233/pi-python` 当前 `main`（Python 包与 `zycode-agent` `1.1.0`，VS Code 插件 `zycode.zycode` `1.12.0`，Rust TUI `zypi` `1.1.0`）  
 > **目标范围**：
 > 0. **重构前置优化**：在启动架构重构之前，先在现有 `pi-python` + VS Code + TUI 体系上落地两项高频对话体验优化——**对话中途引导（`steer`）**与**无污染侧边聊天（`/btw`）**；
@@ -17,10 +17,10 @@
 
 | 维度 | 现状实测数据 | 核心痛点与机会 |
 |---|---|---|
-| **Python 核心与扩展 (`pi-python`)** | `pi_agent_core/` + 7 个 `packages/*` 非测试源码共 **35,101 行**，PyPI 发行 **8 个稳定包**（`1.1.0`），4,400+ 测试 | 语义完整、迭代效率高，**`AgentHarness` 内部已实现 `steer()` 队列**，但尚未打通 ACP 协议与客户端 UI；需持续维护，并作为 `pi-rust` 的行为基线与性能对照对象 |
+| **Python 核心与扩展 (`pi-python`)** | `pi_agent_core/` + 7 个 `packages/*` 非测试源码共 **35,101 行**，PyPI 发行 **8 个稳定包**（`1.1.0`），4,400+ 测试 | 语义完整、迭代效率高，**Pre-Refactor（PR #157）已贯通 `X9` `pi/session/steer` 与 `X10` `pi/session/btw` 的 ACP 协议、VS Code 插件与 Rust TUI**；需持续维护，并作为 `pi-rust` 的行为基线与性能对照对象 |
 | **冻结二进制 `zycode-agent`** | 5 平台 PyInstaller one-file：`linux-x64` **77.0 MB**（VSIX **74.0 MiB**），`darwin-arm64` **41.3 MB**，`win32-x64` **42.7 MB**；冷启动解压约 **1.7 s** | 体积大、冷启动慢、仅内置 `langchain-openai`、缺 `windows-aarch64`（`tiktoken` 无 wheel）、沙箱需二次打包 `pi-sandbox-child` |
-| **Rust TUI (`tui/`)** | 基于 `grok-build` 硬分叉的成熟终端 UI（`pi-pager` 家族功能丰富：全屏/行内、Markdown、Diff、Mermaid、主题、状态栏、快捷键等）；当前全 workspace **80 crates / 958,555 行 Rust**，`zypi-linux-x86_64` 二进制约 **407 MB** | ① TUI（Rust）与 Agent（Python）跨进程走 ACP stdio，存在冷启动、序列化与 X1–X8 协议折中；② 仍传递依赖旧支持层（`pi-tools` 130K 行、`pi-workspace` 81K 行、`pi-shell`、`pi-tools-api` 阻塞原生 Windows 编译） |
-| **VS Code 插件 (`vscode/`)** | TypeScript **11,110 行**，其中 `vscode/src/core/` 有 **23 个零 `vscode` 依赖的纯核心模块**，534 单元测试 | 架构边界极佳，**可直接抽取为跨端共享 TS Client Core** 供桌面端与移动端复用 |
+| **Rust TUI (`tui/`)** | 基于 `grok-build` 硬分叉的成熟终端 UI（`pi-pager` 家族功能丰富：全屏/行内、Markdown、Diff、Mermaid、主题、状态栏、快捷键等）；当前全 workspace **80 crates / 958,555 行 Rust**，`zypi-linux-x86_64` 二进制约 **407 MB** | ① TUI（Rust）与 Agent（Python）跨进程走 ACP stdio，存在冷启动、序列化与 X1–X10 协议折中；② 仍传递依赖旧支持层（`pi-tools` 130K 行、`pi-workspace` 81K 行、`pi-shell`、`pi-tools-api` 阻塞原生 Windows 编译） |
+| **VS Code 插件 (`vscode/`)** | TypeScript **11,110 行**，其中 `vscode/src/core/` 有 **23 个零 `vscode` 依赖的纯核心模块**，548 单元测试 | 架构边界极佳，**可直接抽取为跨端共享 TS Client Core** 供桌面端与移动端复用 |
 | **发布与品牌现状** | 产品品牌、官网（`zycode.dev`）、VS Code 插件 ID（`zycode.zycode`）、二进制名（`zycode-agent`）均已叫 `zycode`，仅 GitHub 仓库名、配置目录（`~/.pi-python`）和 PyPI 包名沿用历史名 | 仓库改名后 Open VSX 与 VS Marketplace 的 **OIDC Trusted Publishing** 需同步更新仓库名（操作简单，3–5 分钟零密钥完成） |
 
 ### 0.2 整体演进脉络
@@ -50,42 +50,39 @@ flowchart LR
 
 ---
 
-## 1. 重构前置优化：对话 `steer` 与 `/btw` 侧边聊天
+## 1. 重构前置优化：对话 `steer` 与 `/btw` 侧边聊天（PR #157 已落地）
 
-> **详细实现规格**：[Pre-Refactor 前置体验优化设计规格：对话 `steer` 与 `/btw` 侧边聊天](2026-11-26-pre-refactor-steer-and-btw-design.md)（含精确 JSON-RPC Schema、悬空 Tool Call 修复、Auto 安全联动时序、VS Code/TUI 改动清单、测试矩阵与 5 个 PR 拆分计划）。
+> **详细实现规格**：[Pre-Refactor 前置体验优化设计规格：对话 `steer` 与 `/btw` 侧边聊天](2026-11-26-pre-refactor-steer-and-btw-design.md)（权威协议契约以 [2026-11-05-acp-extension-registry.md](2026-11-05-acp-extension-registry.md) 的 X9 / X10 条目为准）。
 
-在启动仓库改名与全平台重构前，先在当前 `pi-python`（`pi_agent_harness` + `pi_agent_cli`）与两个现有交互端（VS Code 插件、`zypi` TUI）上落地两项高频能力。所有新增 ACP 协议项严格遵循 `docs/specs/2026-11-05-acp-extension-registry.md` 的五条准入规则（无标准等价、Python 侧带测试、登记入册、Rust 类型统一放 `pi-acp-lib`、经 `initialize` 能力协商且对 Zed 等第三方客户端无害）。
+在启动仓库改名与全平台重构前，已在当前 `pi-python`（`pi_agent_harness` + `pi_agent_cli`）与两个现有交互端（VS Code 插件、`zypi` TUI）上落地两项高频能力。所有新增 ACP 协议项严格遵循 `docs/specs/2026-11-05-acp-extension-registry.md` 的五条准入规则（无标准等价、Python 侧带测试、登记入册、Rust 类型统一放 `pi-acp-lib`、经 `initialize` 能力协商且对 Zed 等第三方客户端无害）。
 
 ### 1.1 优化一：对话支持 `steer`（运行中即时引导）
 
-#### 1.1.1 现状盘点（底座已备，缺协议与 UI 贯通）
+#### 1.1.1 落地总览（改造前断点已全链路打通）
 
-核查现有源码：
-- **核心与 Harness 层已就绪**：`packages/pi-agent-harness/pi_agent_harness/agent_harness.py` 已内置 `self.steer_queue`（`steering_mode: "one-at-a-time"`）、`async def steer(text, images)`（第 1766 行）、`agent_loop` 的 turn 边界消费回调 `get_steering_messages`（第 1610 行），以及 `QueueUpdateEvent` 与 `AbortEvent(clearedSteer=...)`。
-- **当前断点**：
-  1. `PiAcpAgent._run_prompt`（`packages/pi-agent-cli/pi_agent_cli/agent.py:536-537`）对并发 `session/prompt` 直接返回 `invalid_params({"reason": "busy"})`，尚未暴露 `steer` 入口；
-  2. `pi_agent_cli/events.py` 未投影 `queue_update` 事件；
-  3. `vscode/src/core/chat-controller.ts`（第 1080、1119 行）在 `status === "busy"` 时阻止发送新输入；
-  4. `tui/`（`pi-pager`）虽自带输入队列概念，但未对接 agent 的 `steer` 队列。
+- **核心与 Harness 层（`packages/pi-agent-harness/pi_agent_harness/agent_harness.py`）**：基于内置 `self.steer_queue`（`steering_mode: "one-at-a-time"`）与 `agent_loop` 的 turn 边界消费回调 `get_steering_messages`，补齐内存级 `steer_id` 映射（不改动 JSONL v3 schema）、同步中止门控（`begin_abort()` / `is_aborting`），并在任意 run 结束出口（流错误、`max_turns`、stop hook 或 cancel）自动清理未送达的用户 steer（通过 `QueueUpdateEvent.undeliveredSteer` 通知客户端回填，避免泄漏到后续无关 prompt）。
+- **ACP 协议与 Agent 层（`packages/pi-agent-cli/pi_agent_cli/agent.py`、`events.py`）**：已接入 `X9` 扩展方法 `pi/session/steer`、队列通知 `pi/queue_update`，以及被引导消息真正注入时的 `user_message_chunk` 投影（带 `_meta["pi/steered"] = true` 与 `_meta["pi/steerId"]`）。
+- **客户端层（`vscode/` 与 `tui/`）**：VS Code 插件与 `zypi` 均已打通忙碌态 steer 排队、队列状态徽章、空闲回退、取消/异常结束草稿恢复；`pi-acp-lib/src/extensions/steer.rs` 统一定义 Rust 线类型。
 
-#### 1.1.2 端到端设计方案
+#### 1.1.2 端到端协议与安全语义
 
-1. **ACP 协议扩展（新登记项 `X9`：`pi/session/steer`）**：
-   - **能力协商**：`initialize` 响应的 `_meta["pi/capabilities"]["steer"] = true`（不支持该能力的旧 Agent 或第三方客户端不受影响）。
-   - **请求**：client → agent，wire 名 `_pi/session/steer`，参数 `{"sessionId": string, "prompt": ContentBlock[]}`（复用 `_prompt_to_text_images`，同时支持文字与图片）。
-   - **竞态与原子语义**：
-     - 当 `harness` 处于 `busy`（active turn）时：调用 `await harness.steer(text, images)`，并**同步调用 `auto.note_user_message(text)`**（安全不变量：Auto 模式分类器必须知晓用户新发出的引导意图，避免误判权限），立即返回 `{"queued": true, "queueLength": N}`。
-     - 当用户回车瞬间主 turn 刚巧结束（`harness` 已回到 `idle`）：返回 `{"queued": false, "reason": "idle"}`，客户端自动无感回退为常规 `session/prompt`，确保不丢消息。
-   - **事件回显与取消语义**：
-     - 入队时可选通过 `pi/queue_update` 通知推送当前待注入队列计数（供客户端展示「Steer 已排队」徽章）。
-     - 当 `agent_loop` 在当前工具批次结束后的 turn 边界真正消费该 steer 消息时，通过标准 `session/update` 发出 `user_message_chunk`（带 `_meta["pi/steered"] = true`），让时间线按真实生效位置展示该条用户引导。
-     - 用户点击 Cancel（`session/cancel`）时，`harness.abort()` 自动清空未消费的 `steer_queue`（可回填至客户端输入框方便用户修改重发，避免白打字）。
+1. **ACP 协议扩展（已登记项 `X9`：`pi/session/steer`）**：
+   - **能力协商**：Agent 在 `initialize` 响应的 `_meta["pi/capabilities"]["steer"] = true` 宣告支持；opt-in 客户端（`zypi`、VS Code 插件）同步在 `clientCapabilities._meta["pi/capabilities"]["steer"] = true` 宣告（不支持该能力的旧 Agent 或第三方客户端不受影响）。
+   - **请求**：client → agent，方法名 `pi/session/steer`（ACP wire 名 `_pi/session/steer`），参数 `{"sessionId": string, "steerId"?: string, "prompt": ContentBlock[]}`（复用 `_prompt_to_text_images`，同时支持文字与图片）。
+   - **竞态、安全与清理语义**：
+     - 当 `harness` 处于活跃 turn 且未进入中止流程时：调用 `await harness.steer(text, images, steer_id=steer_id)` 入队，返回 `{"sessionId": string, "steerId": string, "queued": true, "queueLength": N}`。
+     - **Auto 安全不变量（S2，注入时生效）**：`AutoSession.note_user_message(text)` **绝不在入队时调用**，而**仅在被引导消息于 turn 边界真正被 `agent_loop` 消费注入（`message_start`）时调用**；若在消费前被 `session/cancel` 或异常结束清空，该文本不会进入 Auto 分类器上下文。
+     - 当主 turn 已回到 `idle`、正在 `aborting`、或阻塞在 `waiting_for_trust` / `waiting_for_barriers` 时：返回 `{"sessionId": string, "steerId": string, "queued": false, "reason": "idle" | "aborting" | "waiting_for_trust" | "waiting_for_barriers"}`。若返回 `idle`，客户端自动无感回退为常规 `session/prompt`（VS Code 在本地尚未收到上一轮 `prompt` 返回时亦自动排队等待转 `ready` 后补发，确保不丢消息）。
+   - **事件回显与草稿恢复语义**：
+     - 队列变更通过通知 `pi/queue_update`（wire 名 `_pi/queue_update`，参数 `{"sessionId", "steer": [{"steerId", "preview"}], "clearedByAbort": boolean, "clearedSteerIds"?: string[]}`）推送。
+     - 当 `agent_loop` 在当前工具批次结束后的 turn 边界真正消费该 steer 消息时，通过标准 `session/update` 发出 `user_message_chunk`（带 `_meta["pi/steered"] = true` 与可选 `_meta["pi/steerId"]`），让时间线按真实生效位置展示该条用户引导。
+     - 无论因 `session/cancel` 还是流错误 / `max_turns` / stop hook 导致 run 结束，未消费的 steer 都会被清空并通过 `pi/queue_update`（`clearedByAbort: true` + `clearedSteerIds`）回报，客户端将其前置回填至输入框（保留用户已输入的草稿文本，不丢字）。
 2. **VS Code 插件（`vscode/`）**：
-   - `status === "busy"` 时保持输入框可输入；检测到 agent 支持 `steer` 能力时，回车 / 点击 **Steer** 发送 `_pi/session/steer`（保留显式 Stop 按钮用于中断）。
-   - 聊天区底部展示紧凑的「待注入引导（Steer）」待生效条目；生效后自然转为对话流中的带 `Steered` 标记的用户气泡；若被取消则自动回填输入框。
+   - `status === "busy"` 时保持输入框可输入；检测到 agent 支持 `steer` 能力时，回车 / 点击 **Steer** 发送 `_pi/session/steer`（保留显式 Stop 按钮用于中断；忙碌态下其他斜杠命令如 `/model`、`/auto-log` 禁止当普通 steer 发送，提示等待当前 turn 结束并恢复草稿）。
+   - 聊天区底部展示紧凑的「待注入引导（Steer）」待生效条目；生效后自然转为对话流中的带 `Steered` 标记的用户气泡；若被取消或非取消异常结束仍未消费，则自动回填输入框。
 3. **Rust TUI（`tui/`）**：
-   - 将 `X9` 类型定义写入 `pi-acp-lib`（符合准入规则 4）。
-   - Turn 运行期间允许继续输入并提交：若 agent 宣布 `steer` 能力，直接发送 `_pi/session/steer` 并在输入区上方显示排队条；否则平滑保持本地等待行为。
+   - `X9` 线类型统一定义在 `pi-acp-lib/src/extensions/steer.rs`（符合准入规则 4）。
+   - Turn 运行期间允许继续输入并提交：先走斜杠命令解析，普通文本在 agent 宣布 `steer` 能力时发送 `_pi/session/steer` 并展示排队状态；否则平滑保持本地等待队列；收到 `clearedByAbort: true` 时前置拼接回填到输入框。
 
 ---
 
@@ -95,18 +92,21 @@ flowchart LR
 
 用户在主对话执行过程中（**无论主对话是 `idle` 还是 `busy` 正在运行长耗时工具/多轮推理**），需要临时问一个与当前上下文相关的旁路问题（例如「刚才改的那个函数签名是什么」「这个报错码什么意思」「总结目前改了哪几个文件」）。`/btw` 必须严格满足四条语义不变量：
 
-1. **共享主上下文只读快照**：模型能看到当前主会话的 system prompt 与截至当前的对话历史快照，无需用户重新粘贴背景。
+1. **共享主上下文只读快照**：模型能看到当前主会话的 system prompt 与截至当前的对话历史快照（含悬空 tool call 自动闭合与无工具文本投影，单条 tool result 截断至 4,000 字符），无需用户重新粘贴背景。
 2. **零污染主会话**：`/btw` 的提问与回答**绝不写入主会话 JSONL v3 文件**、**不进入主会话下一轮 LLM 上下文**、**不消耗主会话上下文窗口**、**不触发主会话 Compaction**。
 3. **无工具、零副作用、可并行**：`/btw` 固定以 `tools = []` 纯问答模式调用 LLM，不修改文件、不跑命令、**无需权限弹窗**；且**不争抢 `AgentHarness` 的 Phase 锁**，因此在主对话 `busy` 跑测试/编代码期间可完全并行问答！
-4. **即用即走（Ephemeral）**：回答展示在独立侧边气泡/浮层中，支持复制、继续追问（仅在该次侧边浮层生命周期内保留多轮内存上下文，关闭即销毁）和一键 `Esc` 关闭。
+4. **即用即走（Ephemeral）**：回答展示在独立侧边气泡/浮层中，支持复制、继续追问（仅在该次侧边浮层生命周期内保留多轮内存上下文，按 20 轮与 32 KiB UTF-8 字节双重裁剪，关闭即销毁）和一键 `Esc` 关闭。
 
-#### 1.2.2 端到端设计方案
+#### 1.2.2 端到端协议与实现方案
 
 1. **Harness 层（`pi_agent_harness`）**：
-   - 新增无锁只读方法 `harness.snapshot_context_for_btw() -> BtwContextSnapshot`：浅拷贝当前 system prompt + 已落盘消息 + 当前 turn 进行中文本快照（不持 Phase 锁、不修改 SessionStorage）。
-2. **Agent 与 ACP 协议层（`pi_agent_cli`，新登记项 `X10`：`pi/session/btw`）**：
-   - **能力协商**：`initialize` 响应声明 `_meta["pi/capabilities"]["btw"] = true`；同时在 `available_commands_update` 注册 `/btw` 命令提示。
-   - **请求**：client → agent，wire 名 `_pi/session/btw`，参数：
+   - 无锁只读方法 `harness.snapshot_context_for_btw() -> BtwContextSnapshot`：浅拷贝当前 system prompt + 已落盘消息快照（不持 Phase 锁、不修改 SessionStorage，不触发延迟写文件的落盘）。
+2. **Agent 与 ACP 协议层（`pi_agent_cli`，已登记项 `X10`：`pi/session/btw`、`pi/btw_update`、`pi/session/btw_cancel`）**：
+   - **双向能力协商与防误触兜底**：
+     - Agent 在 `initialize` 响应声明 `_meta["pi/capabilities"]["btw"] = true`。
+     - `available_commands_update` **仅向在 `clientCapabilities._meta["pi/capabilities"]["btw"] = true` 中显式 opt-in 的客户端（`zypi`、VS Code 插件）广播 `/btw`**，避免不支持 `pi/session/btw` 的第三方 ACP 客户端（如 Zed）误展示该命令。
+     - 若客户端仍经 `session/prompt` 直接发送字面 `/btw ...`（且没有扩展注册 `btw` 命令），Agent 直接返回简短提示并结束（`end_turn`），**不调用 LLM、不写 JSONL**。
+   - **请求**：client → agent，方法名 `pi/session/btw`（wire 名 `_pi/session/btw`），参数：
      ```json
      {
        "sessionId": "<main-session-id>",
@@ -115,15 +115,15 @@ flowchart LR
        "history": []
      }
      ```
-     （`history` 可选，仅用于用户在同一个未关闭的 `/btw` 浮层内连续追问；Agent 端不持久化）。
-   - **独立并发执行**：`PiAcpAgent` 启动独立 `asyncio.Task`（与主 `_run_prompt` 解耦），基于 `snapshot_context_for_btw()` + `history` + 本次提问，附加一段简洁的侧边回答指令（说明无工具权限、直接基于上下文简明作答），直接调用 `self._stream_fn`（`tools=[]`，默认复用当前会话模型，后续支持 `[btw] model = "..."` 配轻量快模型）。
-   - **独立流式通道**：通过 notification `_pi/btw_update`（参数 `{"sessionId", "btwId", "kind": "thought"|"text"|"done"|"error", "delta": "..."}`）推送流式增量，**完全不混入主会话的 `session/update`**，彻底避免主时间线串台或误渲染；配套 `_pi/session/btw_cancel` 允许单独中断侧边回答而不影响主 turn。
+     （`history` 可选，仅用于用户在同一个未关闭的 `/btw` 浮层内连续追问，服务端硬上限 20 轮 / 32 KiB UTF-8，客户端自动裁剪最旧轮次；Agent 端不持久化）。
+   - **独立并发执行与配置**：`PiAcpAgent` 在 `await snapshot_context_for_btw()` 之前同步预占并发与 `btwId` 槽位（单会话并发上限 2，防重复 id），随后启动独立 `asyncio.Task` 执行 `btw.py:run_btw()`（`tools=[]`，经 `[btw]` 配置表支持独立 `model`、`thinking = "off" | "inherit"` 及 `timeout_seconds` 默认 120s、范围 5–600s；未知 `model` 记录配置 note 并回退会话模型）。**数据流说明**：`/btw` 会将完整主会话上下文（system prompt、用户/助手文本、截断至 4,000 字符的工具结果）发送给 `[btw].model`，后者可能指向不同的 provider 与 API key。
+   - **独立流式通道**：通过 notification `pi/btw_update`（wire 名 `_pi/btw_update`，参数 `{"sessionId", "btwId", "kind": "thought_delta" | "text_delta" | "done" | "error", "delta": string, "error": string | null, "stopReason"?: string}`）推送流式增量，**完全不混入主会话的 `session/update`**；配套 `pi/session/btw_cancel`（wire 名 `_pi/session/btw_cancel`，幂等）允许单独中断侧边回答而不影响主 turn。
 3. **VS Code 插件（`vscode/`）**：
-   - `/` 斜杠补全菜单增加 `/btw`；即使 `status === "busy"`，输入 `/btw <问题>` 也可直接提交（不走主 turn 互斥校验）。
-   - 在聊天区上方/底部弹出轻量 **BTW 侧边浮层卡片**（带「侧边问答 · 不计入主对话上下文」提示、流式 Markdown 渲染、复制按钮、浮层内继续追问输入框与 `Esc`/× 关闭按钮）。
+   - `initialize` 声明 `clientCapabilities._meta["pi/capabilities"] = { steer: true, btw: true }`；即使 `status === "busy"`，输入 `/btw <问题>` 也可直接提交（不走主 turn 互斥校验）。
+   - 聊天区弹出轻量 **BTW 侧边浮层卡片**（就地增量更新 DOM 以保留 Thinking `<details>` 展开态、Stop/Copy 按钮焦点与用户上滚阅读位置，回答容器带 `aria-live="polite"`；焦点在 `/btw` 浮层内或主会话 `idle` 时按 `Esc` 关闭浮层并取消在途侧边请求，主会话 `busy` 时主输入框按 `Esc` 优先取消主 turn）。
 4. **Rust TUI（`tui/`）**：
-   - `pi-acp-lib` 定义 `X10` 的请求与 `_pi/btw_update` 类型；`pi-pager` 斜杠菜单注册 `/btw`。
-   - 触发后弹出轻量 **Overlay 浮层**（类似现有助手/问题弹窗，底部主对话仍持续流式刷新不被冻结），支持流式阅读、滚动、复制及 `Esc` 一键关闭。
+   - `pi-acp-lib/src/extensions/btw.rs` 定义 `X10` 请求与通知线类型；`pi-pager` 在 `initialize` 声明 `clientCapabilities._meta["pi/capabilities"] = { steer: true, btw: true }`，斜杠菜单支持 `/btw` 并按 32 KiB UTF-8 裁剪多轮历史。
+   - 触发后弹出轻量 **Overlay 浮层**（底部主对话仍持续流式刷新不被冻结），支持流式阅读、滚动、复制及 `Esc` 一键关闭。
 
 > **架构复利**：`steer` 与 `/btw` 在 `AgentHarness` 与协议层的抽象，在 Phase 1 桌面端 ADE App 和 Phase 2 `pi-rust` 中将被原样继承——桌面端可将 `/btw` 展示为可停靠的侧边抽屉，而 `pi-rust` 会将其纳入 `tests/conformance/` 一致性验收清单。
 
@@ -496,16 +496,16 @@ flowchart LR
 
 ### 5.2 分阶段详细里程碑与验收门禁
 
-#### Pre-Refactor：对话体验双优化——`steer` 与 `/btw`（预计 2–3 周）
+#### Pre-Refactor：对话体验双优化——`steer` 与 `/btw`（已在 PR #157 实现）
 
 - **核心交付**：
-  1. **协议登记与实现**：在 `docs/specs/2026-11-05-acp-extension-registry.md` 登记 `X9`（`pi/session/steer`）与 `X10`（`pi/session/btw` + `pi/btw_update` + `pi/session/btw_cancel`），经 `initialize` 能力协商；在 `pi-acp-lib` 定义对应 Rust 线类型。
-  2. **Python 引擎层**：`pi_agent_harness` 补齐 `snapshot_context_for_btw()`；`pi_agent_cli` 接入 `steer`（联动 `auto.note_user_message` 与空闲回退）和独立并发、无工具、零污染的 `/btw`。
-  3. **VS Code 插件**：运行中解锁输入框支持 Steer 排队/生效/取消回填；实现 `/btw` 斜杠命令与可折叠侧边问答浮层。
-  4. **Rust TUI（`tui/`）**：`pi-pager` 接入 `X9` 排队引导与 `X10` `/btw` Overlay 侧边浮层（主对话运行期间可随时呼出）。
+  1. **协议登记与实现**：在 `docs/specs/2026-11-05-acp-extension-registry.md` 登记 `X9`（`pi/session/steer` + `pi/queue_update`）与 `X10`（`pi/session/btw` + `pi/btw_update` + `pi/session/btw_cancel`），经 `initialize` 双向能力协商；在 `pi-acp-lib` 定义对应 Rust 线类型。
+  2. **Python 引擎层**：`pi_agent_harness` 补齐 `snapshot_context_for_btw()`、`steer_id` 映射、同步中止门控与 run 结束未送达 steer 清理；`pi_agent_cli` 接入 `steer`（仅在 turn 边界真正注入 `message_start` 时调用 `auto.note_user_message`，空闲/barrier/trust/aborting 精确回馈）和独立并发、无工具、零污染的 `/btw`（含仅向 opt-in 客户端广播 `/btw` 及字面 `/btw` 兜底提示）。
+  3. **VS Code 插件**：运行中解锁输入框支持 Steer 排队/生效/取消与异常结束草稿回填、空闲竞态自动回退、忙碌态拦截斜杠命令；实现 `/btw` 斜杠命令与就地增量更新 DOM 的侧边问答浮层（32 KiB UTF-8 历史裁剪、浮层内或空闲态 `Esc` 关闭）。
+  4. **Rust TUI（`tui/`）**：`pi-pager` 接入 `X9` 排队引导（含非空草稿前置回填）与 `X10` `/btw` Overlay 侧边浮层（32 KiB UTF-8 历史裁剪，主对话运行期间可随时呼出）。
 - **退出门禁**：
-  - `pytest`（含 ACP 契约、Auto Mode 联动、主会话 JSONL 零污染验证）、`vscode` `npm run check`、`python_agent_e2e.rs` 与 `scripts/tui_pty/` 全绿；
-  - 发布新版本 `pi-agent-cli-lc`、`zycode-agent` 与 `zycode.zycode` 插件供日常实战验证。
+  - `pytest`（含 Harness、ACP 契约、Auto Mode 注入时安全联动、主会话 JSONL 零污染验证）、`vscode` `npm run check`、`pi-pager` 单测、`python_agent_e2e.rs` 与 TUI baseline gates 全绿；
+  - 合并 PR #157 后发布新版本 `pi-agent-cli-lc`、`zycode-agent` 与 `zycode.zycode` 插件供日常实战验证。
 
 ---
 
@@ -585,8 +585,8 @@ flowchart LR
 
 | 风险项 | 严重度 | 缓解策略 |
 |---|---|---|
-| **`steer` 与 Auto 模式/取消竞态导致状态错乱或安全绕过** | 🔴 高 | `steer` 入队必须同步通知 `auto.note_user_message`；空转竞态自动回退 `session/prompt`；`abort` 清空队列时向客户端回报被清理文本用于回填 |
-| **`/btw` 并发读写主会话引发状态竞争或污染 JSONL** | 🟡 中 | `snapshot_context_for_btw()` 严格只读拷贝、不持 Phase 锁、`tools=[]`、走独立 `_pi/btw_update` 通知通道，单测强制断言主会话 JSONL 字节零变化 |
+| **`steer` 与 Auto 模式/取消竞态导致状态错乱或安全绕过** | 🔴 高 | `auto.note_user_message` **仅在 steer 于 turn 边界真正注入（`message_start`）时调用，绝不在入队时写入**（Invariant S2）；`cancel` 后同步拒收新 steer（`reason: "aborting"`）；任何 run 结束（cancel、流错误、`max_turns`、stop hook）均清空未消费 steer 并通过 `pi/queue_update`（`clearedByAbort: true` + `clearedSteerIds`）回报客户端前置回填草稿；空闲竞态自动回退 `session/prompt` |
+| **`/btw` 并发读写主会话引发状态竞争、污染 JSONL 或第三方误触** | 🟡 中 | `snapshot_context_for_btw()` 严格只读拷贝、不持 Phase 锁、`tools=[]`、走独立 `pi/btw_update`（wire `_pi/btw_update`）通知通道，并发上限 2 且在 `await` 快照前同步占槽；`/btw` 仅向 opt-in 客户端广播且字面 `/btw` prompt 零副作用兜底；单测强制断言主会话 JSONL 字节零变化 |
 | **仓库改名后未及时更新 VS Code OIDC 导致发布报错** | 🔴 高 | 按 §2.2.1 指引在改名后 3–5 分钟内同步 Open VSX（删旧建新）与 VS Marketplace 策略，用 Dry Run 验证；保留 `--skip-duplicate` 幂等重试与网页免 Token 手动上传兜底 |
 | **`pi-rust` v1 语义漂移或收益不及预期** | 🔴 高 | `pi-python` 持续维护不提前停更；设立 Phase 2 正式性能与 FrontierHarness 30 对比门禁，用实测数据决定后续切换策略而非盲目押注 |
 | **`tui/` 接入 `pi-rust` 时与旧支持层产生依赖冲突** | 🟡 中 | 通过 `SessionBackend` Trait 隔离边界，统一 workspace 依赖版本，按 4 批次渐进替换旧支持层，每批独立过 CI |
