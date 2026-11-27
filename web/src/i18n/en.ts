@@ -299,7 +299,7 @@ PI_USE_MOCK=1 python -m pi_agent_cli -p "hello" --cwd .`,
       mcp: 'MCP servers that the editor passes',
       codemode: 'Programmatic tool orchestration and deferred tool discovery',
     },
-    next: 'Next: a prebuilt `zypi` binary for Windows (planned, no date). There is no macOS x86_64 build of `zypi` and no automatic update.',
+    next: 'Next: see the [roadmap](https://github.com/zy1233/zycode#roadmap). It has no dates. Some base work is planned. A shared daemon with a desktop app, a Rust engine, a prebuilt `zypi` for Windows, and a mobile app are proposals only. There is no macOS x86_64 build of `zypi` and no automatic update.',
   },
   evidence: {
     eyebrow: 'Evidence',

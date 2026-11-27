@@ -241,11 +241,21 @@ cd vscode && npm run check
 
 ## 路线图
 
-核心运行时、`AgentHarness`、编程工具、ACP CLI、`zypi` TUI 及扩展包均已发布 `1.2.0` 稳定版，VS Code 扩展已在 VS Code Marketplace 与 Open VSX 发布稳定版（完整演进记录见 [`CHANGELOG.md`](CHANGELOG.md) 与 [`vscode/CHANGELOG.md`](vscode/CHANGELOG.md)）。
+核心运行时、`AgentHarness`、编程工具、ACP CLI、`zypi` TUI 及扩展包均已发布 `1.2.0` 稳定版，VS Code 扩展 `1.14.0` 已在 VS Code Marketplace 与 Open VSX 发布稳定版（完整演进记录见 [`CHANGELOG.md`](CHANGELOG.md) 与 [`vscode/CHANGELOG.md`](vscode/CHANGELOG.md)）。
 
-**下一步：**
+完整计划见 [`docs/specs/2026-11-25-zycode-refactor-and-roadmap.md`](docs/specs/2026-11-25-zycode-refactor-and-roadmap.md)。所有步骤都没有时间表。在第 2 阶段的对比结论出来之前，Python 版 agent 持续维护。
 
-- **TUI 平台扩展** — 计划中，暂无时间表：提供 Windows 预编译版 `zypi`。暂无且不计划提供 macOS `x86_64` 版 `zypi`，亦不提供自动更新。
+| 步骤 | 内容 | 状态 |
+|------|------|------|
+| Pre-Refactor | 对话中途**引导**（`steer`：回合运行时再发一条消息）与 **`/btw`** 侧边聊天（问一个不写入主对话的临时问题） | **已发布**（2026-11-27）：agent 与 `zypi` `1.2.0`，VS Code 扩展 `1.14.0` |
+| 第 0 阶段 | 仓库已改名为 `zy1233/zycode`。改名后，发布到 PyPI、Open VSX、Marketplace 与官网均正常 | **已完成**（2026-11-27） |
+| 第 0 阶段 | 8 个 PyPI 包改用 Trusted Publishing、配置目录 `~/.zycode`（回退到 `~/.pi-python`）、`tests/conformance/` 黄金测试集 | 计划中 |
+| 第 1 阶段 | 共享守护进程与桌面应用，底层运行 Python 版 agent | 提案 |
+| 第 2 阶段 | Rust 引擎（`pi-rust`），并发布与 Python 版 agent 的对比；结论决定 Rust 引擎是否成为默认引擎 | 提案 |
+| 第 3 阶段 | `zypi` 改用 Rust 引擎，并随之提供 Windows 预编译版 | 提案；仅当第 2 阶段的结论为“是”时开始 |
+| 第 4 阶段 | 远程中继与移动端应用 | 提案 |
+
+**计划中**表示范围已明确。**提案**表示计划已写成，但设计决策尚未做出，且[计划审计](docs/AUDIT/AUDIT-ROADMAP-2026-11-27.md)列出了尚未解决的设计问题。暂无且不计划提供 macOS `x86_64` 版 `zypi`，亦不提供自动更新。
 
 ## 许可证
 

@@ -239,11 +239,21 @@ For real-LLM regression tests, the weekly provider matrix, and smoke scripts, se
 
 ## Roadmap
 
-Core runtime, `AgentHarness`, coding tools, ACP CLI, `zypi` TUI, and extension packages are released at `1.2.0`, and the VS Code extension is stable on VS Code Marketplace and Open VSX (see [`CHANGELOG.md`](CHANGELOG.md) and [`vscode/CHANGELOG.md`](vscode/CHANGELOG.md) for the full history).
+Core runtime, `AgentHarness`, coding tools, ACP CLI, `zypi` TUI, and extension packages are released at `1.2.0`, and the VS Code extension `1.14.0` is stable on VS Code Marketplace and Open VSX (see [`CHANGELOG.md`](CHANGELOG.md) and [`vscode/CHANGELOG.md`](vscode/CHANGELOG.md) for the full history).
 
-**Next:**
+The plan is in [`docs/specs/2026-11-25-zycode-refactor-and-roadmap.md`](docs/specs/2026-11-25-zycode-refactor-and-roadmap.md) (in Chinese). No step has a date. The Python agent stays maintained until the Phase 2 comparison decides what comes next.
 
-- **TUI platform expansion** — planned, no date: a prebuilt `zypi` binary for Windows. There is no macOS `x86_64` build of `zypi` and none is planned, and there is no automatic update.
+| Step | What | State |
+|------|------|-------|
+| Pre-Refactor | Mid-turn **steer** (send one more message while a turn runs) and the **`/btw`** side chat (ask a side question that the chat does not save) | **Released** (2026-11-27): agent and `zypi` `1.2.0`, VS Code extension `1.14.0` |
+| Phase 0 | The repository is now `zy1233/zycode`. Publishing to PyPI, Open VSX, the Marketplace, and the site worked after the rename | **Done** (2026-11-27) |
+| Phase 0 | PyPI Trusted Publishing for the eight packages, the config directory `~/.zycode` with a fallback to `~/.pi-python`, and golden tests in `tests/conformance/` | Planned |
+| Phase 1 | A shared daemon and a desktop app that run the Python agent | Proposed |
+| Phase 2 | A Rust engine (`pi-rust`) and a published comparison with the Python agent. The result decides if the Rust engine becomes the default | Proposed |
+| Phase 3 | `zypi` on the Rust engine, and with it a prebuilt binary for Windows | Proposed. It starts only if Phase 2 says yes |
+| Phase 4 | A remote relay and a mobile app | Proposed |
+
+**Planned** means that the scope is clear. **Proposed** means that the plan is written, but its design decisions are not made, and the [audit of the plan](docs/AUDIT/AUDIT-ROADMAP-2026-11-27.md) lists open design issues. There is no macOS `x86_64` build of `zypi` and none is planned, and there is no automatic update.
 
 ## License
 

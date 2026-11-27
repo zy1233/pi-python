@@ -258,7 +258,7 @@ flowchart LR
 | 4. 统一清理 | 完成（本提交） | 8 个 `pyproject.toml`、`release.yml`、`vscode/`、`web/`、两个 `README`、`docs/`、`CHANGELOG.md` 和两个脚本里的仓库 URL 与名称。 |
 | 4. `agentclientprotocol/registry#735` | 完成 | fork 分支 `zy1233/registry:add-zycode` 新增提交 `bfbf48b`：`repository`、`license_url` 与 5 个 `archive` 的 URL 改为 `zy1233/zycode`。`sha256` 没有变，与 `zy1233/zycode` 下发布资产的摘要逐个相同。PR 仍可合并，在等维护者。 |
 | 4. `omacom/omarchy#19501` | 完成 | fork 分支 `zy1233/omarchy:feat/add-zycode-agent` 新增提交 `1dcee41`：4 个文件里的 URL 改为 `zy1233/zycode`（`bin/omarchy-default-agent`、`etc/mise/conf.d/omarchy-tools.toml`、`manual/17-ai.md`、`test/shell.d/default-agent-test.sh`）。`~/.pi-python` 没有改。这个 PR 在改名前就与 `quattro` 冲突，这次没有处理。 |
-| 5. 验证门禁 | 部分完成 | 本地检查已通过。其余门禁见下面"还没有验证的项"。 |
+| 5. 验证门禁 | 完成，可选项除外 | 本地检查、`VS Code extension` 的 Dry Run、`Release`（真实发布 `v1.2.0`）和 `Workers Builds: zycode-web` 都已通过。改名后的真实发布也已验证。可选的 PyPI OIDC 还没做。见下面"验证结果"。 |
 
 **更正（与 §2.1 到 §2.3 的原文相比）：**
 
@@ -267,11 +267,11 @@ flowchart LR
 - **Dry Run 不能证明 OIDC 注册。** `VS Code extension` 的 Dry Run（`publish` 不勾选）不会调用注册表。只有下一次真实发布能证明两条注册。
 - **Cloudflare 不用改。** 连接按 `repo_id` 绑定，只有名称标签是旧的。
 
-**还没有验证的项：**
+**验证结果（2026-11-27，原先列为"还没有验证的项"）：**
 
-1. 改名后的真实发布（Open VSX 与 Marketplace）：下一次发布插件时验证。
-2. 改名后的 `Workers Builds: zycode-web` 构建：推送含 `web/` 改动的提交后验证。
-3. PyPI 项目页上的链接：下一次发布后才会更新。
+1. 改名后的真实发布（Open VSX 与 Marketplace）：**已验证。** 扩展 1.14.0 的发布运行 `46016850220`（`main`，提交 `1d70cb1`）一次成功。Open VSX 用 Trusted Publishing 接受 5 个包，Marketplace 用 `vsce publish --oidc` 接受 5 个包，都不用 token。两条新注册都有效。记录在 `vscode/RELEASING.md` 的 1.14.0 一节。
+2. 改名后的 `Workers Builds: zycode-web` 构建：**已验证。** 提交 `9ae0db8`（改名）和 `cfa74e4` 触发的构建都成功。
+3. PyPI 项目页上的链接：**已验证。** 8 个包的 1.2.0（2026-11-27 发布）的 `Homepage` 和 `Repository` 都指向 `https://github.com/zy1233/zycode`。
 
 ---
 

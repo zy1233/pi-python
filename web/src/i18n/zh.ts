@@ -299,7 +299,7 @@ PI_USE_MOCK=1 python -m pi_agent_cli -p "hello" --cwd .`,
       mcp: '编辑器传入的 MCP 服务器',
       codemode: '代码编排工具调用与按需延迟工具发现',
     },
-    next: '下一步：为 Windows 提供预编译的 `zypi`（计划中，没有日期）。不做 `zypi` 的 macOS x86_64 版本，也不做自动更新。',
+    next: '下一步：见[路线图](https://github.com/zy1233/zycode/blob/main/README.zh-CN.md#路线图)，没有日期。部分基础工作已列入计划；共享守护进程与桌面应用、Rust 引擎、Windows 预编译版 `zypi`、移动端应用目前只是提案。不做 `zypi` 的 macOS x86_64 版本，也不做自动更新。',
   },
   evidence: {
     eyebrow: '证据',

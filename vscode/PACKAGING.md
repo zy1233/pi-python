@@ -40,7 +40,7 @@ To try a VSIX in VS Code: `code --install-extension out/zycode-linux-x64-*.vsix`
 
 A release goes out from the workflow `.github/workflows/vscode-extension.yml` (Trusted Publishing, started by hand on `main`). The steps, and what to do if the OIDC publish fails, are in `RELEASING.md`.
 
-Check before you upload a file made on your machine: `sha256sum -c out/SHA256SUMS`. The sha256 of a VSIX is not the same from build to build, so compare only with the `SHA256SUMS` of the same build. Each VSIX is between 39 and 74 MiB (the VSIX of `linux-x64` is the largest: 73.7 MiB with agent 1.1.0).
+Check before you upload a file made on your machine: `sha256sum -c out/SHA256SUMS`. The sha256 of a VSIX is not the same from build to build, so compare only with the `SHA256SUMS` of the same build. Each VSIX is between 40 and 74 MiB (the VSIX of `linux-x64` is the largest: 74.0 MiB with agent 1.2.0).
 
 ## Change the agent version
 
