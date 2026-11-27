@@ -1,5 +1,23 @@
 # Changelog
 
+## 1.14.0 (2026-11-27)
+
+Stable release. It follows 1.12.0 and bundles agent 1.2.0 (1.12.0 had agent 1.1.0). A user of 1.12.0 gets it as an update.
+
+### New
+
+- **Steer.** While the agent works on a turn, the **Send** button says **Steer**. Type one more message and press it. The agent shows the message to the model at the next turn boundary. A tool that runs is not stopped. The queued steers show above the message box, under the title **Queued steer**. If the turn ends before the model has seen a steer (an error, the turn limit or a stop), the text goes back to the message box. It does not reach a later turn. If the agent has already finished when you press **Steer**, the extension sends the text as a normal message. A slash command is never sent as a steer. Steer needs agent 1.2.0 or later. With an older agent (one that you choose with `zycode.agentPath`), the button works as before.
+- **`/btw` side chat.** Type `/btw <question>` to ask the agent a question on the side. A panel (**BTW · Side chat**) shows the answer as it comes, also while a turn runs. The panel says that the answer is not saved to the main chat. Ask a follow-up in the panel. **Stop** cancels an answer. **Esc** closes the panel. The agent answers from a read-only copy of the chat, and it calls no tool. `/btw` needs agent 1.2.0 or later.
+- **`/btw` sends the whole chat to a model.** It sends the system prompt, the messages, and the tool results (each cut to 4000 characters) to the model that `[btw] model` names in `agent.toml`. That model can belong to another provider and use another key. When `[btw] model` is empty, the model of the chat answers. `[btw]` has two more keys: `thinking` (`off`, the default, or `inherit`) and `timeout_seconds` (5 to 600, default 120).
+- **Skills in the `/` menu.** Agent 1.2.0 lists each skill as the command `/skill:<name>`, with the description of the skill, and the `/` menu shows them. The list of past chats, and a chat that you open again, show the line that you typed, not the text of the skill.
+
+### Changed
+
+- **Bundles `zycode-agent` 1.2.0** for `linux-x64`, `linux-arm64`, `darwin-arm64`, `darwin-x64`, and `win32-x64` (was 1.1.0). The package of `linux-x64` is the largest, about 74 MiB. The full list of agent changes is in the [CHANGELOG of the repository](https://github.com/zy1233/zycode/blob/main/CHANGELOG.md).
+- **Auto on Windows with Git Bash.** The model writes the project folder as `/c/work/app`, and Git Bash reads that as `C:\work\app`. Agent 1.1.0 read it as a folder that does not exist, so Auto asked about almost every `bash` call with such a path (84 of 85 decisions in one session). Agent 1.2.0 gives the rules the mount points of the shell of the Bash tool, and the rules decide a command in the project folder as before.
+- **`replay_reasoning` in `agent.toml`.** Agent 1.2.0 has a new key for an OpenAI-format gateway. Set `replay_reasoning = true` on a `[model]` or `[[models]]` entry to send the thinking of earlier turns back to the model. It is off by default, because the OpenAI API and some gateways refuse the extra field.
+- The repository is now `zy1233/zycode` (it was `zy1233/pi-python`). The links in the package, the README and the notices point there. The old links still work.
+
 ## 1.12.0 (2026-11-25)
 
 Stable release. It follows 1.10.0 and bundles the same agent (1.1.0). A user of 1.10.0 gets it as an update.

@@ -221,7 +221,8 @@ describe("ChatController steer and /btw", () => {
     const { controller, messages } = startRig({ FAKE_STEER_BTW: "1" });
     await controller.start();
 
-    const turn = controller.send("steer-idle-race");
+    // The fake agent keeps the turn open until it has answered two steers with "idle".
+    const turn = controller.send("steer-idle-race:2");
     await waitFor(
       () => ofType(messages, "agentText").some((m) => m.text.includes("finishing")),
       "steer-idle-race finishing chunk",
@@ -246,16 +247,23 @@ describe("ChatController steer and /btw", () => {
     const { controller, messages } = startRig({ FAKE_STEER_BTW: "1" });
     await controller.start();
 
-    const turn = controller.send("steer-idle-race");
+    // The send of the joined text is the one that fails. Every other call goes to the real method.
+    // The spy is in place before the turn starts, so the test does not depend on the order of events.
+    const realSend = controller.send.bind(controller);
+    const sendSpy = vi
+      .spyOn(controller, "send")
+      .mockImplementation(async (text, mentions, images) =>
+        text === "first fallback\n\nsecond fallback" ? false : realSend(text, mentions, images),
+      );
+
+    // The fake agent keeps the turn open until it has answered two steers with "idle".
+    const turn = controller.send("steer-idle-race:2");
     await waitFor(
       () => ofType(messages, "agentText").some((m) => m.text.includes("finishing")),
       "steer-idle-race finishing chunk",
     );
     expect(await controller.send("first fallback")).toBe(true);
     expect(await controller.send("second fallback")).toBe(true);
-
-    const sendSpy = vi.spyOn(controller, "send");
-    sendSpy.mockImplementationOnce(async () => false);
     await turn;
     await waitFor(() => ofType(messages, "restoreDraft").length > 0, "restoreDraft after failed send");
 

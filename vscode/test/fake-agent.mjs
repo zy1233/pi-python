@@ -54,6 +54,8 @@ const cancelled = new Set();
 const cwds = new Map();
 const busySessions = new Set();
 const pendingSteers = new Map();
+// How many steers each session got the answer "idle" for (the scenario `steer-idle-race` waits for them).
+const idleSteerReplies = new Map();
 const cancelledBtw = new Set();
 let steerSeq = 0;
 
@@ -307,11 +309,20 @@ async function runPrompt(ctx, sessionId, prompt) {
     cancelled.delete(sessionId);
     return "cancelled";
   }
-  if (prompt === "steer-idle-race") {
-    // Simulate agent phase returning to idle before prompt() response reaches the client.
+  // `steer-idle-race` or `steer-idle-race:<n>`: the agent is idle before the answer of prompt() reaches
+  // the client. The turn stays open until the agent has answered <n> steers (default 1) with "idle".
+  // A timer here made the tests depend on the speed of the machine: when the steers were slow, the
+  // turn ended first and the text went out as a normal prompt. The 5 s limit only stops a test that
+  // sends no steer.
+  const idleRace = /^steer-idle-race(?::([1-9]\d*))?$/.exec(prompt);
+  if (idleRace) {
+    const wanted = Number(idleRace[1] ?? "1");
+    idleSteerReplies.set(sessionId, 0);
     busySessions.delete(sessionId);
     await notify(text(sessionId, "agent_message_chunk", "finishing"));
-    await sleep(60);
+    for (let i = 0; i < 500 && (idleSteerReplies.get(sessionId) ?? 0) < wanted; i++) await sleep(10);
+    // A short gap keeps the last steer answer and the prompt answer apart for the client.
+    await sleep(30);
     return "end_turn";
   }
   if (prompt === "steer-unconsumed-end") {
@@ -470,6 +481,7 @@ const app = acp
     const textVal = (ctx.params.prompt ?? []).map((b) => (b.type === "text" ? b.text : "")).join("");
     const steerId = typeof ctx.params.steerId === "string" ? ctx.params.steerId : `st-${++steerSeq}`;
     if (!busySessions.has(sessionId)) {
+      idleSteerReplies.set(sessionId, (idleSteerReplies.get(sessionId) ?? 0) + 1);
       return { sessionId, steerId, queued: false, reason: "idle" };
     }
     const queue = pendingSteers.get(sessionId) ?? [];
