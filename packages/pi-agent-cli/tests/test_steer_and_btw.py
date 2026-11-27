@@ -1058,6 +1058,68 @@ async def test_steer_waiting_for_trust_and_waiting_for_barriers(tmp_path: Path):
 
 
 @pytest.mark.asyncio
+async def test_steer_after_run_end_before_prompt_returns_is_idle_not_waiting_for_barriers(
+    tmp_path: Path,
+):
+    """The turn-end race (S3): the run is over, ``prompt()`` has not returned yet.
+
+    The client falls back to a normal prompt only on ``idle``. ``waiting_for_barriers`` stays
+    for a prompt whose run has not started, also for a second prompt after a first one ended.
+    """
+    block_second = False
+    barrier_entered = asyncio.Event()
+    release_barrier = asyncio.Event()
+
+    def ext(pi: Any) -> None:
+        async def wait_barrier() -> None:
+            if block_second:
+                barrier_entered.set()
+                await release_barrier.wait()
+
+        pi.add_turn_barrier(wait_barrier)
+
+    client = _RecordingClient()
+    agent = _make_agent(tmp_path, lambda m, c, o=None: _text_stream(m, "done"), extensions=[ext])
+    agent.on_connect(client)
+    created = await agent.new_session(cwd=str(tmp_path))
+    sid = created.session_id
+    harness = agent._harnesses[sid]
+
+    gate = asyncio.Event()
+    run_ended = asyncio.Event()
+
+    async def hold_after_agent_end(event: Any, signal: Any = None) -> None:
+        if getattr(event, "type", None) == "settled":
+            run_ended.set()
+            await gate.wait()
+
+    harness.subscribe(hold_after_agent_end)
+
+    async def steer(steer_id: str) -> dict[str, Any]:
+        return await agent.ext_method(
+            "pi/session/steer",
+            {"sessionId": sid, "steerId": steer_id, "prompt": [{"type": "text", "text": "late"}]},
+        )
+
+    first = asyncio.create_task(agent.prompt(session_id=sid, prompt=[text_block("go")]))
+    await asyncio.wait_for(run_ended.wait(), timeout=5.0)
+    assert harness.phase == "idle"
+    res = await steer("s-after-end")
+    assert res == {"sessionId": sid, "steerId": "s-after-end", "queued": False, "reason": "idle"}
+    gate.set()
+    await asyncio.wait_for(first, timeout=5.0)
+    assert harness.steer_queue == []
+
+    block_second = True
+    second = asyncio.create_task(agent.prompt(session_id=sid, prompt=[text_block("again")]))
+    await asyncio.wait_for(barrier_entered.wait(), timeout=5.0)
+    res = await steer("s-second-barrier")
+    assert res["reason"] == "waiting_for_barriers"
+    release_barrier.set()
+    await asyncio.wait_for(second, timeout=5.0)
+
+
+@pytest.mark.asyncio
 async def test_steer_invalid_params_unknown_session_and_image_block(tmp_path: Path):
     """Finding #9: invalid params, unknown session, and steer carrying an image content block."""
     tool_started = asyncio.Event()

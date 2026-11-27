@@ -267,6 +267,8 @@ class PiAcpAgent(Agent):
         self._background_tasks: set[asyncio.Task[Any]] = set()
         self._permission_locks: dict[str, asyncio.Lock] = {}
         self._prompts_in_flight: dict[str, int] = {}
+        # Sessions whose run has ended (``agent_end``) while their ``prompt()`` has not returned.
+        self._run_over: set[str] = set()
         self._trust: dict[str, _SessionTrust] = {}
         self._project_locks: dict[str, asyncio.Lock] = {}
         # Held while a session is created under an id the client chose, so two requests for the
@@ -498,6 +500,7 @@ class PiAcpAgent(Agent):
         self._context_used.pop(session_id, None)
         self._session_cwds.pop(session_id, None)
         self._reserved_ids.discard(session_id)
+        self._run_over.discard(session_id)
         harness = self._harnesses.pop(session_id, None)
         self._permission_locks.pop(session_id, None)
         self._drop_trust(session_id)
@@ -529,6 +532,7 @@ class PiAcpAgent(Agent):
         harness = self._require_harness(session_id)
         in_flight = self._prompts_in_flight
         in_flight[session_id] = in_flight.get(session_id, 0) + 1
+        self._run_over.discard(session_id)
         try:
             # Until the user has answered the question about the project, nothing of it is
             # loaded, and a prompt would run without it (and then again with it, differently).
@@ -568,6 +572,7 @@ class PiAcpAgent(Agent):
             in_flight[session_id] -= 1
             if not in_flight[session_id]:
                 del in_flight[session_id]
+                self._run_over.discard(session_id)
 
     async def _run_prompt(
         self, session_id: str, harness: AgentHarness, text: str, images: list[ImageContent]
@@ -582,6 +587,7 @@ class PiAcpAgent(Agent):
         another one of the client's own in flight is a client error and is refused as busy.
         """
         while True:
+            self._run_over.discard(session_id)
             try:
                 return await harness.prompt(text, images or None)
             except Exception as exc:
@@ -791,9 +797,13 @@ class PiAcpAgent(Agent):
                 "reason": "aborting",
             }
         if harness.phase == "idle":
-            reason = (
-                "waiting_for_barriers" if self._prompts_in_flight.get(session_id, 0) > 0 else "idle"
+            # ``waiting_for_barriers``: a prompt is in flight and its run has not started yet.
+            # Once the run has ended, the prompt response is only moments away: a steer now
+            # is plain ``idle`` and the client sends it as a normal prompt (S3).
+            waiting = self._prompts_in_flight.get(session_id, 0) > 0 and (
+                session_id not in self._run_over
             )
+            reason = "waiting_for_barriers" if waiting else "idle"
             return {
                 "sessionId": session_id,
                 "steerId": steer_id,
@@ -1359,6 +1369,8 @@ class PiAcpAgent(Agent):
 
         async def on_event(event: Any, signal: Any | None = None) -> None:
             etype = getattr(event, "type", None)
+            if etype == "agent_end":
+                self._run_over.add(session_id)
             if etype == "message_start":
                 msg = getattr(event, "message", None)
                 if msg is not None and harness.is_steered_message(msg):

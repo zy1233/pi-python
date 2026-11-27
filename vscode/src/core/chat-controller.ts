@@ -124,6 +124,12 @@ export function buildTrimmedBtwHistory(
   return history;
 }
 
+interface PendingIdleFallback {
+  text: string;
+  mentions: readonly MentionAttachment[];
+  images: readonly ImageAttachment[];
+}
+
 export const ALWAYS_APPROVE_WARNING = {
   message: "Turn on Always approve?",
   detail:
@@ -225,11 +231,7 @@ export class ChatController {
 
   private items: TranscriptItem[] = [];
   private pendingSteers: PendingSteerView[] = [];
-  private pendingIdleFallbacks: {
-    text: string;
-    mentions: readonly MentionAttachment[];
-    images: readonly ImageAttachment[];
-  }[] = [];
+  private pendingIdleFallbacks: PendingIdleFallback[] = [];
   private btwTurns: BtwTurnView[] = [];
   private readonly btwActiveIds = new Set<string>();
   private readonly toolItemIndices = new Map<string, number>();
@@ -1319,14 +1321,25 @@ export class ChatController {
     }
     this.refreshSessionList();
     if (this.pendingIdleFallbacks.length > 0) {
+      const queued = this.pendingIdleFallbacks;
+      this.pendingIdleFallbacks = [];
       if (stopReason === "cancelled" || this.status !== "ready") {
-        const queuedTexts = this.pendingIdleFallbacks.map((item) => item.text);
-        this.pendingIdleFallbacks = [];
-        this.emit({ type: "restoreDraft", text: queuedTexts.join("\n") });
+        this.emit({ type: "restoreDraft", text: queued.map((item) => item.text).join("\n") });
       } else {
-        const next = this.pendingIdleFallbacks.shift();
-        if (next) void this.send(next.text, next.mentions, next.images);
+        void this.sendIdleFallbacks(queued);
       }
+    }
+  }
+
+  /** Sends every steer that the agent refused as `idle` as one prompt, in the order typed (S3). */
+  private async sendIdleFallbacks(queued: readonly PendingIdleFallback[]): Promise<void> {
+    const text = queued.map((item) => item.text).join("\n\n");
+    const mentions = queued.flatMap((item) => item.mentions);
+    const images = queued.flatMap((item) => item.images);
+    const sent = await this.send(text, mentions, images);
+    if (!sent) {
+      this.pushNotice("info", "Could not send the queued message. It is back in the input.");
+      this.emit({ type: "restoreDraft", text: queued.map((item) => item.text).join("\n") });
     }
   }
 

@@ -217,6 +217,31 @@ describe("ChatController steer and /btw", () => {
     expect(ofType(messages, "restoreDraft")).toHaveLength(0);
   });
 
+  it("sends every idle-fallback steer, in order, as one prompt after the turn ends (S3)", async () => {
+    const { controller, messages } = startRig({ FAKE_STEER_BTW: "1" });
+    await controller.start();
+
+    const turn = controller.send("steer-idle-race");
+    await waitFor(
+      () => ofType(messages, "agentText").some((m) => m.text.includes("finishing")),
+      "steer-idle-race finishing chunk",
+    );
+
+    expect(await controller.send("first fallback")).toBe(true);
+    expect(await controller.send("second fallback")).toBe(true);
+    await turn;
+
+    await waitFor(
+      () =>
+        controller
+          .transcript()
+          .some((item) => item.type === "agent" && item.text.includes("echo: first fallback\n\nsecond fallback")),
+      "both fallbacks ran in one prompt",
+    );
+    expect(ofType(messages, "restoreDraft")).toHaveLength(0);
+    expect(controller.stateMessage().pendingSteers).toBeUndefined();
+  });
+
   it("disables steer capability and restores draft when agent returns method-not-found (-32601)", async () => {
     const { controller, messages } = startRig({
       FAKE_STEER_BTW: "1",
