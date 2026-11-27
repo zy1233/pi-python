@@ -2295,15 +2295,15 @@ btwCloseButton.addEventListener("click", () => {
   input.focus();
 });
 btwAskButton.addEventListener("click", submitBtwFollowUp);
+btwPanel.addEventListener("keydown", (event) => {
+  if (event.key !== "Escape" || event.isComposing || event.keyCode === 229) return;
+  event.preventDefault();
+  send({ type: "btwClose" });
+  input.focus();
+});
 btwInput.addEventListener("keydown", (event) => {
   const composing = event.isComposing || event.keyCode === 229;
   if (composing) return;
-  if (event.key === "Escape") {
-    event.preventDefault();
-    send({ type: "btwClose" });
-    input.focus();
-    return;
-  }
   if (event.key === "Enter" && !event.shiftKey) {
     event.preventDefault();
     submitBtwFollowUp();
@@ -2516,12 +2516,6 @@ input.addEventListener("keydown", (event) => {
         return;
       }
     }
-  }
-
-  if (event.key === "Escape" && btwState !== null && btwState.turns.length > 0) {
-    event.preventDefault();
-    send({ type: "btwClose" });
-    return;
   }
 
   if (event.key === "Escape" && state.status === "busy") {

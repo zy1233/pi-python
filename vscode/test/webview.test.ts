@@ -2036,6 +2036,31 @@ describe.skipIf(!chrome || !built)("webview: P1 images, insertMention, saveAll, 
     });
   });
 
+  it("Escape in the main input cancels a busy turn even when the /btw panel is open, and Escape inside the panel closes only the panel", () => {
+    const out = run(`${state}
+      state({ status: "busy" });
+      host({ type: "btwState", btw: { turns: [{ id: "btw-1", question: "why?", answer: "because", thought: "", status: "done" }] } });
+      const input = document.querySelector("textarea");
+      const panel = document.querySelector(".btw-panel");
+      const btwInput = document.querySelector(".btw-input");
+      const panelVisible = !panel.hidden;
+
+      input.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", bubbles: true }));
+      const afterMainEsc = window.__posted.map((m) => m.type).filter((t) => t === "cancel" || t === "btwClose");
+
+      window.__posted.length = 0;
+      btwInput.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", bubbles: true }));
+      const afterPanelEsc = window.__posted.map((m) => m.type).filter((t) => t === "cancel" || t === "btwClose");
+
+      window.__result = { panelVisible, afterMainEsc, afterPanelEsc };`);
+    expect(out).toMatchObject({
+      ok: true,
+      panelVisible: true,
+      afterMainEsc: ["cancel"],
+      afterPanelEsc: ["btwClose"],
+    });
+  });
+
   it("attaches pasted and dropped images as chips, supports removing an image chip, and submits image-only prompts", () => {
     const out = run(
       `${state}
