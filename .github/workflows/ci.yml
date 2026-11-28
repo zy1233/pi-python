@@ -60,6 +60,6 @@ jobs:
       - name: Install packages (dev)
         # `deepseek`: the adapters override private methods of `ChatDeepSeek` too, and the tests
         # of that class (`test_langchain_private_api.py`, `test_deepseek_replay.py`) skip without it.
-        run: pip install -e ".[dev,deepseek]" -e "./packages/pi-agent-harness" -e "./packages/pi-agent-cli" -e "./packages/pi-web-access" -e "./packages/pi-goal-x" -e "./packages/pi-dynamic-workflows" -e "./packages/pi-mcp" -e "./packages/pi-codemode"
+        run: pip install -e ".[dev,deepseek]" -e "./packages/pi-agent-harness" -e "./packages/pi-agent-cli" -e "./packages/pi-web-access" -e "./packages/pi-goal-x" -e "./packages/pi-dynamic-workflows" -e "./packages/pi-mcp" -e "./packages/pi-codemode" -e "./packages/pi-chat-gateway[feishu]"
       - name: Run tests
         run: pytest -v

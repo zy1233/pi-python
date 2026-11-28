@@ -1,0 +1,50 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "pi-chat-gateway-py"
+version = "0.1.0"
+description = "Use the zycode agent from a chat app (Feishu / Lark first): a standard ACP client that starts zycode-agent"
+readme = "README.md"
+requires-python = ">=3.11"
+license = "MIT"
+authors = [
+    { name = "zy1233", email = "zy1233@users.noreply.github.com" },
+]
+keywords = ["agent", "acp", "chat", "feishu", "lark", "bot", "coding-agent"]
+classifiers = [
+    "Development Status :: 3 - Alpha",
+    "Intended Audience :: Developers",
+    "License :: OSI Approved :: MIT License",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.13",
+]
+dependencies = [
+    # The gateway starts the agent of this release (`python -m pi_agent_cli` when no
+    # `zycode-agent` is found) and uses steer and /btw, which the agent has from 1.2.0.
+    "pi-agent-cli-lc>=1.2.0,<2",
+    # The same bound as the agent: 1.0.0 removed helpers that both sides use.
+    "agent-client-protocol>=0.12.0,<1.0.0",
+]
+
+[project.optional-dependencies]
+# The long connection and `card.action.trigger` handling were written against lark-oapi 1.9.0.
+feishu = ["lark-oapi>=1.9,<2"]
+
+[project.scripts]
+zycode-chat = "pi_chat_gateway.cli:main"
+
+[project.urls]
+Homepage = "https://github.com/zy1233/zycode"
+Website = "https://zycode.dev"
+Repository = "https://github.com/zy1233/zycode"
+Issues = "https://github.com/zy1233/zycode/issues"
+
+[tool.hatch.build.targets.wheel]
+packages = ["pi_chat_gateway"]
+
+[tool.uv.sources]
+pi-agent-cli-lc = { workspace = true }

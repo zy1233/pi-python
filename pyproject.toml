@@ -57,7 +57,7 @@ all = [
 dev = ["pytest>=8.0", "pytest-asyncio>=0.24", "ruff>=0.16"]
 
 [tool.uv.workspace]
-members = ["packages/pi-agent-harness", "packages/pi-agent-cli", "packages/pi-web-access", "packages/pi-goal-x", "packages/pi-dynamic-workflows", "packages/pi-mcp", "packages/pi-codemode"]
+members = ["packages/pi-agent-harness", "packages/pi-agent-cli", "packages/pi-web-access", "packages/pi-goal-x", "packages/pi-dynamic-workflows", "packages/pi-mcp", "packages/pi-codemode", "packages/pi-chat-gateway"]
 
 [tool.uv.sources]
 pi-agent-harness-lc = { workspace = true }
@@ -71,7 +71,7 @@ packages = ["pi_agent_core"]
 
 [tool.pytest.ini_options]
 asyncio_mode = "auto"
-testpaths = ["pi_agent_core/tests", "packages/pi-agent-harness/tests", "packages/pi-agent-cli/tests", "packages/pi-web-access/tests", "packages/pi-goal-x/tests", "packages/pi-dynamic-workflows/tests", "packages/pi-mcp/tests", "packages/pi-codemode/tests", "scripts/tests"]
+testpaths = ["pi_agent_core/tests", "packages/pi-agent-harness/tests", "packages/pi-agent-cli/tests", "packages/pi-web-access/tests", "packages/pi-goal-x/tests", "packages/pi-dynamic-workflows/tests", "packages/pi-mcp/tests", "packages/pi-codemode/tests", "packages/pi-chat-gateway/tests", "scripts/tests"]
 # Live-API tests are left out of a plain run; `pytest -m real_llm ...` selects them (the last -m wins).
 addopts = "-m 'not real_llm'"
 markers = ["real_llm: tests that hit a live LLM API (left out of a plain run; select with -m real_llm)"]
@@ -94,6 +94,8 @@ select = [
 
 [tool.ruff.lint.per-file-ignores]
 "packages/pi-dynamic-workflows/pi_dynamic_workflows/builtin_workflows.py" = ["E501"]
+# The gateway's own words in Chinese use full-width punctuation, which RUF001 reads as confusable.
+"packages/pi-chat-gateway/pi_chat_gateway/texts.py" = ["RUF001", "E501"]
 
 [tool.ruff.lint.isort]
-known-first-party = ["pi_agent_core", "pi_agent_harness", "pi_agent_cli"]
+known-first-party = ["pi_agent_core", "pi_agent_harness", "pi_agent_cli", "pi_chat_gateway"]

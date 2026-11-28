@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- **The chat gateway `zycode-chat`, Feishu / Lark first (new package `pi-chat-gateway-py`, alpha, not published)**: use the agent from a chat app. The gateway is one more standard ACP client: it keeps a long connection to Feishu (it connects out; no public port), turns messages into prompts, and starts one `zycode-agent` per project. A turn is one card that the gateway updates while the agent works; a permission request is an approval card with the whole request and **Allow once** / **Reject**; a message sent during a turn is a steer (X9); `/btw` asks a side question (X10); `/new`, `/project`, `/resume`, `/stop`, `/mode`, `/model`, `/thinking`, `/status` and `/help` are handled by the gateway. Version 0.1 is personal: one owner per platform, paired with a one-time code from the machine's terminal; a bound group can list more users and approvers. Fixed rules: no session is ever in `always-approve` (an `agent.toml` that sets it is put back to `ask`), the project trust question is always answered no from the chat, the credentials stay out of `local.env` and out of the agents' environment, links and Markdown images in posted text are shown as code so the platform fetches nothing, and tool output is not posted. Tested against the real agent behind a fake platform; not run against a live Feishu tenant yet. Design: `docs/specs/2026-11-28-chat-gateway-design.md`.
+
 ## [1.2.0] - 2026-11-27
 
 This is a minor release. It adds mid-turn steer and the `/btw` side chat, adds skills as `/skill:<name>` slash commands, adds `replay_reasoning` to send the thinking back to a gateway, builds the agent program with pinned versions, fixes Auto for Git Bash on Windows, fixes three faults of the steer and cancel code, and moves the repository to `zy1233/zycode`. All eight Python packages and the TUI move to `1.2.0`.

@@ -1,10 +1,11 @@
 # zycode 聊天应用接入设计（Chat Gateway）
 
-> **状态**：设计草案（第二版）。§9 的决策待确认，确认之前不写代码。
+> **状态**：第一版的范围已定（2026-11-28，见 §9），G1 正在实现：`packages/pi-chat-gateway`（`pi-chat-gateway-py`，alpha，没有发布）。
 >
 > **修订记录**：
 > - 2026-11-28 第一版：架构、审批与安全规则。
 > - 2026-11-28 第二版：按"需支持主流办公软件（Slack、Teams、Lark/飞书、企业微信等）"修订。改动：平台分级，Slack、Microsoft Teams、飞书/Lark、企业微信为必须支持（§3）；Teams 只能经公网 HTTPS 收消息，新增"入口"一节（§2.5）；一个网关同时连多个平台（§2.6）；实现语言改为 TypeScript（§9 的 CG-D2）；新增企业部署的要求（§7.4）。
+> - 2026-11-28 第三版：所有者定了第一版的范围：**首发飞书，用 Python，只做个人功能，不引入团队**；其余按推荐（§9）。所以 §2.3 回到 Python 的包结构，G0（抽 `clients/core`）不再需要；§8 按实现改写（平台类型 `feishu` 加 `domain`，所有者存在 `state.sqlite`）；§11 的里程碑按新顺序排。Slack、Teams、企业微信、钉钉仍是后续的目标，第二版写的平台分析留着（§2.5、§3），实现语言到时再议（企业微信长连接的官方 SDK 只有 Node.js）。
 >
 > **一句话**：`zycode-chat` 是一个常驻的网关进程。它连到办公软件的机器人接口，把聊天里的消息、按钮和命令转成标准 ACP 请求，交给本机的 `zycode-agent`。用户可以在 Slack、Teams、飞书/Lark、企业微信等里面给 agent 派任务、看进度、审批命令、中途补一句（steer）、问旁路问题（`/btw`）。
 >
@@ -16,7 +17,7 @@
 
 ### 0.1 目标
 
-1. **在主流办公软件里用 zycode。** 必须支持：Slack、Microsoft Teams、飞书/Lark、企业微信。第二批：钉钉、Google Chat。私聊机器人，或在绑定的频道/群里 @ 它，发起一个任务。它在本机的项目目录里工作，回答以流式卡片（或节流编辑的消息）出现。
+1. **在主流办公软件里用 zycode。** 必须支持：Slack、Microsoft Teams、飞书/Lark、企业微信。第二批：钉钉、Google Chat。私聊机器人，或在绑定的频道/群里 @ 它，发起一个任务。它在本机的项目目录里工作，回答以流式卡片（或节流编辑的消息）出现。**第一版只做飞书 / Lark**（§9），其余平台按 §11 的顺序。
 2. **一个网关同时连多个平台。** 例如海外同事用 Slack、国内用飞书，同一台开发机上的同一个网关都能服务。
 3. **手机上审批。** agent 要运行一个需要确认的工具调用时，所有者的手机收到平台推送，看到完整的命令或代码，点"允许一次"或"拒绝"。
 4. **复用现有能力，不改 agent。** 网关是又一个标准 ACP 客户端，与 VS Code 插件、`zypi` 同级。它用已登记的 X9（steer）与 X10（`/btw`），不新增必需的线上协议项。
@@ -117,77 +118,38 @@ flowchart LR
 3. **空闲回收。** 一个项目的 agent 进程空闲 `idle_agent_minutes`（默认 20）后，网关关闭它的 stdin，agent 按现有的退出路径结束（剥离计划 P6）。下一条消息再启动，并用 `session/resume` 接上。本机测得源码版 agent 空闲时约 74 MiB（审计 §八 8.3），所以要回收。
 4. **崩溃。** agent 进程意外退出时，网关把它的等待中的审批按"取消"结束，在受影响的话题里说一句，下一条消息时重启并 `resume`。网关自己退出时，agent 读到 EOF 也会退出；会话已在 JSONL 里，重启后照常 `resume`，正在跑的回合会丢，网关重启后告诉这些话题"上一轮被中断"。
 
-### 2.3 组件（TypeScript）
+### 2.3 组件（Python，已实现的结构）
 
-建议的目录（语言的理由见 §9 的 CG-D2）：
+`packages/pi-chat-gateway/pi_chat_gateway/`：
 
 ```text
-clients/core/                  # 与宿主无关的共享模块（路线图 Phase 1 交付 1 的一部分，先抽这几件）
-├── acp-connection.ts          # 从 vscode/src/core/ 搬来：ACP 连接，已有 X9、X10 的客户端调用
-├── protocol.ts / tool-calls.ts / version.ts / session-list.ts
-└── trust.ts                   # 从 chat-controller.ts 抽出 looksLikeTrustRequest、hasTrustOptions
-clients/node/                  # 只在 Node 上用的模块（VS Code 插件与网关共用）
-├── agent-process.ts           # 启动 agent 子进程
-└── locate.ts                  # 找 zycode-agent（先找本程序旁边，再找 PATH）
-apps/chat-gateway/
-├── src/cli.ts                 # zycode-chat：setup | pair | run | status | unpair
-├── src/config.ts              # chat.toml 与凭据；拒绝 always-approve、相对路径、未知平台
-├── src/identity.ts            # 配对码、所有者、白名单、租户检查、每个动作的授权
-├── src/backend.ts             # AgentBackend；AgentProcessPool（一个项目一个 agent）；以后的 DaemonBackend
-├── src/acp-client.ts          # Client 一侧：sessionUpdate、requestPermission、extNotification
-├── src/bindings.ts            # (平台, 租户, 聊天, 话题) ↔ 会话；state.sqlite
-├── src/turns.ts               # 每个绑定一个回合状态机：idle / busy / waiting_approval
-├── src/approvals.ts           # 等待中的审批、nonce、超时、信任问题的识别与自动拒绝
-├── src/render/                # 回合视图；卡片原语；Markdown 方言；拆分；脱敏；链接与图片；节流
-├── src/ingress.ts             # 只给 webhook 型平台：绑 127.0.0.1 的 HTTP 入口
-└── src/platforms/
-    ├── types.ts               # PlatformAdapter 接口与能力表
-    ├── fake.ts                # 测试用的内存平台
-    ├── slack.ts  teams.ts  lark.ts  wecom.ts  dingtalk.ts  google-chat.ts
+cli.py           # zycode-chat：setup | pair | unpair | run | status
+config.py        # chat.toml 与 chat/credentials.toml；拒绝 always-approve、相对路径、未知平台、权限太宽的凭据
+store.py         # chat/state.sqlite：所有者、配对码（只存哈希）、绑定、处理过的事件 id
+identity.py      # 配对（一次有效、10 分钟、错 5 次锁 1 小时）与授权（租户、所有者、群的 users 与 approvers）
+trust.py         # 信任问题的识别（与 VS Code 插件的判断相同）与唯一的回答：不信任
+approvals.py     # 等待中的审批：请求 id、nonce、第一次有效点击生效、超时拒绝；allow_always 不做成按钮
+backend.py       # AgentPool：一个项目一个 zycode-agent 进程，initialize 带 pi/capabilities，空闲回收，退出检测
+acp_client.py    # ACP 的 Client 一侧：按 session id 把请求与通知交给会话；新会话的 id 登记前到达的消息稍等
+runner.py        # 每个聊天或话题一个 SessionRunner：prompt / steer / stop / btw、审批卡片、模式强制、回合外的消息
+gateway.py       # 入站的门（去重、配对、租户、授权、@）、命令、图片、按钮点击
+agent_env.py     # agent 的环境：去掉凭据，可选取登录 shell 的环境
+audit.py         # chat/audit.log
+render/          # text.py（脱敏、链接与图片、平台标签、按字节拆分）、view.py（回合视图）、cards.py、throttle.py
+platforms/       # base.py（接口）、fake.py（测试用）、feishu.py（lark-oapi）
+texts.py         # 网关自己的文字，zh 与 en
 ```
 
-1. `vscode/src/core/` 里这几件本来就不导入 `vscode`，也不导入 `node:*`（`acp-connection.ts` 只导入 `@agentclientprotocol/sdk` 与两个本地类型；`protocol.ts` 会带上同样不依赖宿主的 `composer.ts` 与 `mentions.ts`；`version.ts` 只从 `locate.ts` 导入一个类型 `AgentSource`，搬的时候把这个类型移进 `clients/core/`）。搬到 `clients/core/` 后，VS Code 插件改为从那里导入，esbuild 照样打进 VSIX，用户看不到变化。
-2. 同一个 PR 里要改 CI 的路径（审计 RM-14）：`vscode-extension.yml` 与新的 `chat-gateway.yml` 都在 `clients/**` 变化时运行。
-3. 网关用 `@agentclientprotocol/sdk`（VS Code 插件已在用；npm 上的当前版本是 2.12.0）。启动 agent 时显式给出环境变量（§7.2 第 4 条）。
-
-**平台适配器接口**（示意）：
-
-```ts
-interface PlatformCaps {
-  buttons: boolean;        // 消息里能放按钮
-  edit: boolean;           // 能编辑已发的消息
-  stream: "native" | "edit" | "none";
-  streamScopes: ("dm" | "group" | "channel")[];   // Teams 的流式只在一对一聊天里
-  ephemeral: boolean;      // 能发"仅自己可见"的消息
-  reactions: boolean;      // 能在用户的消息上加表情
-  threads: boolean;        // 群里有话题 / 线程
-  files: boolean;          // 能发文件
-  proactive: boolean;      // 不在回复上下文里也能主动发消息（企业微信待核实，§3.3）
-  maxText: number;         // 单条消息的长度上限
-}
-
-interface PlatformAdapter {
-  readonly id: string;                         // 例如 "slack:T0123"、"teams:<tenant>"
-  readonly caps: PlatformCaps;
-  start(sink: InboundSink): Promise<void>;     // 长连接，或注册到 ingress
-  send(to: Target, msg: OutMessage): Promise<MessageRef>;
-  update(ref: MessageRef, msg: OutMessage): Promise<void>;
-  stream?(to: Target): Promise<StreamHandle>;
-  sendFile(to: Target, name: string, data: Uint8Array): Promise<MessageRef>;
-  react?(msg: InboundRef, emoji: string): Promise<void>;
-  sendEphemeral?(to: Target, user: string, msg: OutMessage): Promise<void>;
-  stop(): Promise<void>;
-}
-```
-
-入站事件统一成两种：`InboundMessage`（平台、租户、聊天、话题、消息 id、发送者、文字、图片、是否 @ 机器人、是否私聊）和 `InboundAction`（按钮：绑定 id、审批 id、选项 id、nonce、点按钮的人）。出站内容是与平台无关的"卡片原语"（标题与状态、Markdown 正文、工具列表、按钮、脚注），每个适配器把它转成自己的格式：Slack 的 Block Kit、Teams 的 Adaptive Card、飞书/Lark 的卡片 JSON 2.0、企业微信的模板卡片与 Markdown、钉钉的互动卡片、Google Chat 的 Cards v2。
+1. 依赖：`pi-agent-cli-lc>=1.2.0,<2`（没有找到 `zycode-agent` 时用 `python -m pi_agent_cli`；也用它的 `pi_home()` 与 `read_local_env`，不写第四份家目录规则，见审计 RM-7）、`agent-client-protocol>=0.12.0,<1.0.0`（与 agent 相同的上界），可选的 `feishu = ["lark-oapi>=1.9,<2"]`。
+2. Python 的 ACP SDK 的客户端一侧够用：`spawn_agent_process(..., env=..., cwd=...)`，`ext_method` 自动加前导下划线（`_pi/session/steer`），收到的扩展通知去掉前导下划线（`pi/queue_update`、`pi/btw_update`）。
+3. 平台适配器接口（`platforms/base.py`）：`start(sink)`、`stop()`、`send_card(chat, card, reply_to)`、`send_card_to_user(user_id, card)`、`update_card(message_id, card)`、`react(message_id, "queued" | "done" | "failed")`、`download_image(image)`。入站事件统一成 `InboundMessage` 与 `InboundAction`；出站内容是与平台无关的 `Card`（标题、颜色、Markdown 块、按钮、脚注），适配器转成自己的格式（飞书：卡片 JSON 2.0）。以后加 Slack、Teams 等平台时，接口按 §3 的能力差别再扩（原生流式、仅自己可见、文件）。
 
 ### 2.4 与路线图的关系
 
 | 路线图阶段 | 网关的形态 |
 |------------|------------|
 | 现在（Phase 1 之前） | `AgentProcessPool` 后端：网关自己启动 agent。不依赖任何未定的设计 |
-| Phase 1（daemon） | 换成 `DaemonBackend`：网关是 daemon 的一个远程客户端，会话可以在桌面端开始、在 Teams 里审批。网关现在的规则（§6）就是 daemon 的"远程客户端权限范围"（审计建议的 D9）的第一份实现。`clients/core` 的抽取在这里提前做了一小步 |
+| Phase 1（daemon） | 换成 `DaemonBackend`：网关是 daemon 的一个远程客户端，会话可以在桌面端开始、在聊天里审批。网关现在的规则（§6）就是 daemon 的"远程客户端权限范围"（审计建议的 D9）的第一份实现 |
 | Phase 4（移动端） | 办公软件已经覆盖"手机上审批、通知、steer、`/btw`"。手机 App 还要不要做、做到什么范围，建议 Phase 1 之后按使用情况再定（CG-D7）。代价：办公软件看得到明文，E2EE 中继看不到 |
 
 网关不需要路线图里任何还没定的决定（D1–D5），也不改变它们。
@@ -265,9 +227,10 @@ interface PlatformAdapter {
 
 **飞书 / Lark**
 1. 一个适配器，`domain = "feishu" | "lark"` 选开放平台的域名。
-2. 回答用 CardKit 流式卡片（卡片 JSON 2.0）；流式被平台关掉或卡片接近 30 KB 时，结束这张卡，开新的一张。
-3. 审批用卡片按钮。按钮回调在长连接模式下的接收方式与响应时限：写代码前核实。
+2. 回答用 CardKit 流式卡片（卡片 JSON 2.0）；流式被平台关掉或卡片接近 30 KB 时，结束这张卡，开新的一张。（G1 先用节流的 `message.patch` 更新共享卡片，CardKit 放在 G2。）
+3. 审批用卡片按钮（2.0 的 `behaviors: [{type: "callback"}]`）。读 lark-oapi 1.9.0 的源码（`lark_oapi/ws/client.py`）确认：新版卡片回调 `card.action.trigger` 经长连接作为事件帧到达，处理函数的返回值就是回调的应答（toast 与原地替换的卡片）；旧式卡片回调的帧被 SDK 忽略。没有在真实租户上验证。
 4. 租户检查：`tenant_key`。
+5. SDK 的长连接客户端用模块级的事件循环并且阻塞运行，网关把它放进单独的线程、给它新的事件循环；事件处理函数把事件交给网关的循环后立刻返回，卡片点击最多等网关 2.5 秒。
 
 **企业微信**
 1. 用智能机器人的长连接。一个机器人同时只能有一个网关实例在线（第三方资料：新连接踢掉旧的），所以不能为同一个机器人跑两个网关。
@@ -459,57 +422,39 @@ agent 的信任问题也走 `session/request_permission`（`pi_agent_cli/trust_p
 
 ```toml
 [gateway]
-agent_command = "zycode-agent"   # 与 zypi 相同：先找本程序旁边，再找 PATH
-start_mode = "ask"               # ask | auto；写 always-approve 会拒绝启动
+# agent_command = ["zycode-agent"] # 不写：先找本程序旁边与 PATH 上的 zycode-agent，再用 python -m pi_agent_cli
+start_mode = "ask"               # ask | auto（要 allow_auto = true）；写 always-approve 会拒绝启动
 allow_auto = false
 approval_timeout_minutes = 30
 approvals_in_dm = true
 idle_agent_minutes = 20
 max_active_turns = 3
 show_thinking = false
-tool_output = "none"             # none | on_request
+tool_output = "none"             # 第一版只有 none；on_request 在 G2
 env = "login-shell"              # login-shell | inherit
 language = "zh"                  # 网关自己的文字：zh | en
+update_interval_seconds = 1.0    # 卡片最多多久更新一次
 
 [[projects]]
 name = "zycode"
 path = "/home/me/work/zycode"    # 必须是绝对路径
 
 [[platforms]]
-id = "slack-main"
-type = "slack"                   # slack | teams | lark | wecom | dingtalk | google-chat
-tenant = "T0123ABC"              # Slack 的 team_id
-owner = ""                       # 由 zycode-chat pair 写入
+id = "feishu"
+type = "feishu"                  # 第一版只有 feishu
+domain = "feishu"                # feishu（open.feishu.cn）| lark（open.larksuite.com）
+# tenant = "<tenant_key>"        # 不写：配对时记下所有者的租户，之后只认它
+# owner = "ou_..."               # 不写：所有者由 zycode-chat pair 配对，存在 chat/state.sqlite
 
-[[platforms]]
-id = "teams-corp"
-type = "teams"
-tenant = "<Entra 租户 id>"
-app_id = "<Azure Bot 的 App ID>"
-listen = "127.0.0.1:3978"        # 只能是本机地址；公网一侧见 §2.5
-tool_output = "none"             # 平台级覆盖
-owner = ""
-
-[[platforms]]
-id = "feishu-cn"
-type = "lark"
-domain = "feishu"                # feishu | lark
-tenant = "<tenant_key>"
-owner = ""
-
-[[platforms]]
-id = "wecom-corp"
-type = "wecom"
-tenant = "<corpid>"
-owner = ""
-
-[[channels]]                     # 可选：把群或频道绑定到一个项目
-platform = "slack-main"
-chat_id = "C0456DEF"
+[[channels]]                     # 可选：把群绑定到一个项目
+platform = "feishu"
+chat_id = "oc_..."
 project = "zycode"
 users = []                       # 除所有者外，谁能在这里给 agent 发消息
 approvers = []                   # 除所有者外，谁能审批这里的会话
 ```
+
+所有者不写进 `chat.toml`：配对时存进 `state.sqlite`，免得网关改写用户的配置文件。§2.6 与第二版的 Slack、Teams、企业微信条目，等那些平台实现时再加回来。
 
 ### 8.2 凭据
 
@@ -542,8 +487,8 @@ secret = "…"
 
 ### 8.4 安装与命令行
 
-1. 分发：npm 包（`npm i -g zycode-chat`，或 `npx zycode-chat`），要求 Node.js 22 以上。以后视需要再出单文件程序。
-2. agent：沿用 VS Code 插件的办法，在包里写明 `zycode-agent` 的版本与 sha256（同 `vscode/agent-assets.json`），首次运行时下载并校验；也可以用 `agent_command` 指向已装好的 agent。
+1. 分发：PyPI 包 `pi-chat-gateway-py`（还没有发布；`release.yml` 里还没有它）。仓库里：`pip install -e "./packages/pi-chat-gateway[feishu]"`。要求 Python 3.11 以上，agent 1.2.0 以上。
+2. agent：`agent_command`；否则本程序旁边或 `PATH` 上的 `zycode-agent`；否则本环境的 `python -m pi_agent_cli`（网关依赖 `pi-agent-cli-lc`）。
 
 ```text
 zycode-chat setup [--platform <type>]   # 选平台、填凭据、测连接、生成给管理员的说明与模板
@@ -557,7 +502,19 @@ v1 只在前台运行，文档给出 systemd 用户单元、launchd 与 Windows 
 
 ---
 
-## 9. 待确认的决策
+## 9. 决策
+
+**已定（所有者，2026-11-28）**：首发飞书；用 Python 开发；第一版只做个人功能，不引入团队；其余按下表的推荐。
+
+| # | 决策点 | 定下的 | 说明 |
+|---|--------|--------|------|
+| CG-D1 | 平台的先后 | **飞书 / Lark 首发** | Slack、Teams、企业微信、钉钉在后面（§11） |
+| CG-D2 | 实现语言 | **Python，`packages/pi-chat-gateway/`** | 飞书有官方 Python SDK（`lark-oapi`）；测试直接对着真实 agent 跑。企业微信长连接的官方 SDK 只有 Node.js，做企业微信时再议 |
+| CG-D3 | 第一版范围 | **个人模式**，不引入团队 | 一个所有者；绑定的群可以另列 `users` 与 `approvers` |
+| CG-D4 至 CG-D9 | 权限模式、项目信任、工具输出、与 Phase 4 的关系、分发、信任问题的协议 | **按推荐**（见下表） | — |
+| CG-D10、CG-D11 | Teams 的入口、企业微信的主动消息 | 第一版不涉及 | 做这两个平台时再定 |
+
+第二版的推荐（CG-D1、CG-D2 已被上面取代）：
 
 | # | 决策点 | 推荐 | 备选 |
 |---|--------|------|------|
@@ -576,6 +533,8 @@ v1 只在前台运行，文档给出 systemd 用户单元、launchd 与 Windows 
 ---
 
 ## 10. 测试计划
+
+**第一版已有的测试**（pytest，`packages/pi-chat-gateway/tests/`，2026-11-28 在 Linux 上 60 个通过）：`test_chat_units.py`（配置、文字表、配对与授权、存储、信任、审批、命令、脱敏与链接、拆分、卡片、agent 的环境）；`test_chat_agent.py`（对着真实 agent：文字回合、允许一次、拒绝与陌生人的点击、超时、信任问题自动拒绝且扩展没有运行、`/proc/<pid>/environ` 里没有凭据、steer 后停止并提示没送达、`/btw` 不写会话文件、`agent.toml` 的 always-approve 被切回 ask、陌生人与配对、重投的事件只处理一次）；`test_chat_feishu.py`（事件与卡片点击的解析、卡片 JSON 2.0、发送、话题回复、更新、表情、图片、在连接线程里应答点击）；`test_chat_cli.py`。下面是第二版写的完整计划，没做的部分在后续里程碑里。
 
 1. **单元测试**（vitest，与 `vscode/` 相同；不联网，不启动 agent）：
    - 配置：拒绝 `always-approve`、相对路径、不存在的项目、未知平台、`listen` 不是本机地址、webhook 平台缺少租户或 App ID。
@@ -603,12 +562,13 @@ v1 只在前台运行，文档给出 systemd 用户单元、launchd 与 Windows 
 
 ## 11. 里程碑
 
-| 里程碑 | 内容 | 退出门禁 |
-|--------|------|----------|
-| G0：共享模块 | 把 `acp-connection.ts` 等几件抽到 `clients/core/`，`agent-process.ts`、`locate.ts` 抽到 `clients/node/`，信任识别抽成 `trust.ts`；VS Code 插件改为从那里导入；CI 路径 | VS Code 插件 `npm run check` 与 VSIX 冒烟测试通过，行为不变 |
-| G1：个人模式 MVP | 核心、内存平台、Slack 与飞书/Lark 适配器；私聊；`ask`；审批；steer；`/stop`、`/new`、`/resume`、`/status`；图片输入；节流编辑与原生流式 | §10 第 1、2 组全部通过；两个平台的手工清单通过 |
-| G2：Teams 与企业微信 | Teams 适配器与本机入口（Dev Tunnels 的文档）、Adaptive Card 审批、一对一流式；企业微信适配器（先核实主动消息）；`/btw`；`auto`（可选）；群与频道绑定、审批进私聊；`tool_output = "on_request"` | 新增功能的测试与手工清单通过；入口的安全测试通过 |
-| G3：第二批与推广 | 钉钉、Google Chat；可选的 `zycode-chat-relay`；服务安装的文档；给管理员的说明；README 的 Status 表与网站（`en.ts`、`zh.ts`）同步；ACP 扩展登记补上网关这个客户端（X9、X10 的"Sent by / Read by"）和信任问题的形状 | 文档与网站的说法和 README 一致 |
+按第三版的决定（首发飞书、Python、个人模式）重排：
+
+| 里程碑 | 内容 | 状态与退出门禁 |
+|--------|------|----------------|
+| G1：飞书个人模式 MVP | 核心、内存平台、飞书适配器；私聊与绑定的群（话题即会话，群里的审批进所有者私聊）；`ask` 与可选的 `auto`；审批卡片；steer；`/btw`；`/stop`、`/new`、`/project`、`/resume`、`/mode`、`/model`、`/thinking`、`/status`、`/help`；图片输入；节流更新的共享卡片；配对；审计日志 | **代码与自动测试已有**（§10）。还差：在真实飞书租户上走一遍手工清单（§10 第 4 条），之后才能标为可用 |
+| G2：飞书完整体验 | CardKit 流式卡片；`tool_output = "on_request"`（按钮取输出与 diff，发文件）；会话的跨进程锁（随路线图 D8）；服务安装的示例；发布到 PyPI（`release.yml`） | 新增功能的测试；手工清单 |
+| G3：更多办公软件 | Slack（Socket Mode）、Teams（本机入口与隧道，§2.5）、企业微信（先核实主动消息，CG-D11）、钉钉；那时再定实现语言是否仍是 Python；README 的 Status 表与网站同步；ACP 扩展登记补上信任问题的形状（网关作为 X9、X10 的客户端，G1 已登记） | 每个平台的测试与手工清单；入口的安全测试 |
 | G4：接 daemon（路线图 Phase 1 之后） | `DaemonBackend`；会话在各端之间共享；daemon 对远程客户端的权限范围沿用 §6 | daemon 的一致性用例：远程客户端不能信任项目、不能进入 `always-approve` |
 
 ---
@@ -617,7 +577,7 @@ v1 只在前台运行，文档给出 systemd 用户单元、launchd 与 Windows 
 
 1. **团队模式**（v1 不做）：要按用户隔离进程或容器、按用户的模型凭据与额度、按用户的项目信任与审计。届时另写设计。
 2. **Teams**：机器人消息里的链接会不会出预览、能不能关；单条消息与 Adaptive Card 的大小上限；一对一流式在 iOS 上的支持（微软文档的新旧两版说法不同）；单租户机器人在个人模式下的注册步骤；Universal Actions 在所有客户端上的表现。
-3. **飞书 / Lark**：卡片按钮在长连接模式下怎么收（新版卡片回传交互）、响应时限；CardKit 流式的时长上限；Lark 国际版的长连接与 CardKit 是否与飞书完全一致（现有资料是第三方的）；链接预览能不能关。
+3. **飞书 / Lark**：卡片按钮的回调走长连接（SDK 源码已确认，§3.3），但没有在真实租户上验证，响应时限也没有实测；表情回应的类型名（`OnIt`、`DONE`、`CrossMark`）与开发者后台的权限名没有核对；CardKit 流式的时长上限；Lark 国际版的长连接与 CardKit 是否与飞书完全一致（现有资料是第三方的）；卡片里的链接会不会出预览（网关反正把链接改成代码样式）。
 4. **企业微信**：智能机器人能否主动发消息（CG-D11）；"一个机器人一条长连接"与"10 分钟内结束流式"的官方出处；链接预览能不能关。
 5. **Slack**：流式接口在私聊与频道里的可用范围；Socket Mode 应用能否上架 Marketplace（只影响公开分发）。
 6. **钉钉**：Node SDK 只有 beta 版本时的取舍（CG-D2）。
